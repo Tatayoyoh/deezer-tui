@@ -1,0 +1,20 @@
+[package]
+name = "deezer-tui"
+description = "Terminal UI for Deezer music player"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "deezer-tui"
+path = "src/main.rs"
+
+[dependencies]
+deezer-core = { path = "../deezer-core" }
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
