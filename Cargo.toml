@@ -1,0 +1,50 @@
+[workspace]
+members = ["crates/deezer-core", "crates/deezer-tui"]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+
+[workspace.dependencies]
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Crypto
+blowfish = "0.9"
+cbc = "0.1"
+md-5 = "0.10"
+
+# Audio decoding & playback
+symphonia = { version = "0.5", features = ["mp3", "flac", "pcm"] }
+rodio = { version = "0.19", default-features = false, features = ["symphonia-mp3", "symphonia-flac"] }
+
+# Streaming
+stream-download = { version = "0.7", features = ["reqwest"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Regex
+regex = "1"
+
+# Config
+directories = "5"

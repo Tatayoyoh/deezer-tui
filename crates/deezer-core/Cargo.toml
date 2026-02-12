@@ -1,0 +1,23 @@
+[package]
+name = "deezer-core"
+description = "Deezer streaming client library — API, decryption, and playback engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+blowfish = { workspace = true }
+cbc = { workspace = true }
+md-5 = { workspace = true }
+symphonia = { workspace = true }
+rodio = { workspace = true }
+stream-download = { workspace = true }
+regex = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+directories = { workspace = true }
