@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// Application-level events.
 #[derive(Debug)]
@@ -11,10 +11,13 @@ pub enum AppEvent {
 }
 
 /// Poll for terminal events with a tick rate.
+/// Only key-press events are forwarded (ignore Release/Repeat).
 pub fn poll(tick_rate: Duration) -> Result<AppEvent> {
     if event::poll(tick_rate)? {
         if let Event::Key(key) = event::read()? {
-            return Ok(AppEvent::Key(key));
+            if key.kind == KeyEventKind::Press {
+                return Ok(AppEvent::Key(key));
+            }
         }
     }
     Ok(AppEvent::Tick)
