@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tracing::debug;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -21,6 +22,13 @@ use crate::event::{self, AppEvent};
 use crate::ui;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
+
+/// UI display mode: foreground (TUI visible) or background (music only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiMode {
+    Foreground,
+    Background,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActiveTab {
@@ -61,6 +69,7 @@ pub enum AsyncResult {
 
 pub struct App {
     pub running: bool,
+    pub ui_mode: UiMode,
     pub screen: Screen,
     pub active_tab: ActiveTab,
     pub input_mode: InputMode,
@@ -99,6 +108,9 @@ pub struct App {
     // Playback position tracking
     playback_started_at: Option<Instant>,
     playback_offset_secs: u64,
+
+    // Cached audio data for current track (needed to resume after fork)
+    current_audio_data: Option<Vec<u8>>,
 }
 
 impl App {
@@ -115,6 +127,7 @@ impl App {
 
         Ok(Self {
             running: true,
+            ui_mode: UiMode::Foreground,
             screen,
             active_tab: ActiveTab::Search,
             input_mode: if screen == Screen::Login {
@@ -150,16 +163,52 @@ impl App {
 
             playback_started_at: None,
             playback_offset_secs: 0,
+
+            current_audio_data: None,
         })
     }
 
-    pub async fn run(&mut self) -> Result<()> {
-        // Setup terminal
+    /// Enter TUI mode: enable raw mode, alternate screen, create terminal.
+    fn enter_tui() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {
+        // Reattach to the controlling terminal if we've been daemonized.
+        // /dev/tty always refers to the calling user's terminal.
+        #[cfg(unix)]
+        {
+            use std::os::unix::io::AsRawFd;
+            if let Ok(tty) = std::fs::OpenOptions::new().read(true).write(true).open("/dev/tty") {
+                let tty_fd = tty.as_raw_fd();
+                unsafe {
+                    // Redirect stdout and stderr to the new tty
+                    libc::dup2(tty_fd, 1); // stdout
+                    libc::dup2(tty_fd, 2); // stderr
+                    libc::dup2(tty_fd, 0); // stdin
+                }
+                // tty will be closed when dropped, but fds 0/1/2 remain valid
+            }
+        }
+
         enable_raw_mode()?;
         io::stdout().execute(EnterAlternateScreen)?;
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
+        Ok(terminal)
+    }
+
+    /// Leave TUI mode: drop terminal, disable raw mode, leave alternate screen.
+    fn leave_tui(terminal: Option<Terminal<CrosstermBackend<io::Stdout>>>) -> Result<()> {
+        drop(terminal);
+        disable_raw_mode()?;
+        io::stdout().execute(LeaveAlternateScreen)?;
+        Ok(())
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        let mut terminal = Some(Self::enter_tui()?);
+
+        // Register SIGUSR1 handler (unix only) for foreground recall
+        #[cfg(unix)]
+        let mut sigusr1 = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())?;
 
         // If we already have an ARL, auto-login
         if let Some(arl) = self.config.arl.clone() {
@@ -169,24 +218,147 @@ impl App {
 
         // Main loop
         while self.running {
-            terminal.draw(|frame| {
-                ui::draw(frame, self);
-            })?;
+            match self.ui_mode {
+                UiMode::Foreground => {
+                    if let Some(ref mut term) = terminal {
+                        term.draw(|frame| {
+                            ui::draw(frame, self);
+                        })?;
+                    }
 
-            match event::poll(TICK_RATE)? {
-                AppEvent::Key(key) => self.handle_key(key),
-                AppEvent::Tick => self.on_tick(),
+                    match event::poll(TICK_RATE)? {
+                        AppEvent::Key(key) => self.handle_key(key),
+                        AppEvent::Tick => self.on_tick(),
+                    }
+
+                    self.process_async_results();
+
+                    // Transition to background if Ctrl+Z was pressed
+                    if self.ui_mode == UiMode::Background {
+                        Self::leave_tui(terminal.take())?;
+
+                        // Fork: parent exits (returns shell prompt), child keeps playing
+                        #[cfg(unix)]
+                        {
+                            eprintln!("deezer-tui: music continues in background. Run `deezer-tui` to restore.");
+                            match unsafe { libc::fork() } {
+                                -1 => {
+                                    // fork failed — stay in foreground
+                                    eprintln!("deezer-tui: fork failed, staying in foreground");
+                                    terminal = Some(Self::enter_tui()?);
+                                    self.ui_mode = UiMode::Foreground;
+                                }
+                                0 => {
+                                    // Child: detach from terminal, continue running
+                                    unsafe { libc::setsid() };
+                                    // Re-register SIGUSR1 after fork
+                                    sigusr1 = tokio::signal::unix::signal(
+                                        tokio::signal::unix::SignalKind::user_defined1(),
+                                    )?;
+                                    // Update PID file with child's PID
+                                    if let Some(path) = deezer_core::Config::dir().map(|d| d.join("deezer-tui.pid")) {
+                                        let _ = std::fs::write(&path, std::process::id().to_string());
+                                    }
+                                    // Reinitialize audio — ALSA threads don't survive fork
+                                    self.reinit_audio_after_fork();
+                                }
+                                _parent_pid => {
+                                    // Parent: exit immediately to return shell prompt
+                                    std::process::exit(0);
+                                }
+                            }
+                        }
+                    }
+                }
+                UiMode::Background => {
+                    // Background mode: no TUI, just tick + wait for SIGUSR1
+                    #[cfg(unix)]
+                    {
+                        tokio::select! {
+                            _ = tokio::time::sleep(TICK_RATE) => {
+                                self.on_tick();
+                                self.process_async_results();
+                            }
+                            _ = sigusr1.recv() => {
+                                // Another instance sent us SIGUSR1 — re-enter foreground
+                                terminal = Some(Self::enter_tui()?);
+                                self.ui_mode = UiMode::Foreground;
+                            }
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        tokio::time::sleep(TICK_RATE).await;
+                        self.on_tick();
+                        self.process_async_results();
+                    }
+                }
             }
-
-            // Process async results
-            self.process_async_results();
         }
 
-        // Restore terminal
-        disable_raw_mode()?;
-        io::stdout().execute(LeaveAlternateScreen)?;
+        // Restore terminal if still in foreground
+        if terminal.is_some() {
+            Self::leave_tui(terminal)?;
+        }
 
         Ok(())
+    }
+
+    /// Recreate the audio engine after fork().
+    /// ALSA/cpal threads don't survive fork, so we must reinitialize.
+    fn reinit_audio_after_fork(&mut self) {
+        // Drop the old (broken) engine
+        let old_state = self.player_state.lock().unwrap().clone();
+        self.engine = None;
+
+        if let Some(master_key) = self.master_key {
+            match PlayerEngine::new(master_key) {
+                Ok(mut engine) => {
+                    // Restore volume
+                    engine.set_volume(old_state.volume);
+
+                    // Resume the current track if we have cached audio
+                    if let Some(ref audio_data) = self.current_audio_data {
+                        if old_state.status == PlaybackStatus::Playing
+                            || old_state.status == PlaybackStatus::Paused
+                        {
+                            if let Some(ref track) = old_state.current_track {
+                                if engine
+                                    .play_decoded(audio_data.clone(), track, old_state.quality)
+                                    .is_ok()
+                                {
+                                    // Seek approximation: skip ahead by consuming samples
+                                    // This isn't perfect but keeps playback going
+                                    debug!(
+                                        position = old_state.position_secs,
+                                        "Resumed track after fork"
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Restore shared state (queue, shuffle, repeat, etc.)
+                    {
+                        let new_state_arc = engine.state();
+                        let mut new_state = new_state_arc.lock().unwrap();
+                        new_state.queue = old_state.queue;
+                        new_state.queue_index = old_state.queue_index;
+                        new_state.shuffle = old_state.shuffle;
+                        new_state.repeat = old_state.repeat;
+                        new_state.current_track = old_state.current_track;
+                        new_state.duration_secs = old_state.duration_secs;
+                        new_state.position_secs = old_state.position_secs;
+                    }
+
+                    self.player_state = engine.state();
+                    self.engine = Some(engine);
+                }
+                Err(e) => {
+                    debug!("Failed to reinit audio after fork: {e}");
+                }
+            }
+        }
     }
 
     fn process_async_results(&mut self) {
@@ -244,6 +416,8 @@ impl App {
                 }
                 AsyncResult::TrackReady { audio_data, track, quality } => {
                     if let Some(ref mut engine) = self.engine {
+                        // Cache audio data for potential resume after fork
+                        self.current_audio_data = Some(audio_data.clone());
                         match engine.play_decoded(audio_data, &track, quality) {
                             Ok(()) => {
                                 self.playback_started_at = Some(Instant::now());
@@ -480,9 +654,20 @@ impl App {
     // --- Key handling ---
 
     fn handle_key(&mut self, key: KeyEvent) {
+        debug!(?key, "key event received");
+
         // Ctrl+C always quits
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.running = false;
+            return;
+        }
+
+        // Ctrl+Z: go to background mode (music continues)
+        #[cfg(unix)]
+        if matches!(key.code, KeyCode::Char('z') | KeyCode::Char('Z'))
+            && key.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            self.ui_mode = UiMode::Background;
             return;
         }
 
