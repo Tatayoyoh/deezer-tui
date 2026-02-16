@@ -1,11 +1,11 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph, Clear};
 
-use crate::app::App;
+use crate::client::ViewState;
 use crate::theme::Theme;
 use crate::ui::common;
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, view: &ViewState) {
     let area = frame.area();
 
     // Full-screen dark background
@@ -59,16 +59,16 @@ pub fn draw(frame: &mut Frame, app: &App) {
         .title(" ARL Token ")
         .title_style(Theme::title());
 
-    let input_text = if app.login_input.is_empty() {
+    let input_text = if view.login_input.is_empty() {
         Span::styled(
             "Paste your ARL token from browser cookies...",
             Theme::dim(),
         )
     } else {
         // Mask the ARL token for privacy
-        let masked: String = "*".repeat(app.login_input.len().min(40));
-        let suffix = if app.login_input.len() > 40 {
-            format!("... ({})", app.login_input.len())
+        let masked: String = "*".repeat(view.login_input.len().min(40));
+        let suffix = if view.login_input.len() > 40 {
+            format!("... ({})", view.login_input.len())
         } else {
             String::new()
         };
@@ -79,14 +79,14 @@ pub fn draw(frame: &mut Frame, app: &App) {
     frame.render_widget(input, form_chunks[2]);
 
     // Set cursor position
-    let cursor_x = form_chunks[2].x + 1 + app.login_cursor.min(form_chunks[2].width as usize - 2) as u16;
+    let cursor_x = form_chunks[2].x + 1 + view.login_cursor.min(form_chunks[2].width as usize - 2) as u16;
     let cursor_y = form_chunks[2].y + 1;
     frame.set_cursor_position(Position::new(cursor_x, cursor_y));
 
     // Error or hint
-    let hint_text = if app.login_loading {
+    let hint_text = if view.login_loading {
         Span::styled("Connecting...", Style::default().fg(Color::Cyan))
-    } else if let Some(ref error) = app.login_error {
+    } else if let Some(ref error) = view.login_error {
         Span::styled(error.as_str(), Style::default().fg(Color::Red))
     } else {
         Span::styled(

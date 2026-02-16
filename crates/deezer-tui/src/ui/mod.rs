@@ -8,19 +8,20 @@ pub mod search;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Tabs};
 
-use crate::app::{ActiveTab, App, Screen};
+use crate::client::ViewState;
+use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
 
 /// Root draw function — dispatches to the correct screen.
-pub fn draw(frame: &mut Frame, app: &App) {
-    match app.screen {
-        Screen::Login => login::draw(frame, app),
-        Screen::Main => draw_main(frame, app),
+pub fn draw(frame: &mut Frame, view: &ViewState) {
+    match view.screen {
+        Screen::Login => login::draw(frame, view),
+        Screen::Main => draw_main(frame, view),
     }
 }
 
 /// Draw the main screen with tabs + content + player bar.
-fn draw_main(frame: &mut Frame, app: &App) {
+fn draw_main(frame: &mut Frame, view: &ViewState) {
     let area = frame.area();
 
     // Layout: tabs (3 lines) | content (fill) | player bar (4 lines)
@@ -34,27 +35,27 @@ fn draw_main(frame: &mut Frame, app: &App) {
         .split(area);
 
     // Tab bar
-    draw_tabs(frame, app, chunks[0]);
+    draw_tabs(frame, view, chunks[0]);
 
     // Content area (based on active tab)
-    match app.active_tab {
-        ActiveTab::Search => search::draw(frame, app, chunks[1]),
-        ActiveTab::Favorites => favorites::draw(frame, app, chunks[1]),
-        ActiveTab::Radio => radio::draw(frame, app, chunks[1]),
+    match view.active_tab {
+        ActiveTab::Search => search::draw(frame, view, chunks[1]),
+        ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
+        ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
     }
 
     // Player bar
-    player::draw(frame, app, chunks[2]);
+    player::draw(frame, view, chunks[2]);
 }
 
-fn draw_tabs(frame: &mut Frame, app: &App, area: Rect) {
+fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
     let tab_titles = vec![
         Line::from(" Search "),
         Line::from(" Favorites "),
         Line::from(" Radios / Podcasts "),
     ];
 
-    let selected = match app.active_tab {
+    let selected = match view.active_tab {
         ActiveTab::Search => 0,
         ActiveTab::Favorites => 1,
         ActiveTab::Radio => 2,

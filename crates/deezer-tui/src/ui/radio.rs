@@ -1,10 +1,10 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::app::App;
+use crate::client::ViewState;
 use crate::theme::Theme;
 
-pub fn draw(frame: &mut Frame, _app: &App, area: Rect) {
+pub fn draw(frame: &mut Frame, _view: &ViewState, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border())

@@ -445,6 +445,8 @@ dependencies = [
  "deezer-core",
  "libc",
  "ratatui",
+ "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
