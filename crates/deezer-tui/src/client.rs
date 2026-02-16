@@ -28,6 +28,15 @@ pub enum InputMode {
     Typing,
 }
 
+/// Sub-mode for the login screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginMode {
+    /// Default: shows a "Login" button (Enter = browser login, w = ARL input).
+    Button,
+    /// ARL text input (Enter = submit ARL, Esc = back to Button).
+    ArlInput,
+}
+
 /// View state used by UI rendering functions.
 /// Combines daemon snapshot with local client-only state.
 pub struct ViewState {
@@ -58,6 +67,7 @@ pub struct ViewState {
     // Local client state
     pub input_mode: InputMode,
     pub search_input: String,
+    pub login_mode: LoginMode,
     pub login_input: String,
     pub login_cursor: usize,
 }
@@ -90,6 +100,7 @@ impl ViewState {
 
             input_mode: InputMode::Normal,
             search_input: String::new(),
+            login_mode: LoginMode::Button,
             login_input: String::new(),
             login_cursor: 0,
         }
@@ -186,9 +197,9 @@ impl Client {
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
-        // Set input mode based on screen
+        // Reset login mode when starting on login screen
         if self.view.screen == Screen::Login {
-            self.view.input_mode = InputMode::Typing;
+            self.view.login_mode = LoginMode::Button;
         }
 
         // Main client loop
@@ -215,6 +226,26 @@ impl Client {
                             }
                             KeyAction::SendCommand(cmd) => {
                                 self.send_cmd(&cmd).await?;
+                            }
+                            KeyAction::WebLogin => {
+                                // Suspend TUI
+                                disable_raw_mode()?;
+                                io::stdout().execute(LeaveAlternateScreen)?;
+                                drop(terminal);
+
+                                // Run browser login (blocking)
+                                let result = crate::web_login::login_via_browser();
+
+                                // Resume TUI
+                                enable_raw_mode()?;
+                                io::stdout().execute(EnterAlternateScreen)?;
+                                terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+                                terminal.clear()?;
+
+                                if let Ok(Some(arl)) = result {
+                                    self.view.login_loading = true;
+                                    self.send_cmd(&Command::Login { arl }).await?;
+                                }
                             }
                         }
                     }
@@ -297,40 +328,58 @@ impl Client {
             return KeyAction::Continue;
         }
 
-        match key.code {
-            KeyCode::Esc => KeyAction::Quit,
-            KeyCode::Char(c) => {
-                self.view.login_input.insert(self.view.login_cursor, c);
-                self.view.login_cursor += 1;
-                KeyAction::Continue
-            }
-            KeyCode::Backspace => {
-                if self.view.login_cursor > 0 {
-                    self.view.login_cursor -= 1;
-                    self.view.login_input.remove(self.view.login_cursor);
-                }
-                KeyAction::Continue
-            }
-            KeyCode::Left => {
-                self.view.login_cursor = self.view.login_cursor.saturating_sub(1);
-                KeyAction::Continue
-            }
-            KeyCode::Right => {
-                if self.view.login_cursor < self.view.login_input.len() {
-                    self.view.login_cursor += 1;
-                }
-                KeyAction::Continue
-            }
-            KeyCode::Enter => {
-                if !self.view.login_input.is_empty() {
-                    let arl = self.view.login_input.clone();
-                    self.view.login_loading = true;
-                    KeyAction::SendCommand(Command::Login { arl })
-                } else {
+        match self.view.login_mode {
+            LoginMode::Button => match key.code {
+                KeyCode::Enter => KeyAction::WebLogin,
+                KeyCode::Char('w') => {
+                    self.view.login_mode = LoginMode::ArlInput;
+                    self.view.login_input.clear();
+                    self.view.login_cursor = 0;
                     KeyAction::Continue
                 }
-            }
-            _ => KeyAction::Continue,
+                KeyCode::Esc => KeyAction::Quit,
+                _ => KeyAction::Continue,
+            },
+            LoginMode::ArlInput => match key.code {
+                KeyCode::Esc => {
+                    self.view.login_mode = LoginMode::Button;
+                    self.view.login_input.clear();
+                    self.view.login_cursor = 0;
+                    KeyAction::Continue
+                }
+                KeyCode::Enter => {
+                    if !self.view.login_input.is_empty() {
+                        let arl = self.view.login_input.clone();
+                        self.view.login_loading = true;
+                        KeyAction::SendCommand(Command::Login { arl })
+                    } else {
+                        KeyAction::Continue
+                    }
+                }
+                KeyCode::Char(c) => {
+                    self.view.login_input.insert(self.view.login_cursor, c);
+                    self.view.login_cursor += 1;
+                    KeyAction::Continue
+                }
+                KeyCode::Backspace => {
+                    if self.view.login_cursor > 0 {
+                        self.view.login_cursor -= 1;
+                        self.view.login_input.remove(self.view.login_cursor);
+                    }
+                    KeyAction::Continue
+                }
+                KeyCode::Left => {
+                    self.view.login_cursor = self.view.login_cursor.saturating_sub(1);
+                    KeyAction::Continue
+                }
+                KeyCode::Right => {
+                    if self.view.login_cursor < self.view.login_input.len() {
+                        self.view.login_cursor += 1;
+                    }
+                    KeyAction::Continue
+                }
+                _ => KeyAction::Continue,
+            },
         }
     }
 
@@ -437,4 +486,6 @@ enum KeyAction {
     Quit,
     /// Detach: exit client but keep daemon running (Ctrl+Z / Ctrl+C).
     Detach,
+    /// Open browser for Deezer web login.
+    WebLogin,
 }

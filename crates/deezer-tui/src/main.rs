@@ -3,6 +3,7 @@ mod daemon;
 mod protocol;
 mod theme;
 mod ui;
+mod web_login;
 
 use std::fs;
 
