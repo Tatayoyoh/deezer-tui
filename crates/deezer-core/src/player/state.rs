@@ -1,6 +1,11 @@
-use crate::api::models::{AudioQuality, TrackData};
+use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+use crate::api::models::{AudioQuality, TrackData};
+use crate::Config;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PlaybackStatus {
     Stopped,
     Playing,
@@ -8,14 +13,14 @@ pub enum PlaybackStatus {
     Loading,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RepeatMode {
     Off,
     Track,
     Queue,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerState {
     pub status: PlaybackStatus,
     pub current_track: Option<TrackData>,
@@ -63,5 +68,54 @@ impl PlayerState {
             self.duration_secs / 60,
             self.duration_secs % 60,
         )
+    }
+}
+
+/// Serializable snapshot of playback state, saved when going to background.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedState {
+    pub current_track: Option<TrackData>,
+    pub quality: AudioQuality,
+    pub volume: f32,
+    pub shuffle: bool,
+    pub repeat: RepeatMode,
+    pub queue: Vec<TrackData>,
+    pub queue_index: usize,
+    pub was_playing: bool,
+}
+
+impl SavedState {
+    fn file_path() -> Option<PathBuf> {
+        Config::dir().map(|d| d.join("background_state.json"))
+    }
+
+    pub fn from_player_state(state: &PlayerState) -> Self {
+        Self {
+            current_track: state.current_track.clone(),
+            quality: state.quality,
+            volume: state.volume,
+            shuffle: state.shuffle,
+            repeat: state.repeat,
+            queue: state.queue.clone(),
+            queue_index: state.queue_index,
+            was_playing: matches!(state.status, PlaybackStatus::Playing | PlaybackStatus::Paused),
+        }
+    }
+
+    pub fn save(&self) -> std::io::Result<()> {
+        let Some(path) = Self::file_path() else {
+            return Ok(());
+        };
+        let json = serde_json::to_string(self).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::Other, e)
+        })?;
+        std::fs::write(path, json)
+    }
+
+    pub fn load() -> Option<Self> {
+        let path = Self::file_path()?;
+        let json = std::fs::read_to_string(&path).ok()?;
+        let _ = std::fs::remove_file(&path); // consume it
+        serde_json::from_str(&json).ok()
     }
 }

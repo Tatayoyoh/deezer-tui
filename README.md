@@ -10,7 +10,7 @@ Available :
 * Deezer
 
 Planned :
-* background player, still playeing music
+✅ background player, still playeing music
 * login from browser/deezer.com link/backlink
 * Add to favorites
 * better shortcuts
@@ -21,6 +21,14 @@ Planned :
 * SoundCloud
 * local music
 
+## Build on your system
+
+sudo apt install pkg-config
+sudo apt install libasound2-dev
+curl https://sh.rustup.rs -sSf | sh
+source ~/.bashrc
+
+cargo build --release
 
 ## Other goods projects
 

@@ -86,7 +86,7 @@ pub struct UserOptions {
     pub web_lossless: bool,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
     #[serde(rename = "SNG_ID")]
     pub track_id: String,

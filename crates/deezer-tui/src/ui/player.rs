@@ -3,10 +3,10 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
-use crate::app::App;
+use crate::client::ViewState;
 use crate::theme::Theme;
 
-pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
+pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Theme::border())
@@ -24,18 +24,15 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(inner);
 
-    // Read player state
-    let state = app.player_state.lock().unwrap();
-
     // Track info line
-    let status_icon = match state.status {
+    let status_icon = match view.status {
         PlaybackStatus::Playing => Span::styled("  >> ", Style::default().fg(Color::Green)),
         PlaybackStatus::Paused => Span::styled("  || ", Style::default().fg(Color::Yellow)),
         PlaybackStatus::Loading => Span::styled("  .. ", Style::default().fg(Color::Cyan)),
         PlaybackStatus::Stopped => Span::styled("  [] ", Theme::dim()),
     };
 
-    let track_info = if let Some(ref track) = state.current_track {
+    let track_info = if let Some(ref track) = view.current_track {
         Line::from(vec![
             status_icon,
             Span::styled(&track.title, Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD)),
@@ -52,10 +49,10 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(track_info), chunks[0]);
 
     // Progress bar
-    let ratio = state.progress_percent().min(1.0);
-    let time_label = state.format_position();
-    let quality_label = if state.current_track.is_some() {
-        format!("  {}", state.quality.as_api_format())
+    let ratio = view.progress_percent().min(1.0);
+    let time_label = view.format_position();
+    let quality_label = if view.current_track.is_some() {
+        format!("  {}", view.quality.as_api_format())
     } else {
         String::new()
     };
@@ -75,24 +72,24 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(progress, chunks[1]);
 
     // Controls line
-    let vol_pct = (app.config.volume * 100.0) as u8;
-    let shuffle_style = if state.shuffle {
+    let vol_pct = (view.volume * 100.0) as u8;
+    let shuffle_style = if view.shuffle {
         Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
-    let repeat_label = match state.repeat {
+    let repeat_label = match view.repeat {
         RepeatMode::Off => "[r] Repeat",
         RepeatMode::Queue => "[r] Repeat All",
         RepeatMode::Track => "[r] Repeat One",
     };
-    let repeat_style = if state.repeat != RepeatMode::Off {
+    let repeat_style = if view.repeat != RepeatMode::Off {
         Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
 
-    let status_text = app.status_msg.as_deref().unwrap_or("");
+    let status_text = view.status_msg.as_deref().unwrap_or("");
 
     let controls = Line::from(vec![
         Span::styled("  ", Theme::dim()),

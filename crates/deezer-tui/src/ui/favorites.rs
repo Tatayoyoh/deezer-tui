@@ -1,11 +1,11 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph};
 
-use crate::app::App;
+use crate::client::ViewState;
 use crate::theme::Theme;
 
-pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
-    if app.favorites_loading {
+pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
+    if view.favorites_loading {
         let loading = Paragraph::new(Span::styled("Loading favorites...", Theme::dim()))
             .alignment(Alignment::Center)
             .block(
@@ -16,7 +16,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
                     .title_style(Theme::title()),
             );
         frame.render_widget(loading, area);
-    } else if app.favorites.is_empty() {
+    } else if view.favorites.is_empty() {
         let empty = Paragraph::new(Span::styled(
             "No favorites yet — add some on Deezer!",
             Theme::dim(),
@@ -31,7 +31,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
         );
         frame.render_widget(empty, area);
     } else {
-        let items: Vec<ListItem> = app
+        let items: Vec<ListItem> = view
             .favorites
             .iter()
             .enumerate()
@@ -51,7 +51,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             })
             .collect();
 
-        let title = format!(" Favorites ({}) ", app.favorites.len());
+        let title = format!(" Favorites ({}) ", view.favorites.len());
         let list = List::new(items)
             .block(
                 Block::default()
@@ -63,7 +63,7 @@ pub fn draw(frame: &mut Frame, app: &App, area: Rect) {
             .highlight_style(Theme::highlight())
             .highlight_symbol("> ");
 
-        let mut list_state = ListState::default().with_selected(Some(app.favorites_selected));
+        let mut list_state = ListState::default().with_selected(Some(view.favorites_selected));
         frame.render_stateful_widget(list, area, &mut list_state);
     }
 }
