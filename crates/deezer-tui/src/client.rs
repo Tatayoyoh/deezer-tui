@@ -1,8 +1,10 @@
+use std::cell::Cell;
 use std::io;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
+use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
@@ -70,6 +72,9 @@ pub struct ViewState {
     pub login_mode: LoginMode,
     pub login_input: String,
     pub login_cursor: usize,
+
+    /// Button area set by the UI draw pass, used for mouse hit-testing.
+    pub login_button_area: Cell<Option<Rect>>,
 }
 
 impl ViewState {
@@ -103,6 +108,7 @@ impl ViewState {
             login_mode: LoginMode::Button,
             login_input: String::new(),
             login_cursor: 0,
+            login_button_area: Cell::new(None),
         }
     }
 
@@ -193,6 +199,7 @@ impl Client {
         // Setup terminal
         enable_raw_mode()?;
         io::stdout().execute(EnterAlternateScreen)?;
+        io::stdout().execute(EnableMouseCapture)?;
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
@@ -211,42 +218,51 @@ impl Client {
                 ui::draw(frame, &self.view);
             })?;
 
-            // Poll for keyboard events (non-blocking with short timeout)
+            // Poll for input events (non-blocking with short timeout)
             if event::poll(TICK_RATE)? {
-                if let Event::Key(key) = event::read()? {
-                    if key.kind == KeyEventKind::Press {
-                        match self.handle_key(key) {
-                            KeyAction::Continue => {}
-                            KeyAction::Quit => {
-                                send_shutdown = true;
-                                running = false;
-                            }
-                            KeyAction::Detach => {
-                                running = false;
-                            }
-                            KeyAction::SendCommand(cmd) => {
-                                self.send_cmd(&cmd).await?;
-                            }
-                            KeyAction::WebLogin => {
-                                // Suspend TUI
-                                disable_raw_mode()?;
-                                io::stdout().execute(LeaveAlternateScreen)?;
-                                drop(terminal);
+                let action = match event::read()? {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => {
+                        self.handle_key(key)
+                    }
+                    Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+                        self.handle_mouse_click(mouse.column, mouse.row)
+                            .unwrap_or(KeyAction::Continue)
+                    }
+                    _ => KeyAction::Continue,
+                };
 
-                                // Run browser login (blocking)
-                                let result = crate::web_login::login_via_browser();
+                match action {
+                    KeyAction::Continue => {}
+                    KeyAction::Quit => {
+                        send_shutdown = true;
+                        running = false;
+                    }
+                    KeyAction::Detach => {
+                        running = false;
+                    }
+                    KeyAction::SendCommand(cmd) => {
+                        self.send_cmd(&cmd).await?;
+                    }
+                    KeyAction::WebLogin => {
+                        // Suspend TUI
+                        io::stdout().execute(DisableMouseCapture)?;
+                        disable_raw_mode()?;
+                        io::stdout().execute(LeaveAlternateScreen)?;
+                        drop(terminal);
 
-                                // Resume TUI
-                                enable_raw_mode()?;
-                                io::stdout().execute(EnterAlternateScreen)?;
-                                terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
-                                terminal.clear()?;
+                        // Run browser login (blocking)
+                        let result = crate::web_login::login_via_browser();
 
-                                if let Ok(Some(arl)) = result {
-                                    self.view.login_loading = true;
-                                    self.send_cmd(&Command::Login { arl }).await?;
-                                }
-                            }
+                        // Resume TUI
+                        enable_raw_mode()?;
+                        io::stdout().execute(EnterAlternateScreen)?;
+                        io::stdout().execute(EnableMouseCapture)?;
+                        terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+                        terminal.clear()?;
+
+                        if let Ok(Some(arl)) = result {
+                            self.view.login_loading = true;
+                            self.send_cmd(&Command::Login { arl }).await?;
                         }
                     }
                 }
@@ -280,6 +296,7 @@ impl Client {
         }
 
         // Restore terminal
+        io::stdout().execute(DisableMouseCapture)?;
         disable_raw_mode()?;
         io::stdout().execute(LeaveAlternateScreen)?;
 
@@ -473,6 +490,25 @@ impl Client {
 
             _ => KeyAction::Continue,
         }
+    }
+
+    fn handle_mouse_click(&mut self, col: u16, row: u16) -> Option<KeyAction> {
+        // Only handle clicks on the login button
+        if self.view.screen == Screen::Login
+            && self.view.login_mode == LoginMode::Button
+            && !self.view.login_loading
+        {
+            if let Some(rect) = self.view.login_button_area.get() {
+                if col >= rect.x
+                    && col < rect.x + rect.width
+                    && row >= rect.y
+                    && row < rect.y + rect.height
+                {
+                    return Some(KeyAction::WebLogin);
+                }
+            }
+        }
+        None
     }
 }
 

@@ -39,7 +39,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
 
     match view.login_mode {
         LoginMode::Button => draw_button_mode(frame, view, form_area),
-        LoginMode::ArlInput => draw_arl_mode(frame, view, form_area),
+        LoginMode::ArlInput => {
+            view.login_button_area.set(None);
+            draw_arl_mode(frame, view, form_area);
+        }
     }
 }
 
@@ -87,6 +90,8 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
                     Style::default().fg(Theme::PRIMARY)
                 }),
         );
+    // Record button area for mouse hit-testing
+    view.login_button_area.set(Some(chunks[2]));
     frame.render_widget(button, chunks[2]);
 
     // Hint / error
