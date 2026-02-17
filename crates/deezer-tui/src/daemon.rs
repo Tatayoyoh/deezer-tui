@@ -6,14 +6,15 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
-use deezer_core::api::models::{AudioQuality, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
 use deezer_core::api::DeezerClient;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
 use crate::protocol::{
-    ActiveTab, Command, DaemonSnapshot, Screen, ServerMessage, read_line, socket_path,
+    ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen, SearchCategory, ServerMessage,
+    read_line, socket_path,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -26,8 +27,10 @@ enum AsyncResult {
     MasterKeyError(String),
     SearchResults(Vec<TrackData>),
     SearchError(String),
+    SearchDisplayResults(Vec<DisplayItem>),
     FavoritesLoaded(Vec<TrackData>),
     FavoritesError(String),
+    FavoritesDisplayLoaded(Vec<DisplayItem>),
     TrackReady {
         audio_data: Vec<u8>,
         track: TrackData,
@@ -51,11 +54,16 @@ pub struct Daemon {
     search_results: Vec<TrackData>,
     search_selected: usize,
     search_loading: bool,
+    search_category: SearchCategory,
+    search_display: Vec<DisplayItem>,
+    last_search_query: String,
 
     // Favorites state
     favorites: Vec<TrackData>,
     favorites_selected: usize,
     favorites_loading: bool,
+    favorites_category: FavoritesCategory,
+    favorites_display: Vec<DisplayItem>,
 
     // Player
     player_state: Arc<Mutex<PlayerState>>,
@@ -97,10 +105,15 @@ impl Daemon {
             search_results: Vec::new(),
             search_selected: 0,
             search_loading: false,
+            search_category: SearchCategory::default(),
+            search_display: Vec::new(),
+            last_search_query: String::new(),
 
             favorites: Vec::new(),
             favorites_selected: 0,
             favorites_loading: false,
+            favorites_category: FavoritesCategory::default(),
+            favorites_display: Vec::new(),
 
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
@@ -251,26 +264,49 @@ impl Daemon {
                 self.start_login(arl);
             }
             Command::Search { query } => {
+                self.last_search_query = query.clone();
                 self.start_search(query);
             }
             Command::PlayFromSearch { index } => {
-                if let Some(track) = self.search_results.get(index).cloned() {
-                    // Set queue from search results
-                    if let Ok(mut state) = self.player_state.lock() {
-                        state.queue = self.search_results.clone();
-                        state.queue_index = index;
+                // Try to get a playable track from display items
+                if let Some(item) = self.search_display.get(index) {
+                    if let Some(track) = &item.track {
+                        // Build queue from all playable tracks in search results
+                        let playable: Vec<TrackData> = self
+                            .search_display
+                            .iter()
+                            .filter_map(|d| d.track.clone())
+                            .collect();
+                        let queue_idx = playable
+                            .iter()
+                            .position(|t| t.track_id == track.track_id)
+                            .unwrap_or(0);
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = playable;
+                            state.queue_index = queue_idx;
+                        }
+                        self.start_play_track(track.clone());
                     }
-                    self.start_play_track(track);
                 }
             }
             Command::PlayFromFavorites { index } => {
-                if let Some(track) = self.favorites.get(index).cloned() {
-                    // Set queue from favorites
-                    if let Ok(mut state) = self.player_state.lock() {
-                        state.queue = self.favorites.clone();
-                        state.queue_index = index;
+                if let Some(item) = self.favorites_display.get(index) {
+                    if let Some(track) = &item.track {
+                        let playable: Vec<TrackData> = self
+                            .favorites_display
+                            .iter()
+                            .filter_map(|d| d.track.clone())
+                            .collect();
+                        let queue_idx = playable
+                            .iter()
+                            .position(|t| t.track_id == track.track_id)
+                            .unwrap_or(0);
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = playable;
+                            state.queue_index = queue_idx;
+                        }
+                        self.start_play_track(track.clone());
                     }
-                    self.start_play_track(track);
                 }
             }
             Command::TogglePause => {
@@ -324,15 +360,15 @@ impl Daemon {
             },
             Command::SelectDown => match self.active_tab {
                 ActiveTab::Search => {
-                    if !self.search_results.is_empty() {
+                    if !self.search_display.is_empty() {
                         self.search_selected =
-                            (self.search_selected + 1).min(self.search_results.len() - 1);
+                            (self.search_selected + 1).min(self.search_display.len() - 1);
                     }
                 }
                 ActiveTab::Favorites => {
-                    if !self.favorites.is_empty() {
+                    if !self.favorites_display.is_empty() {
                         self.favorites_selected =
-                            (self.favorites_selected + 1).min(self.favorites.len() - 1);
+                            (self.favorites_selected + 1).min(self.favorites_display.len() - 1);
                     }
                 }
                 _ => {}
@@ -341,15 +377,72 @@ impl Daemon {
                 self.active_tab = match self.active_tab {
                     ActiveTab::Search => ActiveTab::Favorites,
                     ActiveTab::Favorites => ActiveTab::Radio,
-                    ActiveTab::Radio => ActiveTab::Search,
+                    ActiveTab::Radio => ActiveTab::Downloads,
+                    ActiveTab::Downloads => ActiveTab::Search,
                 };
             }
             Command::PrevTab => {
                 self.active_tab = match self.active_tab {
-                    ActiveTab::Search => ActiveTab::Radio,
+                    ActiveTab::Search => ActiveTab::Downloads,
                     ActiveTab::Favorites => ActiveTab::Search,
                     ActiveTab::Radio => ActiveTab::Favorites,
+                    ActiveTab::Downloads => ActiveTab::Radio,
                 };
+            }
+            Command::NextCategory => {
+                match self.active_tab {
+                    ActiveTab::Search => {
+                        self.search_category = self.search_category.next();
+                        self.search_selected = 0;
+                        if !self.last_search_query.is_empty() {
+                            self.start_search(self.last_search_query.clone());
+                        }
+                    }
+                    ActiveTab::Favorites => {
+                        self.favorites_category = self.favorites_category.next();
+                        self.favorites_selected = 0;
+                        self.start_load_favorites_category();
+                    }
+                    _ => {}
+                }
+            }
+            Command::PrevCategory => {
+                match self.active_tab {
+                    ActiveTab::Search => {
+                        self.search_category = self.search_category.prev();
+                        self.search_selected = 0;
+                        if !self.last_search_query.is_empty() {
+                            self.start_search(self.last_search_query.clone());
+                        }
+                    }
+                    ActiveTab::Favorites => {
+                        self.favorites_category = self.favorites_category.prev();
+                        self.favorites_selected = 0;
+                        self.start_load_favorites_category();
+                    }
+                    _ => {}
+                }
+            }
+            Command::ShuffleFavorites => {
+                if !self.favorites.is_empty() {
+                    // Set queue from favorites with shuffle enabled
+                    if let Ok(mut state) = self.player_state.lock() {
+                        state.queue = self.favorites.clone();
+                        state.shuffle = true;
+                    }
+                    // Pick a random track to start
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = DefaultHasher::new();
+                    Instant::now().hash(&mut hasher);
+                    let idx = hasher.finish() as usize % self.favorites.len();
+                    if let Ok(mut state) = self.player_state.lock() {
+                        state.queue_index = idx;
+                    }
+                    if let Some(track) = self.favorites.get(idx).cloned() {
+                        self.start_play_track(track);
+                    }
+                }
             }
             Command::Shutdown => {
                 // Handled in the main loop
@@ -375,9 +468,13 @@ impl Daemon {
             search_results: self.search_results.clone(),
             search_selected: self.search_selected,
             search_loading: self.search_loading,
+            search_category: self.search_category,
+            search_display: self.search_display.clone(),
             favorites: self.favorites.clone(),
             favorites_selected: self.favorites_selected,
             favorites_loading: self.favorites_loading,
+            favorites_category: self.favorites_category,
+            favorites_display: self.favorites_display.clone(),
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
@@ -428,18 +525,36 @@ impl Daemon {
         self.search_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
+        let category = self.search_category;
+        let api_key = category.api_key().to_string();
 
-        tokio::spawn(async move {
-            let client = client.lock().await;
-            match client.search(&query).await {
-                Ok(results) => {
-                    let _ = tx.send(AsyncResult::SearchResults(results.data));
+        if category == SearchCategory::Track {
+            // Track search: populate both search_results (for playback) and search_display
+            tokio::spawn(async move {
+                let client = client.lock().await;
+                match client.search(&query).await {
+                    Ok(results) => {
+                        let _ = tx.send(AsyncResult::SearchResults(results.data));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::SearchError(e.to_string()));
+                    }
                 }
-                Err(e) => {
-                    let _ = tx.send(AsyncResult::SearchError(e.to_string()));
+            });
+        } else {
+            // Non-track search: only populate search_display
+            tokio::spawn(async move {
+                let client = client.lock().await;
+                match client.search_category(&query, &api_key).await {
+                    Ok(items) => {
+                        let _ = tx.send(AsyncResult::SearchDisplayResults(items));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::SearchError(e.to_string()));
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     fn start_load_favorites(&mut self) {
@@ -458,6 +573,98 @@ impl Daemon {
                 }
             }
         });
+    }
+
+    fn start_load_favorites_category(&mut self) {
+        self.favorites_loading = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        let category = self.favorites_category;
+
+        match category {
+            FavoritesCategory::Tracks => {
+                // Load favorite tracks (same as default)
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    match client.get_favorites().await {
+                        Ok(tracks) => {
+                            let _ = tx.send(AsyncResult::FavoritesLoaded(tracks));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+            FavoritesCategory::RecentlyPlayed => {
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    match client.get_listening_history().await {
+                        Ok(tracks) => {
+                            let _ = tx.send(AsyncResult::FavoritesLoaded(tracks));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+            FavoritesCategory::Artists => {
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    debug!("Loading favorite artists...");
+                    match client.get_favorite_artists().await {
+                        Ok(items) => {
+                            debug!("Favorite artists loaded: {} items", items.len());
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                        }
+                        Err(e) => {
+                            debug!("Favorite artists error: {e}");
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+            FavoritesCategory::Albums => {
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    match client.get_favorite_albums().await {
+                        Ok(items) => {
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+            FavoritesCategory::Playlists => {
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    match client.get_playlists().await {
+                        Ok(items) => {
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+            FavoritesCategory::Following => {
+                tokio::spawn(async move {
+                    let client = client.lock().await;
+                    match client.get_following().await {
+                        Ok(items) => {
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                        }
+                        Err(e) => {
+                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                        }
+                    }
+                });
+            }
+        }
     }
 
     fn start_play_track(&mut self, track: TrackData) {
@@ -594,7 +801,7 @@ impl Daemon {
                             self.status_msg = Some(format!("Audio init error: {e}"));
                         }
                     }
-                    self.start_load_favorites();
+                    self.start_load_favorites_category();
                 }
                 AsyncResult::MasterKeyError(err) => {
                     self.status_msg = Some(format!("Key error: {err}"));
@@ -602,7 +809,15 @@ impl Daemon {
                 AsyncResult::SearchResults(tracks) => {
                     self.search_loading = false;
                     self.status_msg = Some(format!("{} results", tracks.len()));
+                    self.search_display = tracks.iter().map(DisplayItem::from_track).collect();
                     self.search_results = tracks;
+                    self.search_selected = 0;
+                }
+                AsyncResult::SearchDisplayResults(items) => {
+                    self.search_loading = false;
+                    self.status_msg = Some(format!("{} results", items.len()));
+                    self.search_results.clear();
+                    self.search_display = items;
                     self.search_selected = 0;
                 }
                 AsyncResult::SearchError(err) => {
@@ -611,12 +826,23 @@ impl Daemon {
                 }
                 AsyncResult::FavoritesLoaded(tracks) => {
                     self.favorites_loading = false;
-                    self.status_msg = Some(format!("{} favorites loaded", tracks.len()));
+                    self.status_msg = Some(format!("{} loaded", tracks.len()));
+                    self.favorites_display = tracks.iter().map(DisplayItem::from_track).collect();
                     self.favorites = tracks;
+                    self.favorites_selected = 0;
+                }
+                AsyncResult::FavoritesDisplayLoaded(items) => {
+                    self.favorites_loading = false;
+                    self.status_msg = Some(format!("{} loaded", items.len()));
+                    self.favorites.clear();
+                    self.favorites_display = items;
                     self.favorites_selected = 0;
                 }
                 AsyncResult::FavoritesError(err) => {
                     self.favorites_loading = false;
+                    self.favorites_display.clear();
+                    self.favorites.clear();
+                    self.favorites_selected = 0;
                     self.status_msg = Some(format!("Favorites error: {err}"));
                 }
                 AsyncResult::TrackReady {
