@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use deezer_core::api::models::{AudioQuality, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -42,6 +42,12 @@ pub enum Command {
     NextTab,
     /// Switch to previous tab.
     PrevTab,
+    /// Switch to next category within current tab.
+    NextCategory,
+    /// Switch to previous category within current tab.
+    PrevCategory,
+    /// Play favorites in shuffle mode.
+    ShuffleFavorites,
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -68,6 +74,139 @@ pub enum ActiveTab {
     Search,
     Favorites,
     Radio,
+    Downloads,
+}
+
+/// Search category filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SearchCategory {
+    #[default]
+    Track,
+    Artist,
+    Album,
+    Playlist,
+    Podcast,
+    Episode,
+    Profile,
+}
+
+impl SearchCategory {
+    pub const ALL: [Self; 7] = [
+        Self::Track,
+        Self::Artist,
+        Self::Album,
+        Self::Playlist,
+        Self::Podcast,
+        Self::Episode,
+        Self::Profile,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Track => "Titres",
+            Self::Artist => "Artistes",
+            Self::Album => "Albums",
+            Self::Playlist => "Playlists",
+            Self::Podcast => "Podcasts",
+            Self::Episode => "Épisodes",
+            Self::Profile => "Profils",
+        }
+    }
+
+    /// API section key used in deezer.pageSearch response.
+    pub fn api_key(&self) -> &'static str {
+        match self {
+            Self::Track => "TRACK",
+            Self::Artist => "ARTIST",
+            Self::Album => "ALBUM",
+            Self::Playlist => "PLAYLIST",
+            Self::Podcast => "SHOW",
+            Self::Episode => "EPISODE",
+            Self::Profile => "USER",
+        }
+    }
+
+    /// Column headers for this category's table.
+    pub fn headers(&self) -> [&'static str; 4] {
+        match self {
+            Self::Track => ["Titre", "Artiste", "Album", "Durée"],
+            Self::Artist => ["Artiste", "Fans", "", ""],
+            Self::Album => ["Album", "Artiste", "Titres", ""],
+            Self::Playlist => ["Playlist", "Auteur", "Titres", ""],
+            Self::Podcast => ["Podcast", "Description", "", ""],
+            Self::Episode => ["Épisode", "Podcast", "", "Durée"],
+            Self::Profile => ["Profil", "", "", ""],
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + all.len() - 1) % all.len()]
+    }
+}
+
+/// Favorites category filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum FavoritesCategory {
+    #[default]
+    RecentlyPlayed,
+    Tracks,
+    Artists,
+    Albums,
+    Playlists,
+    Following,
+}
+
+impl FavoritesCategory {
+    pub const ALL: [Self; 6] = [
+        Self::RecentlyPlayed,
+        Self::Tracks,
+        Self::Artists,
+        Self::Albums,
+        Self::Playlists,
+        Self::Following,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::RecentlyPlayed => "Écouté récemment",
+            Self::Tracks => "Titres",
+            Self::Artists => "Artistes",
+            Self::Albums => "Albums",
+            Self::Playlists => "Playlistes",
+            Self::Following => "Following",
+        }
+    }
+
+    /// Column headers for this category's table.
+    pub fn headers(&self) -> [&'static str; 4] {
+        match self {
+            Self::RecentlyPlayed | Self::Tracks => ["Titre", "Artiste", "Album", "Durée"],
+            Self::Artists => ["Artiste", "Fans", "", ""],
+            Self::Albums => ["Album", "Artiste", "Titres", ""],
+            Self::Playlists => ["Playlist", "Auteur", "Titres", ""],
+            Self::Following => ["Profil", "", "", ""],
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + all.len() - 1) % all.len()]
+    }
 }
 
 /// Complete state snapshot sent from daemon to client.
@@ -94,11 +233,15 @@ pub struct DaemonSnapshot {
     pub search_results: Vec<TrackData>,
     pub search_selected: usize,
     pub search_loading: bool,
+    pub search_category: SearchCategory,
+    pub search_display: Vec<DisplayItem>,
 
     // Favorites
     pub favorites: Vec<TrackData>,
     pub favorites_selected: usize,
     pub favorites_loading: bool,
+    pub favorites_category: FavoritesCategory,
+    pub favorites_display: Vec<DisplayItem>,
 
     // UI hints
     pub status_msg: Option<String>,
@@ -125,9 +268,13 @@ impl Default for DaemonSnapshot {
             search_results: Vec::new(),
             search_selected: 0,
             search_loading: false,
+            search_category: SearchCategory::default(),
+            search_display: Vec::new(),
             favorites: Vec::new(),
             favorites_selected: 0,
             favorites_loading: false,
+            favorites_category: FavoritesCategory::default(),
+            favorites_display: Vec::new(),
             status_msg: None,
             login_error: None,
             login_loading: false,

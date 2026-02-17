@@ -13,11 +13,12 @@ use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tracing::debug;
 
-use deezer_core::api::models::{AudioQuality, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::protocol::{
-    ActiveTab, Command, DaemonSnapshot, Screen, ServerMessage, read_line, socket_path,
+    ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen, SearchCategory, ServerMessage,
+    read_line, socket_path,
 };
 use crate::ui;
 
@@ -58,9 +59,13 @@ pub struct ViewState {
     pub search_results: Vec<TrackData>,
     pub search_selected: usize,
     pub search_loading: bool,
+    pub search_category: SearchCategory,
+    pub search_display: Vec<DisplayItem>,
     pub favorites: Vec<TrackData>,
     pub favorites_selected: usize,
     pub favorites_loading: bool,
+    pub favorites_category: FavoritesCategory,
+    pub favorites_display: Vec<DisplayItem>,
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
     pub login_loading: bool,
@@ -95,9 +100,13 @@ impl ViewState {
             search_results: snap.search_results.clone(),
             search_selected: snap.search_selected,
             search_loading: snap.search_loading,
+            search_category: snap.search_category,
+            search_display: snap.search_display.clone(),
             favorites: snap.favorites.clone(),
             favorites_selected: snap.favorites_selected,
             favorites_loading: snap.favorites_loading,
+            favorites_category: snap.favorites_category,
+            favorites_display: snap.favorites_display.clone(),
             status_msg: snap.status_msg.clone(),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
@@ -131,9 +140,13 @@ impl ViewState {
         self.search_results = snap.search_results;
         self.search_selected = snap.search_selected;
         self.search_loading = snap.search_loading;
+        self.search_category = snap.search_category;
+        self.search_display = snap.search_display;
         self.favorites = snap.favorites;
         self.favorites_selected = snap.favorites_selected;
         self.favorites_loading = snap.favorites_loading;
+        self.favorites_category = snap.favorites_category;
+        self.favorites_display = snap.favorites_display;
         self.status_msg = snap.status_msg;
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
@@ -446,6 +459,14 @@ impl Client {
                 KeyAction::Continue
             }
 
+            // Category navigation (h/l or left/right)
+            KeyCode::Char('h') | KeyCode::Left => {
+                KeyAction::SendCommand(Command::PrevCategory)
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                KeyAction::SendCommand(Command::NextCategory)
+            }
+
             // List navigation
             KeyCode::Up | KeyCode::Char('k') => {
                 KeyAction::SendCommand(Command::SelectUp)
@@ -468,6 +489,14 @@ impl Client {
                 }
                 _ => KeyAction::Continue,
             },
+
+            // Shuffle favorites
+            KeyCode::Char('g') => {
+                if self.view.active_tab == ActiveTab::Favorites {
+                    return KeyAction::SendCommand(Command::ShuffleFavorites);
+                }
+                KeyAction::Continue
+            }
 
             // Player controls
             KeyCode::Char('p') | KeyCode::Char(' ') => {

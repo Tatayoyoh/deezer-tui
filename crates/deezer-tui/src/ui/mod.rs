@@ -1,4 +1,5 @@
 pub mod common;
+pub mod downloads;
 pub mod favorites;
 pub mod login;
 pub mod player;
@@ -42,6 +43,7 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
         ActiveTab::Search => search::draw(frame, view, chunks[1]),
         ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
         ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
+        ActiveTab::Downloads => downloads::draw(frame, chunks[1]),
     }
 
     // Player bar
@@ -53,12 +55,14 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         Line::from(" Search "),
         Line::from(" Favorites "),
         Line::from(" Radios / Podcasts "),
+        Line::from(" Downloads "),
     ];
 
     let selected = match view.active_tab {
         ActiveTab::Search => 0,
         ActiveTab::Favorites => 1,
         ActiveTab::Radio => 2,
+        ActiveTab::Downloads => 3,
     };
 
     let tabs = Tabs::new(tab_titles)

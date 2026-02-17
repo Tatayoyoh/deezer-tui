@@ -1,7 +1,10 @@
 use serde_json::json;
 use tracing::debug;
 
-use super::models::{DeezerError, SearchResults, TrackData};
+use super::models::{
+    AlbumData, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData, PodcastData,
+    ProfileData, SearchResults, TrackData,
+};
 use super::DeezerClient;
 
 const GW_LIGHT_URL: &str = "https://www.deezer.com/ajax/gw-light.php";
@@ -131,4 +134,215 @@ impl DeezerClient {
         serde_json::from_value(data.clone())
             .map_err(|e| DeezerError::Api(format!("Failed to parse favorites: {e}")))
     }
+
+    /// Search and return results as DisplayItems for a specific category.
+    pub async fn search_category(
+        &self,
+        query: &str,
+        category: &str,
+    ) -> Result<Vec<DisplayItem>, DeezerError> {
+        let params = json!({
+            "query": query,
+            "filter": "ALL",
+            "output": "TRACK",
+            "start": 0,
+            "nb": 40,
+        });
+
+        let results = self.gw_call("deezer.pageSearch", params).await?;
+
+        match category {
+            "TRACK" => {
+                let section = results.get("TRACK");
+                let tracks: Vec<TrackData> = parse_search_section(section)?;
+                Ok(tracks.iter().map(DisplayItem::from_track).collect())
+            }
+            "ARTIST" => {
+                let section = results.get("ARTIST");
+                let artists: Vec<ArtistData> = parse_search_section(section)?;
+                Ok(artists.iter().map(DisplayItem::from_artist).collect())
+            }
+            "ALBUM" => {
+                let section = results.get("ALBUM");
+                let albums: Vec<AlbumData> = parse_search_section(section)?;
+                Ok(albums.iter().map(DisplayItem::from_album).collect())
+            }
+            "PLAYLIST" => {
+                let section = results.get("PLAYLIST");
+                let playlists: Vec<PlaylistData> = parse_search_section(section)?;
+                Ok(playlists.iter().map(DisplayItem::from_playlist).collect())
+            }
+            "SHOW" => {
+                let section = results.get("SHOW");
+                let podcasts: Vec<PodcastData> = parse_search_section(section)?;
+                Ok(podcasts.iter().map(DisplayItem::from_podcast).collect())
+            }
+            "EPISODE" => {
+                let section = results.get("EPISODE");
+                let episodes: Vec<EpisodeData> = parse_search_section(section)?;
+                Ok(episodes.iter().map(DisplayItem::from_episode).collect())
+            }
+            "USER" => {
+                let section = results.get("USER");
+                let profiles: Vec<ProfileData> = parse_search_section(section)?;
+                Ok(profiles.iter().map(DisplayItem::from_profile).collect())
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Get favorite artists.
+    pub async fn get_favorite_artists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({
+            "user_id": session.user_id,
+            "start": 0,
+            "nb": 2000,
+        });
+
+        let results = self.gw_call("favorite_artist.getList", params).await?;
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in favorite artists".into()))?;
+
+        debug!("favorite_artist sample: {:?}", data.as_array().and_then(|a| a.first()));
+
+        let artists: Vec<ArtistData> = serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse favorite artists: {e}")))?;
+        Ok(artists.iter().map(DisplayItem::from_artist).collect())
+    }
+
+    /// Get favorite albums.
+    pub async fn get_favorite_albums(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({
+            "user_id": session.user_id,
+            "start": 0,
+            "nb": 2000,
+        });
+
+        let results = self.gw_call("favorite_album.getList", params).await?;
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in favorite albums".into()))?;
+
+        let albums: Vec<AlbumData> = serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse favorite albums: {e}")))?;
+        Ok(albums.iter().map(DisplayItem::from_album).collect())
+    }
+
+    /// Get user playlists.
+    pub async fn get_playlists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({
+            "user_id": session.user_id,
+            "start": 0,
+            "nb": 2000,
+        });
+
+        let results = self.gw_call("playlist.getList", params).await?;
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in playlists".into()))?;
+
+        let playlists: Vec<PlaylistData> = serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))?;
+        Ok(playlists.iter().map(DisplayItem::from_playlist).collect())
+    }
+
+    /// Get listening history (recently played tracks).
+    pub async fn get_listening_history(&self) -> Result<Vec<TrackData>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        // Use deezer.pageProfile to fetch the user's listening history
+        let params = json!({
+            "user_id": session.user_id,
+            "tab": "listening_history",
+            "nb": 200,
+        });
+
+        let results = self.gw_call("deezer.pageProfile", params).await;
+
+        match results {
+            Ok(res) => {
+                // The response contains TAB.listening_history.data
+                if let Some(tab) = res.get("TAB") {
+                    if let Some(history) = tab.get("listening_history") {
+                        if let Some(data) = history.get("data") {
+                            let tracks: Result<Vec<TrackData>, _> =
+                                serde_json::from_value(data.clone());
+                            if let Ok(tracks) = tracks {
+                                return Ok(tracks);
+                            }
+                        }
+                    }
+                }
+                // Try alternate structure: direct data array
+                if let Some(data) = res.get("data") {
+                    let tracks: Result<Vec<TrackData>, _> =
+                        serde_json::from_value(data.clone());
+                    if let Ok(tracks) = tracks {
+                        return Ok(tracks);
+                    }
+                }
+                debug!("History response structure: {:?}", res.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+                // Fallback to favorites
+                self.get_favorites().await
+            }
+            Err(e) => {
+                debug!("History API error: {e}, falling back to favorites");
+                self.get_favorites().await
+            }
+        }
+    }
+
+    /// Get followed users/profiles.
+    pub async fn get_following(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({
+            "user_id": session.user_id,
+            "start": 0,
+            "nb": 2000,
+        });
+
+        let results = self.gw_call("user.getFollowings", params).await?;
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in following".into()))?;
+
+        let profiles: Vec<ProfileData> = serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse following: {e}")))?;
+        Ok(profiles.iter().map(DisplayItem::from_profile).collect())
+    }
+}
+
+/// Parse a search section's "data" array into a typed vec.
+fn parse_search_section<T: serde::de::DeserializeOwned>(
+    section: Option<&serde_json::Value>,
+) -> Result<Vec<T>, DeezerError> {
+    let section = section.ok_or_else(|| DeezerError::Api("Section not found in search results".into()))?;
+    let data = section
+        .get("data")
+        .ok_or_else(|| DeezerError::Api("Missing 'data' in search section".into()))?;
+    serde_json::from_value(data.clone())
+        .map_err(|e| DeezerError::Api(format!("Failed to parse search section: {e}")))
 }

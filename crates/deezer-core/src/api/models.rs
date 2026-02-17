@@ -139,15 +139,184 @@ pub struct SearchResults {
     pub total: u64,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistData {
+    #[serde(rename = "ART_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
+    pub artist_id: String,
+    #[serde(rename = "ART_NAME")]
+    #[serde(default)]
+    pub name: String,
+    #[serde(rename = "NB_FAN")]
+    #[serde(default)]
+    pub nb_fan: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlbumData {
+    #[serde(rename = "ALB_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
+    pub album_id: String,
+    #[serde(rename = "ALB_TITLE")]
+    #[serde(default)]
+    pub title: String,
+    #[serde(rename = "ART_NAME")]
+    #[serde(default)]
+    pub artist: String,
+    #[serde(rename = "NUMBER_TRACK")]
+    #[serde(default)]
+    pub nb_tracks: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistData {
     #[serde(rename = "PLAYLIST_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
     pub playlist_id: String,
     #[serde(rename = "TITLE")]
+    #[serde(default)]
     pub title: String,
     #[serde(rename = "NB_SONG")]
     #[serde(default)]
     pub nb_songs: u64,
+    #[serde(rename = "PARENT_USERNAME")]
+    #[serde(default)]
+    pub author: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PodcastData {
+    #[serde(rename = "SHOW_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
+    pub show_id: String,
+    #[serde(rename = "SHOW_NAME")]
+    #[serde(default)]
+    pub name: String,
+    #[serde(rename = "SHOW_DESCRIPTION")]
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeData {
+    #[serde(rename = "EPISODE_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
+    pub episode_id: String,
+    #[serde(rename = "EPISODE_TITLE")]
+    #[serde(default)]
+    pub title: String,
+    #[serde(rename = "SHOW_NAME")]
+    #[serde(default)]
+    pub show_name: String,
+    #[serde(rename = "DURATION")]
+    #[serde(default)]
+    pub duration: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileData {
+    #[serde(rename = "USER_ID")]
+    #[serde(deserialize_with = "deserialize_string_or_number")]
+    pub user_id: u64,
+    #[serde(rename = "BLOG_NAME")]
+    #[serde(default)]
+    pub name: String,
+}
+
+/// A unified display item for rendering in tables.
+/// Adapts different Deezer data types into a common 4-column format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplayItem {
+    pub col1: String,
+    pub col2: String,
+    pub col3: String,
+    pub col4: String,
+    /// Original track data, if this item is playable.
+    pub track: Option<TrackData>,
+}
+
+impl DisplayItem {
+    pub fn from_track(track: &TrackData) -> Self {
+        let dur = track.duration_secs();
+        Self {
+            col1: track.title.clone(),
+            col2: track.artist.clone(),
+            col3: track.album.clone(),
+            col4: format!("{}:{:02}", dur / 60, dur % 60),
+            track: Some(track.clone()),
+        }
+    }
+
+    pub fn from_artist(artist: &ArtistData) -> Self {
+        Self {
+            col1: artist.name.clone(),
+            col2: format!("{} fans", format_number(artist.nb_fan)),
+            col3: String::new(),
+            col4: String::new(),
+            track: None,
+        }
+    }
+
+    pub fn from_album(album: &AlbumData) -> Self {
+        Self {
+            col1: album.title.clone(),
+            col2: album.artist.clone(),
+            col3: format!("{} titres", album.nb_tracks),
+            col4: String::new(),
+            track: None,
+        }
+    }
+
+    pub fn from_playlist(playlist: &PlaylistData) -> Self {
+        Self {
+            col1: playlist.title.clone(),
+            col2: playlist.author.clone(),
+            col3: format!("{} titres", playlist.nb_songs),
+            col4: String::new(),
+            track: None,
+        }
+    }
+
+    pub fn from_podcast(podcast: &PodcastData) -> Self {
+        Self {
+            col1: podcast.name.clone(),
+            col2: podcast.description.clone(),
+            col3: String::new(),
+            col4: String::new(),
+            track: None,
+        }
+    }
+
+    pub fn from_episode(episode: &EpisodeData) -> Self {
+        let dur: u64 = episode.duration.parse().unwrap_or(0);
+        Self {
+            col1: episode.title.clone(),
+            col2: episode.show_name.clone(),
+            col3: String::new(),
+            col4: format!("{}:{:02}", dur / 60, dur % 60),
+            track: None,
+        }
+    }
+
+    pub fn from_profile(profile: &ProfileData) -> Self {
+        Self {
+            col1: profile.name.clone(),
+            col2: String::new(),
+            col3: String::new(),
+            col4: String::new(),
+            track: None,
+        }
+    }
+}
+
+fn format_number(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
 
 /// Deezer sends numeric IDs as strings (e.g. "123456") or as integers (e.g. 0 for invalid).
@@ -180,4 +349,36 @@ where
     }
 
     deserializer.deserialize_any(StringOrNumber)
+}
+
+/// Deezer sends IDs as either strings or numbers. This always returns a String.
+fn deserialize_id_to_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct IdToString;
+
+    impl<'de> de::Visitor<'de> for IdToString {
+        type Value = String;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a string or number")
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
+            Ok(v.to_string())
+        }
+    }
+
+    deserializer.deserialize_any(IdToString)
 }
