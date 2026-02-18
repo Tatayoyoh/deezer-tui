@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -48,6 +48,22 @@ pub enum Command {
     PrevCategory,
     /// Play favorites in shuffle mode.
     ShuffleFavorites,
+    /// Add a track to favorites.
+    AddFavorite { track_id: String },
+    /// Remove a track from favorites.
+    RemoveFavorite { track_id: String },
+    /// Request the user's playlists (for playlist picker).
+    RequestPlaylists,
+    /// Add a track to a playlist.
+    AddToPlaylist { playlist_id: String, track_id: String },
+    /// Mark a track as disliked (don't recommend).
+    DislikeTrack { track_id: String },
+    /// Insert a track to play next in the queue.
+    PlayNext { track: TrackData },
+    /// Append a track to the end of the queue.
+    AddToQueue { track: TrackData },
+    /// Start a mix inspired by a track.
+    StartMix { track_id: String },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -243,6 +259,9 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
 
+    // Playlists (for playlist picker in popup menu)
+    pub playlists: Vec<PlaylistData>,
+
     // UI hints
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
@@ -275,6 +294,7 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            playlists: Vec::new(),
             status_msg: None,
             login_error: None,
             login_loading: false,

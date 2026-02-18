@@ -6,7 +6,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::api::DeezerClient;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
@@ -37,6 +37,17 @@ enum AsyncResult {
         quality: AudioQuality,
     },
     TrackFetchError(String),
+    FavoriteAdded(String),
+    FavoriteRemoved(String),
+    FavoriteError(String),
+    PlaylistsReady(Vec<PlaylistData>),
+    PlaylistsError(String),
+    AddedToPlaylist(String),
+    AddToPlaylistError(String),
+    DislikeOk,
+    DislikeError(String),
+    MixReady(Vec<TrackData>),
+    MixError(String),
 }
 
 pub struct Daemon {
@@ -64,6 +75,9 @@ pub struct Daemon {
     favorites_loading: bool,
     favorites_category: FavoritesCategory,
     favorites_display: Vec<DisplayItem>,
+
+    // Playlists (for popup menu playlist picker)
+    playlists: Vec<PlaylistData>,
 
     // Player
     player_state: Arc<Mutex<PlayerState>>,
@@ -114,6 +128,8 @@ impl Daemon {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+
+            playlists: Vec::new(),
 
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
@@ -444,6 +460,41 @@ impl Daemon {
                     }
                 }
             }
+            Command::AddFavorite { track_id } => {
+                self.start_add_favorite(track_id);
+            }
+            Command::RemoveFavorite { track_id } => {
+                self.start_remove_favorite(track_id);
+            }
+            Command::RequestPlaylists => {
+                self.start_load_playlists();
+            }
+            Command::AddToPlaylist { playlist_id, track_id } => {
+                self.start_add_to_playlist(playlist_id, track_id);
+            }
+            Command::DislikeTrack { track_id } => {
+                self.start_dislike_track(track_id);
+            }
+            Command::PlayNext { track } => {
+                if let Ok(mut state) = self.player_state.lock() {
+                    let insert_idx = state.queue_index + 1;
+                    if insert_idx <= state.queue.len() {
+                        state.queue.insert(insert_idx, track.clone());
+                    } else {
+                        state.queue.push(track.clone());
+                    }
+                }
+                self.status_msg = Some(format!("\"{}\" will play next", track.title));
+            }
+            Command::AddToQueue { track } => {
+                if let Ok(mut state) = self.player_state.lock() {
+                    state.queue.push(track.clone());
+                }
+                self.status_msg = Some(format!("\"{}\" added to queue", track.title));
+            }
+            Command::StartMix { track_id } => {
+                self.start_mix(track_id);
+            }
             Command::Shutdown => {
                 // Handled in the main loop
             }
@@ -475,6 +526,7 @@ impl Daemon {
             favorites_loading: self.favorites_loading,
             favorites_category: self.favorites_category,
             favorites_display: self.favorites_display.clone(),
+            playlists: self.playlists.clone(),
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
@@ -667,6 +719,79 @@ impl Daemon {
         }
     }
 
+    fn start_add_favorite(&mut self, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.add_favorite(&track_id).await {
+                Ok(()) => { let _ = tx.send(AsyncResult::FavoriteAdded(track_id)); }
+                Err(e) => { let _ = tx.send(AsyncResult::FavoriteError(e.to_string())); }
+            }
+        });
+    }
+
+    fn start_remove_favorite(&mut self, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.remove_favorite(&track_id).await {
+                Ok(()) => { let _ = tx.send(AsyncResult::FavoriteRemoved(track_id)); }
+                Err(e) => { let _ = tx.send(AsyncResult::FavoriteError(e.to_string())); }
+            }
+        });
+    }
+
+    fn start_load_playlists(&mut self) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_user_playlists_raw().await {
+                Ok(playlists) => { let _ = tx.send(AsyncResult::PlaylistsReady(playlists)); }
+                Err(e) => { let _ = tx.send(AsyncResult::PlaylistsError(e.to_string())); }
+            }
+        });
+    }
+
+    fn start_add_to_playlist(&mut self, playlist_id: String, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.add_to_playlist(&playlist_id, &[track_id.as_str()]).await {
+                Ok(()) => { let _ = tx.send(AsyncResult::AddedToPlaylist(playlist_id)); }
+                Err(e) => { let _ = tx.send(AsyncResult::AddToPlaylistError(e.to_string())); }
+            }
+        });
+    }
+
+    fn start_dislike_track(&mut self, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.dislike_track(&track_id).await {
+                Ok(()) => { let _ = tx.send(AsyncResult::DislikeOk); }
+                Err(e) => { let _ = tx.send(AsyncResult::DislikeError(e.to_string())); }
+            }
+        });
+    }
+
+    fn start_mix(&mut self, track_id: String) {
+        self.status_msg = Some("Loading mix...".into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_smart_radio(&track_id).await {
+                Ok(tracks) => { let _ = tx.send(AsyncResult::MixReady(tracks)); }
+                Err(e) => { let _ = tx.send(AsyncResult::MixError(e.to_string())); }
+            }
+        });
+    }
+
     fn start_play_track(&mut self, track: TrackData) {
         let Some(master_key) = self.master_key else {
             self.status_msg = Some("Player not ready yet".into());
@@ -844,6 +969,53 @@ impl Daemon {
                     self.favorites.clear();
                     self.favorites_selected = 0;
                     self.status_msg = Some(format!("Favorites error: {err}"));
+                }
+                AsyncResult::FavoriteAdded(_track_id) => {
+                    self.status_msg = Some("Added to favorites".into());
+                    // Reload favorites to reflect the change
+                    self.start_load_favorites();
+                }
+                AsyncResult::FavoriteRemoved(_track_id) => {
+                    self.status_msg = Some("Removed from favorites".into());
+                    self.start_load_favorites();
+                }
+                AsyncResult::FavoriteError(err) => {
+                    self.status_msg = Some(format!("Favorite error: {err}"));
+                }
+                AsyncResult::PlaylistsReady(playlists) => {
+                    self.playlists = playlists;
+                    self.status_msg = Some(format!("{} playlists loaded", self.playlists.len()));
+                }
+                AsyncResult::PlaylistsError(err) => {
+                    self.status_msg = Some(format!("Playlists error: {err}"));
+                }
+                AsyncResult::AddedToPlaylist(_playlist_id) => {
+                    self.status_msg = Some("Added to playlist".into());
+                }
+                AsyncResult::AddToPlaylistError(err) => {
+                    self.status_msg = Some(format!("Add to playlist error: {err}"));
+                }
+                AsyncResult::DislikeOk => {
+                    self.status_msg = Some("Track marked as disliked".into());
+                }
+                AsyncResult::DislikeError(err) => {
+                    self.status_msg = Some(format!("Dislike error: {err}"));
+                }
+                AsyncResult::MixReady(tracks) => {
+                    if tracks.is_empty() {
+                        self.status_msg = Some("No mix tracks found".into());
+                    } else {
+                        self.status_msg = Some(format!("Mix: {} tracks", tracks.len()));
+                        let first = tracks[0].clone();
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = 0;
+                        }
+                        self.start_play_track(first);
+                    }
+                }
+                AsyncResult::MixError(err) => {
+                    self.status_msg = Some(format!("Mix error: {err}"));
                 }
                 AsyncResult::TrackReady {
                     audio_data,

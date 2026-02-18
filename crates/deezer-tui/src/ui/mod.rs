@@ -3,6 +3,7 @@ pub mod downloads;
 pub mod favorites;
 pub mod login;
 pub mod player;
+pub mod popup;
 pub mod radio;
 pub mod search;
 
@@ -48,6 +49,9 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
 
     // Player bar
     player::draw(frame, view, chunks[2]);
+
+    // Popup overlay (drawn on top of everything)
+    popup::draw(frame, view);
 }
 
 fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {

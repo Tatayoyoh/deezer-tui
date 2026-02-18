@@ -8,6 +8,7 @@ impl Theme {
     pub const PRIMARY: Color = Color::Rgb(162, 0, 255);      // Deezer purple
     pub const SECONDARY: Color = Color::Rgb(239, 84, 105);   // Deezer pink/coral
     pub const ACCENT: Color = Color::Rgb(40, 40, 40);        // Dark background accent
+    pub const SUCCESS: Color = Color::Rgb(0, 204, 0);        // Dark background accent
 
     // UI colors
     pub const BG: Color = Color::Rgb(18, 18, 18);            // Near-black background
