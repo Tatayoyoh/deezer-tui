@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
@@ -13,7 +13,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tracing::debug;
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, TrackData};
+use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::protocol::{
@@ -38,6 +38,133 @@ pub enum LoginMode {
     Button,
     /// ARL text input (Enter = submit ARL, Esc = back to Button).
     ArlInput,
+}
+
+// --- Popup menu types ---
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PopupAction {
+    Header,
+    ToggleFavorite,
+    AddToPlaylist,
+    DislikeTrack,
+    PlayNext,
+    AddToQueue,
+    MixFromTrack,
+    Share,
+    TrackInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct PopupMenuItem {
+    pub label: String,
+    pub action: PopupAction,
+    pub is_header: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum SubMenu {
+    PlaylistPicker {
+        playlists: Vec<PlaylistData>,
+        selected: usize,
+        loading: bool,
+    },
+    TrackInfo,
+}
+
+#[derive(Debug, Clone)]
+pub struct PopupMenu {
+    pub title: Option<String>,
+    pub items: Vec<PopupMenuItem>,
+    pub selected: usize,
+    pub track: TrackData,
+    pub is_favorite: bool,
+    pub sub_menu: Option<SubMenu>,
+}
+
+impl PopupMenu {
+    /// Build the full menu (for `m` key on a selected track in a list).
+    fn full(track: TrackData, is_favorite: bool) -> Self {
+        let fav_label = if is_favorite {
+            "Remove from favorites"
+        } else {
+            "Add to favorites"
+        };
+        let items = vec![
+            PopupMenuItem { label: "── Manage ──".into(), action: PopupAction::Header, is_header: true },
+            PopupMenuItem { label: fav_label.into(), action: PopupAction::ToggleFavorite, is_header: false },
+            PopupMenuItem { label: "Add to playlist".into(), action: PopupAction::AddToPlaylist, is_header: false },
+            PopupMenuItem { label: "Don't recommend this track".into(), action: PopupAction::DislikeTrack, is_header: false },
+            PopupMenuItem { label: "── Playback ──".into(), action: PopupAction::Header, is_header: true },
+            PopupMenuItem { label: "Play next".into(), action: PopupAction::PlayNext, is_header: false },
+            PopupMenuItem { label: "Add to queue".into(), action: PopupAction::AddToQueue, is_header: false },
+            PopupMenuItem { label: "Mix inspired by this track".into(), action: PopupAction::MixFromTrack, is_header: false },
+            PopupMenuItem { label: "── Media ──".into(), action: PopupAction::Header, is_header: true },
+            PopupMenuItem { label: "Share".into(), action: PopupAction::Share, is_header: false },
+            PopupMenuItem { label: "Track info".into(), action: PopupAction::TrackInfo, is_header: false },
+        ];
+        Self {
+            title: None,
+            items,
+            selected: 1, // First selectable item
+            track,
+            is_favorite,
+            sub_menu: None,
+        }
+    }
+
+    /// Build the manage-only menu (for `Ctrl+P` on currently playing track).
+    fn manage_only(track: TrackData, is_favorite: bool) -> Self {
+        let fav_label = if is_favorite {
+            "Remove from favorites"
+        } else {
+            "Add to favorites"
+        };
+        let title = format!("{} — {}", track.title, track.artist);
+        let items = vec![
+            PopupMenuItem { label: "── Manage ──".into(), action: PopupAction::Header, is_header: true },
+            PopupMenuItem { label: fav_label.into(), action: PopupAction::ToggleFavorite, is_header: false },
+            PopupMenuItem { label: "Add to playlist".into(), action: PopupAction::AddToPlaylist, is_header: false },
+            PopupMenuItem { label: "Don't recommend this track".into(), action: PopupAction::DislikeTrack, is_header: false },
+        ];
+        Self {
+            title: Some(title),
+            items,
+            selected: 1,
+            track,
+            is_favorite,
+            sub_menu: None,
+        }
+    }
+
+    /// Move selection to next selectable item.
+    fn select_next(&mut self) {
+        let len = self.items.len();
+        let mut next = self.selected + 1;
+        for _ in 0..len {
+            if next >= len {
+                next = 0;
+            }
+            if !self.items[next].is_header {
+                self.selected = next;
+                return;
+            }
+            next += 1;
+        }
+    }
+
+    /// Move selection to previous selectable item.
+    fn select_prev(&mut self) {
+        let len = self.items.len();
+        let mut prev = if self.selected == 0 { len - 1 } else { self.selected - 1 };
+        for _ in 0..len {
+            if !self.items[prev].is_header {
+                self.selected = prev;
+                return;
+            }
+            prev = if prev == 0 { len - 1 } else { prev - 1 };
+        }
+    }
 }
 
 /// View state used by UI rendering functions.
@@ -66,6 +193,7 @@ pub struct ViewState {
     pub favorites_loading: bool,
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
+    pub playlists: Vec<PlaylistData>,
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
     pub login_loading: bool,
@@ -77,9 +205,33 @@ pub struct ViewState {
     pub login_mode: LoginMode,
     pub login_input: String,
     pub login_cursor: usize,
+    pub popup: Option<PopupMenu>,
+    pub toast: Option<Toast>,
 
     /// Button area set by the UI draw pass, used for mouse hit-testing.
     pub login_button_area: Cell<Option<Rect>>,
+}
+
+/// A temporary notification message that auto-dismisses.
+#[derive(Debug, Clone)]
+pub struct Toast {
+    pub message: String,
+    pub created_at: Instant,
+    pub duration: Duration,
+}
+
+impl Toast {
+    pub fn new(message: String, duration: Duration) -> Self {
+        Self {
+            message,
+            created_at: Instant::now(),
+            duration,
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed() >= self.duration
+    }
 }
 
 impl ViewState {
@@ -107,6 +259,7 @@ impl ViewState {
             favorites_loading: snap.favorites_loading,
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
+            playlists: snap.playlists.clone(),
             status_msg: snap.status_msg.clone(),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
@@ -117,6 +270,8 @@ impl ViewState {
             login_mode: LoginMode::Button,
             login_input: String::new(),
             login_cursor: 0,
+            popup: None,
+            toast: None,
             login_button_area: Cell::new(None),
         }
     }
@@ -152,10 +307,28 @@ impl ViewState {
         self.login_loading = snap.login_loading;
         self.user_name = snap.user_name;
 
+        // Update playlists and sync into popup if playlist picker is loading
+        if !snap.playlists.is_empty() {
+            self.playlists = snap.playlists;
+            if let Some(ref mut popup) = self.popup {
+                if let Some(SubMenu::PlaylistPicker { ref mut playlists, ref mut loading, .. }) = popup.sub_menu {
+                    if *loading {
+                        *playlists = self.playlists.clone();
+                        *loading = false;
+                    }
+                }
+            }
+        }
+
         // After login transition (Login → Main), reset typing mode
         if prev_screen == Screen::Login && self.screen == Screen::Main {
             self.input_mode = InputMode::Normal;
         }
+    }
+
+    /// Check if a track is in the user's favorites.
+    fn is_track_favorite(&self, track_id: &str) -> bool {
+        self.favorites.iter().any(|t| t.track_id == track_id)
     }
 
     /// Progress ratio for the progress bar.
@@ -227,6 +400,11 @@ impl Client {
         let mut send_shutdown = false;
 
         while running {
+            // Clear expired toast
+            if self.view.toast.as_ref().is_some_and(|t| t.is_expired()) {
+                self.view.toast = None;
+            }
+
             terminal.draw(|frame| {
                 ui::draw(frame, &self.view);
             })?;
@@ -255,6 +433,11 @@ impl Client {
                     }
                     KeyAction::SendCommand(cmd) => {
                         self.send_cmd(&cmd).await?;
+                    }
+                    KeyAction::MultiCommand(cmds) => {
+                        for cmd in &cmds {
+                            self.send_cmd(cmd).await?;
+                        }
                     }
                     KeyAction::WebLogin => {
                         // Suspend TUI
@@ -414,6 +597,11 @@ impl Client {
     }
 
     fn handle_main_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Popup mode — intercept all keys
+        if self.view.popup.is_some() {
+            return self.handle_popup_key(key);
+        }
+
         // Typing mode (search input)
         if self.view.input_mode == InputMode::Typing {
             match key.code {
@@ -442,6 +630,15 @@ impl Client {
             }
         }
 
+        // Ctrl+P: open manage popup for currently playing track
+        if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(ref track) = self.view.current_track {
+                let is_fav = self.view.is_track_favorite(&track.track_id);
+                self.view.popup = Some(PopupMenu::manage_only(track.clone(), is_fav));
+            }
+            return KeyAction::Continue;
+        }
+
         // Normal mode
         match key.code {
             KeyCode::Char('q') => KeyAction::Quit,
@@ -456,6 +653,12 @@ impl Client {
                     self.view.input_mode = InputMode::Typing;
                     self.view.search_input.clear();
                 }
+                KeyAction::Continue
+            }
+
+            // Open track context menu
+            KeyCode::Char('m') => {
+                self.open_track_popup();
                 KeyAction::Continue
             }
 
@@ -521,6 +724,188 @@ impl Client {
         }
     }
 
+    /// Open the full track context menu for the selected track in the current list.
+    fn open_track_popup(&mut self) {
+        let track = match self.view.active_tab {
+            ActiveTab::Search => {
+                self.view.search_display
+                    .get(self.view.search_selected)
+                    .and_then(|d| d.track.clone())
+            }
+            ActiveTab::Favorites => {
+                self.view.favorites_display
+                    .get(self.view.favorites_selected)
+                    .and_then(|d| d.track.clone())
+            }
+            _ => None,
+        };
+
+        if let Some(track) = track {
+            let is_fav = self.view.is_track_favorite(&track.track_id);
+            self.view.popup = Some(PopupMenu::full(track, is_fav));
+        }
+    }
+
+    /// Handle key events when a popup menu is open.
+    fn handle_popup_key(&mut self, key: KeyEvent) -> KeyAction {
+        let popup = self.view.popup.as_mut().unwrap();
+
+        // Handle playlist picker sub-menu
+        if let Some(ref mut sub) = popup.sub_menu {
+            match sub {
+                SubMenu::PlaylistPicker { playlists, selected, loading } => {
+                    if *loading {
+                        if key.code == KeyCode::Esc {
+                            popup.sub_menu = None;
+                        }
+                        return KeyAction::Continue;
+                    }
+                    match key.code {
+                        KeyCode::Esc => {
+                            popup.sub_menu = None;
+                            return KeyAction::Continue;
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            *selected = selected.saturating_sub(1);
+                            return KeyAction::Continue;
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if !playlists.is_empty() {
+                                *selected = (*selected + 1).min(playlists.len() - 1);
+                            }
+                            return KeyAction::Continue;
+                        }
+                        KeyCode::Enter => {
+                            if let Some(pl) = playlists.get(*selected) {
+                                let cmd = Command::AddToPlaylist {
+                                    playlist_id: pl.playlist_id.clone(),
+                                    track_id: popup.track.track_id.clone(),
+                                };
+                                self.view.popup = None;
+                                return KeyAction::SendCommand(cmd);
+                            }
+                            return KeyAction::Continue;
+                        }
+                        _ => return KeyAction::Continue,
+                    }
+                }
+                SubMenu::TrackInfo => {
+                    if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+                        self.view.popup = None;
+                    }
+                    return KeyAction::Continue;
+                }
+            }
+        }
+
+        // Main popup menu navigation
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.view.popup = None;
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                popup.select_prev();
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                popup.select_next();
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                let action = popup.items[popup.selected].action.clone();
+                self.execute_popup_action(action)
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Execute a popup menu action.
+    fn execute_popup_action(&mut self, action: PopupAction) -> KeyAction {
+        let popup = self.view.popup.as_ref().unwrap();
+        let track = popup.track.clone();
+        let is_favorite = popup.is_favorite;
+
+        match action {
+            PopupAction::Header => KeyAction::Continue,
+            PopupAction::ToggleFavorite => {
+                let cmd = if is_favorite {
+                    Command::RemoveFavorite { track_id: track.track_id }
+                } else {
+                    Command::AddFavorite { track_id: track.track_id }
+                };
+                self.view.popup = None;
+                KeyAction::SendCommand(cmd)
+            }
+            PopupAction::AddToPlaylist => {
+                // Open playlist picker sub-menu
+                if self.view.playlists.is_empty() {
+                    // Request playlists from daemon and show loading
+                    if let Some(ref mut popup) = self.view.popup {
+                        popup.sub_menu = Some(SubMenu::PlaylistPicker {
+                            playlists: Vec::new(),
+                            selected: 0,
+                            loading: true,
+                        });
+                    }
+                    KeyAction::SendCommand(Command::RequestPlaylists)
+                } else {
+                    // Playlists already loaded
+                    let playlists = self.view.playlists.clone();
+                    if let Some(ref mut popup) = self.view.popup {
+                        popup.sub_menu = Some(SubMenu::PlaylistPicker {
+                            playlists,
+                            selected: 0,
+                            loading: false,
+                        });
+                    }
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::DislikeTrack => {
+                self.view.popup = None;
+                KeyAction::SendCommand(Command::DislikeTrack { track_id: track.track_id })
+            }
+            PopupAction::PlayNext => {
+                self.view.popup = None;
+                KeyAction::SendCommand(Command::PlayNext { track })
+            }
+            PopupAction::AddToQueue => {
+                self.view.popup = None;
+                KeyAction::SendCommand(Command::AddToQueue { track })
+            }
+            PopupAction::MixFromTrack => {
+                self.view.popup = None;
+                KeyAction::SendCommand(Command::StartMix { track_id: track.track_id })
+            }
+            PopupAction::Share => {
+                let url = format!("https://www.deezer.com/track/{}", track.track_id);
+                match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
+                    Ok(()) => {
+                        self.view.toast = Some(Toast::new(
+                            "Link copied to clipboard!".into(),
+                            Duration::from_secs(2),
+                        ));
+                    }
+                    Err(e) => {
+                        self.view.toast = Some(Toast::new(
+                            format!("Clipboard error: {e}"),
+                            Duration::from_secs(3),
+                        ));
+                    }
+                }
+                self.view.popup = None;
+                KeyAction::Continue
+            }
+            PopupAction::TrackInfo => {
+                if let Some(ref mut popup) = self.view.popup {
+                    popup.sub_menu = Some(SubMenu::TrackInfo);
+                }
+                KeyAction::Continue
+            }
+        }
+    }
+
     fn handle_mouse_click(&mut self, col: u16, row: u16) -> Option<KeyAction> {
         // Only handle clicks on the login button
         if self.view.screen == Screen::Login
@@ -547,6 +932,9 @@ enum KeyAction {
     Continue,
     /// Send a command to the daemon.
     SendCommand(Command),
+    /// Send multiple commands to the daemon.
+    #[allow(dead_code)]
+    MultiCommand(Vec<Command>),
     /// Quit: send shutdown to daemon and exit.
     Quit,
     /// Detach: exit client but keep daemon running (Ctrl+Z / Ctrl+C).

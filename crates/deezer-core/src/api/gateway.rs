@@ -333,6 +333,80 @@ impl DeezerClient {
             .map_err(|e| DeezerError::Api(format!("Failed to parse following: {e}")))?;
         Ok(profiles.iter().map(DisplayItem::from_profile).collect())
     }
+
+    /// Add a track to the user's favorites.
+    pub async fn add_favorite(&self, song_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "SNG_ID": song_id });
+        self.gw_call("favorite_song.add", params).await?;
+        Ok(())
+    }
+
+    /// Remove a track from the user's favorites.
+    pub async fn remove_favorite(&self, song_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "SNG_ID": song_id });
+        self.gw_call("favorite_song.remove", params).await?;
+        Ok(())
+    }
+
+    /// Add tracks to a playlist.
+    pub async fn add_to_playlist(
+        &self,
+        playlist_id: &str,
+        song_ids: &[&str],
+    ) -> Result<(), DeezerError> {
+        let songs: Vec<serde_json::Value> = song_ids
+            .iter()
+            .map(|id| json!([id, 0]))
+            .collect();
+        let params = json!({
+            "playlist_id": playlist_id,
+            "songs": songs,
+        });
+        self.gw_call("playlist.addSongs", params).await?;
+        Ok(())
+    }
+
+    /// Mark a track as disliked (don't recommend).
+    pub async fn dislike_track(&self, song_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "SNG_ID": song_id });
+        self.gw_call("song.dislike", params).await?;
+        Ok(())
+    }
+
+    /// Get user playlists as raw PlaylistData (for playlist picker).
+    pub async fn get_user_playlists_raw(&self) -> Result<Vec<PlaylistData>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({
+            "user_id": session.user_id,
+            "start": 0,
+            "nb": 2000,
+        });
+
+        let results = self.gw_call("playlist.getList", params).await?;
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in playlists".into()))?;
+
+        serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))
+    }
+
+    /// Get a smart radio mix inspired by a track.
+    pub async fn get_smart_radio(&self, song_id: &str) -> Result<Vec<TrackData>, DeezerError> {
+        let params = json!({ "SNG_ID": song_id });
+        let results = self.gw_call("song.getSearchTrackMix", params).await?;
+
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in smart radio response".into()))?;
+
+        serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse smart radio: {e}")))
+    }
 }
 
 /// Parse a search section's "data" array into a typed vec.
