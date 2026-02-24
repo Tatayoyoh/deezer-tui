@@ -13,7 +13,7 @@ Planned :
 ✅ background player, still playeing music
 ✅ login from browser/deezer.com link/backlink
 🔄 search and favorites categories
-* track context menus
+✅ track context menus
     [Gérer]
     * Ajouter aux favoris (ou enlever des favoris)
     * Ajouter à une playlist
@@ -25,6 +25,7 @@ Planned :
     [Média]
     * Partager
     * informations
+	* Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui)
 * Artist page (or popup) when entering an artiste
 * Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung
 * better UI
