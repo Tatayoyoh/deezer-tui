@@ -1,4 +1,4 @@
-# Fanfare TUI
+# Deezer TUI
 
 Bored to use 300M of RAM to play music ?
 
@@ -10,10 +10,10 @@ Available :
 * Deezer
 
 Planned :
-✅ background player, still playeing music
-✅ login from browser/deezer.com link/backlink
-🔄 search and favorites categories
-✅ track context menus
+* ✅ background player, still playeing music
+* ✅ login from browser/deezer.com link/backlink
+* 🔄 search and favorites categories
+* ✅ track context menus
     [Gérer]
     * Ajouter aux favoris (ou enlever des favoris)
     * Ajouter à une playlist
@@ -28,10 +28,15 @@ Planned :
 	* Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui)
 * Artist page (or popup) when entering an artiste
 * Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung
-✅ shortcut modal
+* ✅ shortcut modal
 * better UI
 * better shortcuts
-✅ Themes
+* Coninuours Integration
+* Parameters
+* Displayed sections
+* ✅ Themes
+
+Maybe in futur :
 * Spotify
 * Youtube
 * SoundCloud
