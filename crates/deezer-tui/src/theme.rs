@@ -193,6 +193,15 @@ impl Theme {
         }
     }
 
+    /// Darkened backdrop color for modal overlays (simulates transparency).
+    pub fn backdrop() -> Color {
+        // Halve each RGB channel of bg() to create a dimming effect
+        match Self::bg() {
+            Color::Rgb(r, g, b) => Color::Rgb(r / 2, g / 2, b / 2),
+            other => other,
+        }
+    }
+
     pub fn border_focused_color() -> Color {
         Self::primary()
     }

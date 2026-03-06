@@ -8,7 +8,7 @@ pub mod radio;
 pub mod search;
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Tabs};
+use ratatui::widgets::{Block, Borders, Clear, Tabs};
 
 use crate::client::ViewState;
 use crate::protocol::{ActiveTab, Screen};
@@ -25,6 +25,13 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
 /// Draw the main screen with tabs + content + player bar.
 fn draw_main(frame: &mut Frame, view: &ViewState) {
     let area = frame.area();
+
+    // Full-screen themed background
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(Theme::bg())),
+        area,
+    );
 
     // Layout: tabs (3 lines) | content (fill) | player bar (4 lines)
     let chunks = Layout::default()
