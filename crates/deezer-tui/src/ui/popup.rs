@@ -11,6 +11,13 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
         draw_toast(frame, &toast.message);
     }
 
+    let has_modal = view.overlay.is_some() || view.popup.is_some();
+
+    // Dim backdrop behind modals
+    if has_modal {
+        draw_backdrop(frame);
+    }
+
     // Overlays take priority over track popups
     match &view.overlay {
         Some(Overlay::Help) => {
@@ -62,6 +69,7 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(title)
         .title_style(Theme::title());
 
@@ -112,6 +120,7 @@ fn draw_playlist_picker(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(format!(" Add \"{}\" to playlist ", track_title))
         .title_style(Theme::title());
 
@@ -156,6 +165,7 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(" Track Info ")
         .title_style(Theme::title());
 
@@ -230,6 +240,7 @@ fn draw_help_overlay(frame: &mut Frame) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(" Keyboard Shortcuts ")
         .title_style(Theme::title());
 
@@ -263,6 +274,7 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(" Settings ")
         .title_style(Theme::title());
 
@@ -300,6 +312,7 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
         .title(" Themes ")
         .title_style(Theme::title());
 
@@ -357,6 +370,13 @@ fn draw_toast(frame: &mut Frame, message: &str) {
         .style(Theme::text())
         .alignment(Alignment::Center);
     frame.render_widget(text, inner);
+}
+
+/// Render a dimmed full-screen backdrop behind modals.
+fn draw_backdrop(frame: &mut Frame) {
+    let area = frame.area();
+    let backdrop = Block::default().style(Style::default().bg(Theme::backdrop()));
+    frame.render_widget(backdrop, area);
 }
 
 /// Create a centered rectangle with a given percentage width and fixed height.
