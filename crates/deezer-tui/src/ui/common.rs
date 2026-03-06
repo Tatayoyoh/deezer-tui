@@ -9,23 +9,23 @@ pub fn deezer_logo() -> Paragraph<'static> {
     let logo = vec![
         Line::from(Span::styled(
             r"  ____                                   ",
-            Style::default().fg(Theme::PRIMARY),
+            Style::default().fg(Theme::primary()),
         )),
         Line::from(Span::styled(
             r" |  _ \  ___  ___ _______ _ __           ",
-            Style::default().fg(Theme::PRIMARY),
+            Style::default().fg(Theme::primary()),
         )),
         Line::from(Span::styled(
             r" | | | |/ _ \/ _ \_  / _ \ '__|          ",
-            Style::default().fg(Theme::PRIMARY),
+            Style::default().fg(Theme::primary()),
         )),
         Line::from(Span::styled(
             r" | |_| |  __/  __// /  __/ |             ",
-            Style::default().fg(Theme::SECONDARY),
+            Style::default().fg(Theme::secondary()),
         )),
         Line::from(Span::styled(
             r" |____/ \___|\___/___\___|_|  TUI        ",
-            Style::default().fg(Theme::SECONDARY),
+            Style::default().fg(Theme::secondary()),
         )),
     ];
 

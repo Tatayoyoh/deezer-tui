@@ -18,6 +18,8 @@ pub struct Config {
     pub quality: AudioQuality,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 fn default_quality() -> AudioQuality {
@@ -34,6 +36,7 @@ impl Default for Config {
             arl: None,
             quality: default_quality(),
             volume: default_volume(),
+            theme: None,
         }
     }
 }

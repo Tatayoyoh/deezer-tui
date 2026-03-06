@@ -28,9 +28,10 @@ Planned :
 	* Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui)
 * Artist page (or popup) when entering an artiste
 * Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung
+✅ shortcut modal
 * better UI
 * better shortcuts
-* Themes
+✅ Themes
 * Spotify
 * Youtube
 * SoundCloud
