@@ -1,0 +1,260 @@
+version: 2.1
+
+executors:
+  linux:
+    docker:
+      - image: cimg/rust:1.75
+    resource_class: medium
+
+  linux-arm:
+    machine:
+      image: ubuntu-2204:current
+    resource_class: arm.medium
+
+  macos:
+    macos:
+      xcode: "15.4.0"
+    resource_class: macos.m1.medium.gen1
+
+  windows:
+    machine:
+      image: windows-server-2022-gui:current
+    resource_class: windows.medium
+    shell: powershell.exe -ExecutionPolicy Bypass
+
+commands:
+  install-rust-unix:
+    description: Install Rust via rustup
+    steps:
+      - run:
+          name: Install Rust
+          command: |
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.75.0
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
+
+  install-rust-windows:
+    description: Install Rust via rustup (Windows)
+    steps:
+      - run:
+          name: Install Rust
+          command: |
+            Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
+            .\rustup-init.exe -y --default-toolchain 1.75.0
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+            [Environment]::SetEnvironmentVariable("PATH", $env:PATH, "User")
+
+  save-cargo-cache:
+    steps:
+      - save_cache:
+          key: cargo-{{ arch }}-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo/registry
+            - ~/.cargo/git
+            - target
+
+  restore-cargo-cache:
+    steps:
+      - restore_cache:
+          keys:
+            - cargo-{{ arch }}-{{ checksum "Cargo.lock" }}
+            - cargo-{{ arch }}-
+
+jobs:
+  # ── CI: runs on every push to main ──────────────────────────
+  test:
+    executor: linux
+    steps:
+      - checkout
+      - restore-cargo-cache
+      - run:
+          name: Install ALSA dev headers
+          command: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run:
+          name: Check formatting
+          command: cargo fmt --check
+      - run:
+          name: Clippy
+          command: cargo clippy -- -D warnings || true
+      - run:
+          name: Build
+          command: cargo build --release
+      - run:
+          name: Test
+          command: cargo test --release
+      - save-cargo-cache
+
+  # ── Release builds: only on tags ────────────────────────────
+  build-linux-x86_64:
+    executor: linux
+    steps:
+      - checkout
+      - restore-cargo-cache
+      - run:
+          name: Install ALSA dev headers
+          command: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run:
+          name: Build release binary
+          command: cargo build --release
+      - run:
+          name: Package artifact
+          command: |
+            mkdir -p artifacts
+            cp target/release/deezer-tui artifacts/deezer-tui-linux-x86_64
+            chmod +x artifacts/deezer-tui-linux-x86_64
+      - save-cargo-cache
+      - persist_to_workspace:
+          root: artifacts
+          paths: ["*"]
+
+  build-linux-aarch64:
+    executor: linux-arm
+    steps:
+      - checkout
+      - install-rust-unix
+      - restore-cargo-cache
+      - run:
+          name: Install ALSA dev headers
+          command: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - run:
+          name: Build release binary
+          command: cargo build --release
+      - run:
+          name: Package artifact
+          command: |
+            mkdir -p artifacts
+            cp target/release/deezer-tui artifacts/deezer-tui-linux-aarch64
+            chmod +x artifacts/deezer-tui-linux-aarch64
+      - save-cargo-cache
+      - persist_to_workspace:
+          root: artifacts
+          paths: ["*"]
+
+  build-macos:
+    executor: macos
+    steps:
+      - checkout
+      - install-rust-unix
+      - run:
+          name: Add x86_64 target for universal binary
+          command: rustup target add x86_64-apple-darwin
+      - restore-cargo-cache
+      - run:
+          name: Build aarch64 (native)
+          command: cargo build --release --target aarch64-apple-darwin
+      - run:
+          name: Build x86_64 (cross)
+          command: cargo build --release --target x86_64-apple-darwin
+      - run:
+          name: Create universal binary
+          command: |
+            mkdir -p artifacts
+            lipo -create \
+              target/aarch64-apple-darwin/release/deezer-tui \
+              target/x86_64-apple-darwin/release/deezer-tui \
+              -output artifacts/deezer-tui-macos-universal
+            chmod +x artifacts/deezer-tui-macos-universal
+      - save-cargo-cache
+      - persist_to_workspace:
+          root: artifacts
+          paths: ["*"]
+
+  build-windows:
+    executor: windows
+    steps:
+      - checkout
+      - install-rust-windows
+      - restore-cargo-cache
+      - run:
+          name: Build release binary
+          command: |
+            $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
+            cargo build --release
+      - run:
+          name: Package artifact
+          command: |
+            New-Item -ItemType Directory -Force -Path artifacts
+            Copy-Item target\release\deezer-tui.exe artifacts\deezer-tui-windows-x86_64.exe
+      - save-cargo-cache
+      - persist_to_workspace:
+          root: artifacts
+          paths: ["*"]
+
+  # ── Create GitHub release ───────────────────────────────────
+  release:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - run:
+          name: Install GitHub CLI
+          command: |
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] \
+              https://cli.github.com/packages stable main" \
+              | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+            sudo apt-get update && sudo apt-get install -y gh
+      - attach_workspace:
+          at: /tmp/artifacts
+      - run:
+          name: Create GitHub Release
+          command: |
+            TAG="${CIRCLE_TAG}"
+            echo "Creating release for tag: ${TAG}"
+            ls -la /tmp/artifacts/
+
+            gh release create "${TAG}" \
+              --repo "${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}" \
+              --title "deezer-tui ${TAG}" \
+              --generate-notes \
+              /tmp/artifacts/deezer-tui-linux-x86_64 \
+              /tmp/artifacts/deezer-tui-linux-aarch64 \
+              /tmp/artifacts/deezer-tui-macos-universal \
+              /tmp/artifacts/deezer-tui-windows-x86_64.exe
+
+workflows:
+  # CI on every push to main
+  ci:
+    jobs:
+      - test:
+          filters:
+            branches:
+              only: main
+
+  # Build + release on version tags
+  release:
+    jobs:
+      - build-linux-x86_64:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-linux-aarch64:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-macos:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - build-windows:
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
+      - release:
+          requires:
+            - build-linux-x86_64
+            - build-linux-aarch64
+            - build-macos
+            - build-windows
+          filters:
+            tags:
+              only: /^v.*/
+            branches:
+              ignore: /.*/
