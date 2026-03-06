@@ -11,7 +11,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
     // Full-screen dark background
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Block::default().style(Style::default().bg(Theme::BG)),
+        Block::default().style(Style::default().bg(Theme::bg())),
         area,
     );
 
@@ -70,11 +70,11 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     };
 
     let button_style = if view.login_loading {
-        Style::default().fg(Theme::BG).bg(Color::Rgb(100, 100, 100))
+        Style::default().fg(Theme::bg()).bg(Color::Rgb(100, 100, 100))
     } else {
         Style::default()
             .fg(Color::White)
-            .bg(Theme::PRIMARY)
+            .bg(Theme::primary())
             .add_modifier(Modifier::BOLD)
     };
 
@@ -87,7 +87,7 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .border_style(if view.login_loading {
                     Style::default().fg(Color::Rgb(100, 100, 100))
                 } else {
-                    Style::default().fg(Theme::PRIMARY)
+                    Style::default().fg(Theme::primary())
                 }),
         );
     // Record button area for mouse hit-testing

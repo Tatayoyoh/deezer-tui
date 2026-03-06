@@ -1,14 +1,31 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
-use crate::client::{PopupMenu, SubMenu, ViewState};
-use crate::theme::Theme;
+use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
+use crate::theme::{Theme, ThemeId};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &ViewState) {
     // Draw toast notification (takes priority display but doesn't block popup)
     if let Some(ref toast) = view.toast {
         draw_toast(frame, &toast.message);
+    }
+
+    // Overlays take priority over track popups
+    match &view.overlay {
+        Some(Overlay::Help) => {
+            draw_help_overlay(frame);
+            return;
+        }
+        Some(Overlay::Settings { selected }) => {
+            draw_settings_overlay(frame, *selected);
+            return;
+        }
+        Some(Overlay::ThemePicker { selected }) => {
+            draw_theme_picker(frame, *selected);
+            return;
+        }
+        None => {}
     }
 
     let Some(ref popup) = view.popup else {
@@ -56,7 +73,7 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
         if item.is_header {
             ListItem::new(Line::from(Span::styled(
                 &item.label,
-                Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD),
+                Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
             )))
         } else {
             let prefix = if i == popup.selected { " > " } else { "   " };
@@ -150,23 +167,23 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
 
     let info_lines = vec![
         Line::from(vec![
-            Span::styled("Title:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Title:    ", Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.title, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Artist:   ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Artist:   ", Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.artist, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Album:    ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Album:    ", Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.album, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Duration: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Duration: ", Style::default().fg(Theme::text_dim_color())),
             Span::styled(format!("{}:{:02}", dur / 60, dur % 60), Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Track ID: ", Style::default().fg(Theme::TEXT_DIM)),
+            Span::styled("Track ID: ", Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.track_id, Theme::text()),
         ]),
         Line::from(""),
@@ -178,6 +195,143 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
 
     let paragraph = Paragraph::new(info_lines);
     frame.render_widget(paragraph, inner);
+}
+
+/// Draw the help overlay showing all keyboard shortcuts.
+fn draw_help_overlay(frame: &mut Frame) {
+    let shortcuts: &[(&str, &str)] = &[
+        ("Tab / Shift+Tab", "Switch tabs"),
+        ("/ or Ctrl+F", "Search"),
+        ("Enter", "Play / Submit"),
+        ("Esc", "Settings / Back"),
+        ("j/k or Up/Down", "Navigate list"),
+        ("h/l or Left/Right", "Navigate categories"),
+        ("p / Space", "Play / Pause"),
+        ("n", "Next track"),
+        ("b", "Previous track"),
+        ("s", "Toggle shuffle"),
+        ("r", "Cycle repeat mode"),
+        ("+/-", "Volume up / down"),
+        ("m", "Track context menu"),
+        ("Ctrl+P", "Playing track menu"),
+        ("g", "Shuffle favorites"),
+        ("?", "This help"),
+        ("Ctrl+O", "Settings"),
+        ("q", "Quit"),
+        ("Ctrl+Z", "Detach (keep playing)"),
+    ];
+
+    let area = frame.area();
+    let height = shortcuts.len() as u16 + 4;
+    let popup_area = centered_rect(60, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .title(" Keyboard Shortcuts ")
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let items: Vec<ListItem> = shortcuts.iter().map(|(key, desc)| {
+        ListItem::new(Line::from(vec![
+            Span::styled(
+                format!("  {:<22}", key),
+                Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(*desc, Theme::text()),
+        ]))
+    }).collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
+/// Draw the settings overlay with selectable entries.
+fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
+    let entries = ["Keyboard shortcuts", "Themes", "Displayed sections", "Parameters"];
+
+    let area = frame.area();
+    let height = entries.len() as u16 + 4;
+    let popup_area = centered_rect(40, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .title(" Settings ")
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, entry)| {
+        let prefix = if i == selected { " > " } else { "   " };
+        ListItem::new(Line::from(Span::styled(
+            format!("{}{}", prefix, entry),
+            if i == selected {
+                Theme::highlight()
+            } else {
+                Theme::text()
+            },
+        )))
+    }).collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
+/// Draw the theme picker overlay.
+fn draw_theme_picker(frame: &mut Frame, selected: usize) {
+    let themes = ThemeId::ALL;
+    let current = Theme::current();
+
+    let area = frame.area();
+    // +1 for the header line, +1 blank line after header
+    let height = themes.len() as u16 + 6;
+    let popup_area = centered_rect(45, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .title(" Themes ")
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let mut items: Vec<ListItem> = Vec::with_capacity(themes.len() + 2);
+
+    // Header
+    items.push(ListItem::new(Line::from(Span::styled(
+        "  Official Deezer themes",
+        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+    ))));
+    items.push(ListItem::new(Line::from("")));
+
+    // Theme entries
+    for (i, &theme) in themes.iter().enumerate() {
+        let prefix = if i == selected { " > " } else { "   " };
+        let suffix = if theme == current { "  ●" } else { "" };
+        let label = format!("{}{}{}", prefix, theme.label(), suffix);
+        let style = if i == selected {
+            Theme::highlight()
+        } else if theme == current {
+            Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+        } else {
+            Theme::text()
+        };
+        items.push(ListItem::new(Line::from(Span::styled(label, style))));
+    }
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
 }
 
 /// Draw a temporary toast notification at the bottom center of the screen.
@@ -193,8 +347,8 @@ fn draw_toast(frame: &mut Frame, message: &str) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Theme::SUCCESS))
-        .style(Style::default().bg(Theme::SURFACE));
+        .border_style(Style::default().fg(Theme::success()))
+        .style(Style::default().bg(Theme::surface()));
 
     let inner = block.inner(toast_area);
     frame.render_widget(block, toast_area);

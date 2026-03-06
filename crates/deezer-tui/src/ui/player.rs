@@ -10,7 +10,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let block = Block::default()
         .borders(Borders::TOP)
         .border_style(Theme::border())
-        .style(Style::default().bg(Theme::SURFACE));
+        .style(Style::default().bg(Theme::surface()));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -35,9 +35,9 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let track_info = if let Some(ref track) = view.current_track {
         Line::from(vec![
             status_icon,
-            Span::styled(&track.title, Style::default().fg(Theme::TEXT).add_modifier(Modifier::BOLD)),
+            Span::styled(&track.title, Style::default().fg(Theme::text_color()).add_modifier(Modifier::BOLD)),
             Span::styled(" - ", Theme::dim()),
-            Span::styled(&track.artist, Style::default().fg(Theme::PRIMARY)),
+            Span::styled(&track.artist, Style::default().fg(Theme::primary())),
             Span::styled(format!("  ({})", &track.album), Theme::dim()),
         ])
     } else {
@@ -60,8 +60,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let progress = Gauge::default()
         .gauge_style(
             Style::default()
-                .fg(Theme::PROGRESS_FILL)
-                .bg(Theme::PROGRESS_BG),
+                .fg(Theme::progress_fill())
+                .bg(Theme::progress_bg()),
         )
         .ratio(ratio)
         .label(Span::styled(
@@ -74,7 +74,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     // Controls line
     let vol_pct = (view.volume * 100.0) as u8;
     let shuffle_style = if view.shuffle {
-        Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
@@ -84,7 +84,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         RepeatMode::Track => "[r] Repeat One",
     };
     let repeat_style = if view.repeat != RepeatMode::Off {
-        Style::default().fg(Theme::PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
@@ -103,7 +103,9 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled("  ", Theme::dim()),
         Span::styled(repeat_label, repeat_style),
         Span::styled(format!("  [+/-] Vol: {vol_pct}%"), Theme::dim()),
-        Span::styled(format!("  {status_text}"), Style::default().fg(Color::Cyan)),
+        Span::styled(format!("  {status_text}  "), Style::default().fg(Color::Cyan)),
+        Span::styled("[?]", Theme::text()),
+        Span::styled(" Help", Theme::dim()),
     ]);
 
     frame.render_widget(Paragraph::new(controls), chunks[2]);

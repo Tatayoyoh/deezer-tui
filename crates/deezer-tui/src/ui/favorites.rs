@@ -38,7 +38,7 @@ fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect)
                 parts.push(Span::styled(
                     cat.label(),
                     Style::default()
-                        .fg(Theme::PRIMARY)
+                        .fg(Theme::primary())
                         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                 ));
             } else {
@@ -59,7 +59,7 @@ fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
         Span::styled(
             "Jouer al\u{00e9}atoirement mes favoris",
             Style::default()
-                .fg(Theme::SECONDARY)
+                .fg(Theme::secondary())
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -104,7 +104,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,
-                    Style::default().fg(Theme::PRIMARY),
+                    Style::default().fg(Theme::primary()),
                 )),
                 Cell::from(Span::styled(&item.col3, Theme::dim())),
                 Cell::from(Span::styled(&item.col4, Theme::dim())),

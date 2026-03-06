@@ -14,12 +14,14 @@ use tokio::net::UnixStream;
 use tracing::debug;
 
 use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::protocol::{
     ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen, SearchCategory, ServerMessage,
     read_line, socket_path,
 };
+use crate::theme::{Theme, ThemeId};
 use crate::ui;
 
 const TICK_RATE: Duration = Duration::from_millis(50);
@@ -167,6 +169,17 @@ impl PopupMenu {
     }
 }
 
+/// Overlay menus independent from track popups.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Overlay {
+    /// Keyboard shortcuts help screen.
+    Help,
+    /// Settings menu with selectable entries.
+    Settings { selected: usize },
+    /// Theme picker.
+    ThemePicker { selected: usize },
+}
+
 /// View state used by UI rendering functions.
 /// Combines daemon snapshot with local client-only state.
 pub struct ViewState {
@@ -206,6 +219,7 @@ pub struct ViewState {
     pub login_input: String,
     pub login_cursor: usize,
     pub popup: Option<PopupMenu>,
+    pub overlay: Option<Overlay>,
     pub toast: Option<Toast>,
 
     /// Button area set by the UI draw pass, used for mouse hit-testing.
@@ -271,6 +285,7 @@ impl ViewState {
             login_input: String::new(),
             login_cursor: 0,
             popup: None,
+            overlay: None,
             toast: None,
             login_button_area: Cell::new(None),
         }
@@ -382,6 +397,14 @@ impl Client {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        // Load saved theme from config
+        let config = Config::load();
+        if let Some(ref theme_str) = config.theme {
+            if let Some(id) = ThemeId::from_str(theme_str) {
+                Theme::set(id);
+            }
+        }
+
         // Setup terminal
         enable_raw_mode()?;
         io::stdout().execute(EnterAlternateScreen)?;
@@ -513,6 +536,24 @@ impl Client {
             return KeyAction::Detach;
         }
 
+        // ? : toggle help overlay
+        if key.code == KeyCode::Char('?') && self.view.screen == Screen::Main {
+            self.view.overlay = match self.view.overlay {
+                Some(Overlay::Help) => None,
+                _ => Some(Overlay::Help),
+            };
+            return KeyAction::Continue;
+        }
+
+        // Ctrl+O : toggle settings overlay
+        if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            self.view.overlay = match self.view.overlay {
+                Some(Overlay::Settings { .. }) => None,
+                _ => Some(Overlay::Settings { selected: 0 }),
+            };
+            return KeyAction::Continue;
+        }
+
         // Ctrl+F: enter search mode (same as /)
         if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
             if self.view.screen == Screen::Main && self.view.active_tab == ActiveTab::Search {
@@ -597,6 +638,11 @@ impl Client {
     }
 
     fn handle_main_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Overlay mode — intercept all keys
+        if self.view.overlay.is_some() {
+            return self.handle_overlay_key(key);
+        }
+
         // Popup mode — intercept all keys
         if self.view.popup.is_some() {
             return self.handle_popup_key(key);
@@ -720,7 +766,95 @@ impl Client {
                 KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
             }
 
+            // Escape in normal mode: open settings
+            KeyCode::Esc => {
+                self.view.overlay = Some(Overlay::Settings { selected: 0 });
+                KeyAction::Continue
+            }
+
             _ => KeyAction::Continue,
+        }
+    }
+
+    /// Handle key events when an overlay is open.
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> KeyAction {
+        let overlay = self.view.overlay.as_mut().unwrap();
+        match overlay {
+            Overlay::Help => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('?') => {
+                        self.view.overlay = None;
+                    }
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
+            Overlay::Settings { selected } => {
+                const SETTINGS_COUNT: usize = 4;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.view.overlay = None;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(SETTINGS_COUNT - 1);
+                    }
+                    KeyCode::Enter => {
+                        match *selected {
+                            0 => {
+                                // Keyboard shortcuts
+                                self.view.overlay = Some(Overlay::Help);
+                                return KeyAction::Continue;
+                            }
+                            1 => {
+                                // Themes
+                                let current = Theme::current();
+                                let idx = ThemeId::ALL.iter().position(|&t| t == current).unwrap_or(0);
+                                self.view.overlay = Some(Overlay::ThemePicker { selected: idx });
+                                return KeyAction::Continue;
+                            }
+                            _ => {
+                                // Other entries — placeholder
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                // Also close on Ctrl+O
+                if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.view.overlay = None;
+                }
+                KeyAction::Continue
+            }
+            Overlay::ThemePicker { selected } => {
+                let count = ThemeId::ALL.len();
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        // Back to settings
+                        self.view.overlay = Some(Overlay::Settings { selected: 1 });
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                        Theme::set(ThemeId::ALL[*selected]);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(count - 1);
+                        Theme::set(ThemeId::ALL[*selected]);
+                    }
+                    KeyCode::Enter => {
+                        // Confirm selection, save to config, back to settings
+                        let theme_id = ThemeId::ALL[*selected];
+                        let mut config = Config::load();
+                        config.theme = Some(theme_id.as_str().to_string());
+                        let _ = config.save();
+                        self.view.overlay = Some(Overlay::Settings { selected: 1 });
+                    }
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
         }
     }
 
