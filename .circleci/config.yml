@@ -3,7 +3,7 @@ version: 2.1
 executors:
   linux:
     docker:
-      - image: cimg/rust:1.85
+      - image: cimg/rust:1.88
     resource_class: medium
 
   linux-arm:
@@ -29,7 +29,7 @@ commands:
       - run:
           name: Install Rust
           command: |
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.85.0
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.88.0
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
   install-rust-windows:
@@ -39,7 +39,7 @@ commands:
           name: Install Rust
           command: |
             Invoke-WebRequest -Uri https://win.rustup.rs/x86_64 -OutFile rustup-init.exe
-            .\rustup-init.exe -y --default-toolchain 1.85.0
+            .\rustup-init.exe -y --default-toolchain 1.88.0
             $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
             [Environment]::SetEnvironmentVariable("PATH", $env:PATH, "User")
 
