@@ -11,7 +11,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([
             Constraint::Length(3), // Search input
             Constraint::Length(1), // Category menu
-            Constraint::Min(3),   // Results table
+            Constraint::Min(3),    // Results table
         ])
         .split(area);
 
@@ -87,8 +87,8 @@ fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
 
 fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     if view.search_loading {
-        let loading = Paragraph::new(Span::styled("Searching...", Theme::dim()))
-            .alignment(Alignment::Center);
+        let loading =
+            Paragraph::new(Span::styled("Searching...", Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(loading, area);
         return;
     }

@@ -40,7 +40,11 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
     };
 
     match &popup.sub_menu {
-        Some(SubMenu::PlaylistPicker { playlists, selected, loading }) => {
+        Some(SubMenu::PlaylistPicker {
+            playlists,
+            selected,
+            loading,
+        }) => {
             draw_playlist_picker(frame, playlists, *selected, *loading, &popup.track.title);
         }
         Some(SubMenu::TrackInfo) => {
@@ -77,24 +81,31 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
     frame.render_widget(block, popup_area);
 
     // Build list items
-    let items: Vec<ListItem> = popup.items.iter().enumerate().map(|(i, item)| {
-        if item.is_header {
-            ListItem::new(Line::from(Span::styled(
-                &item.label,
-                Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
-            )))
-        } else {
-            let prefix = if i == popup.selected { " > " } else { "   " };
-            ListItem::new(Line::from(Span::styled(
-                format!("{}{}", prefix, item.label),
-                if i == popup.selected {
-                    Theme::highlight()
-                } else {
-                    Theme::text()
-                },
-            )))
-        }
-    }).collect();
+    let items: Vec<ListItem> = popup
+        .items
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            if item.is_header {
+                ListItem::new(Line::from(Span::styled(
+                    &item.label,
+                    Style::default()
+                        .fg(Theme::primary())
+                        .add_modifier(Modifier::BOLD),
+                )))
+            } else {
+                let prefix = if i == popup.selected { " > " } else { "   " };
+                ListItem::new(Line::from(Span::styled(
+                    format!("{}{}", prefix, item.label),
+                    if i == popup.selected {
+                        Theme::highlight()
+                    } else {
+                        Theme::text()
+                    },
+                )))
+            }
+        })
+        .collect();
 
     let list = List::new(items);
 
@@ -112,7 +123,11 @@ fn draw_playlist_picker(
     track_title: &str,
 ) {
     let area = frame.area();
-    let height = if loading { 5 } else { (playlists.len() as u16).min(20) + 4 };
+    let height = if loading {
+        5
+    } else {
+        (playlists.len() as u16).min(20) + 4
+    };
     let popup_area = centered_rect(45, height, area);
 
     frame.render_widget(Clear, popup_area);
@@ -143,14 +158,22 @@ fn draw_playlist_picker(
         return;
     }
 
-    let items: Vec<ListItem> = playlists.iter().enumerate().map(|(i, pl)| {
-        let prefix = if i == selected { " > " } else { "   " };
-        let text = format!("{}{} ({} tracks)", prefix, pl.title, pl.nb_songs);
-        ListItem::new(Line::from(Span::styled(
-            text,
-            if i == selected { Theme::highlight() } else { Theme::text() },
-        )))
-    }).collect();
+    let items: Vec<ListItem> = playlists
+        .iter()
+        .enumerate()
+        .map(|(i, pl)| {
+            let prefix = if i == selected { " > " } else { "   " };
+            let text = format!("{}{} ({} tracks)", prefix, pl.title, pl.nb_songs);
+            ListItem::new(Line::from(Span::styled(
+                text,
+                if i == selected {
+                    Theme::highlight()
+                } else {
+                    Theme::text()
+                },
+            )))
+        })
+        .collect();
 
     let list = List::new(items);
     frame.render_widget(list, inner);
@@ -197,10 +220,7 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
             Span::styled(&track.track_id, Theme::text()),
         ]),
         Line::from(""),
-        Line::from(Span::styled(
-            "Press Esc to close",
-            Theme::dim(),
-        )),
+        Line::from(Span::styled("Press Esc to close", Theme::dim())),
     ];
 
     let paragraph = Paragraph::new(info_lines);
@@ -247,15 +267,20 @@ fn draw_help_overlay(frame: &mut Frame) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let items: Vec<ListItem> = shortcuts.iter().map(|(key, desc)| {
-        ListItem::new(Line::from(vec![
-            Span::styled(
-                format!("  {:<22}", key),
-                Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(*desc, Theme::text()),
-        ]))
-    }).collect();
+    let items: Vec<ListItem> = shortcuts
+        .iter()
+        .map(|(key, desc)| {
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    format!("  {:<22}", key),
+                    Style::default()
+                        .fg(Theme::primary())
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(*desc, Theme::text()),
+            ]))
+        })
+        .collect();
 
     let list = List::new(items);
     frame.render_widget(list, inner);
@@ -263,7 +288,12 @@ fn draw_help_overlay(frame: &mut Frame) {
 
 /// Draw the settings overlay with selectable entries.
 fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
-    let entries = ["Keyboard shortcuts", "Themes", "Displayed sections", "Parameters"];
+    let entries = [
+        "Keyboard shortcuts",
+        "Themes",
+        "Displayed sections",
+        "Parameters",
+    ];
 
     let area = frame.area();
     let height = entries.len() as u16 + 4;
@@ -281,17 +311,21 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let items: Vec<ListItem> = entries.iter().enumerate().map(|(i, entry)| {
-        let prefix = if i == selected { " > " } else { "   " };
-        ListItem::new(Line::from(Span::styled(
-            format!("{}{}", prefix, entry),
-            if i == selected {
-                Theme::highlight()
-            } else {
-                Theme::text()
-            },
-        )))
-    }).collect();
+    let items: Vec<ListItem> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let prefix = if i == selected { " > " } else { "   " };
+            ListItem::new(Line::from(Span::styled(
+                format!("{}{}", prefix, entry),
+                if i == selected {
+                    Theme::highlight()
+                } else {
+                    Theme::text()
+                },
+            )))
+        })
+        .collect();
 
     let list = List::new(items);
     frame.render_widget(list, inner);
@@ -324,7 +358,9 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     // Header
     items.push(ListItem::new(Line::from(Span::styled(
         "  Official Deezer themes",
-        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Theme::primary())
+            .add_modifier(Modifier::BOLD),
     ))));
     items.push(ListItem::new(Line::from("")));
 
@@ -336,7 +372,9 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
         let style = if i == selected {
             Theme::highlight()
         } else if theme == current {
-            Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD)
         } else {
             Theme::text()
         };

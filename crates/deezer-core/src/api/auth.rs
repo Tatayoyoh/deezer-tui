@@ -27,9 +27,8 @@ impl DeezerClient {
         // Call getUserData to validate the token and get session info.
         // The server will also set a session cookie (sid) in the response,
         // which the cookie jar will automatically store for subsequent calls.
-        let url = format!(
-            "{GW_LIGHT_URL}?method=deezer.getUserData&input=3&api_version=1.0&api_token="
-        );
+        let url =
+            format!("{GW_LIGHT_URL}?method=deezer.getUserData&input=3&api_version=1.0&api_token=");
 
         let resp = self
             .http
@@ -84,8 +83,14 @@ mod tests {
         println!("  user_id: {}", session.user_id);
         println!("  user_name: '{}'", session.user_name);
         assert!(session.user_id > 0, "user_id should be > 0");
-        assert!(!session.api_token.is_empty(), "api_token should not be empty");
-        assert!(!session.license_token.is_empty(), "license_token should not be empty");
+        assert!(
+            !session.api_token.is_empty(),
+            "api_token should not be empty"
+        );
+        assert!(
+            !session.license_token.is_empty(),
+            "license_token should not be empty"
+        );
     }
 
     #[tokio::test]
@@ -95,10 +100,16 @@ mod tests {
 
         let results = client.search("Daft Punk").await.expect("search failed");
         println!("Search returned {} tracks", results.data.len());
-        assert!(!results.data.is_empty(), "should find tracks for 'Daft Punk'");
+        assert!(
+            !results.data.is_empty(),
+            "should find tracks for 'Daft Punk'"
+        );
 
         let first = &results.data[0];
-        println!("  First: {} - {} (ID: {})", first.title, first.artist, first.track_id);
+        println!(
+            "  First: {} - {} (ID: {})",
+            first.title, first.artist, first.track_id
+        );
         println!("  TRACK_TOKEN present: {}", first.has_track_token());
     }
 
@@ -112,7 +123,10 @@ mod tests {
 
         if !favorites.is_empty() {
             let first = &favorites[0];
-            println!("  First: {} - {} (ID: {})", first.title, first.artist, first.track_id);
+            println!(
+                "  First: {} - {} (ID: {})",
+                first.title, first.artist, first.track_id
+            );
             println!("  TRACK_TOKEN present: {}", first.has_track_token());
         }
     }
@@ -127,14 +141,21 @@ mod tests {
         println!("Track: {} - {}", track.title, track.artist);
         println!("  TRACK_TOKEN present: {}", track.has_track_token());
         println!("  MD5_ORIGIN: '{}'", track.md5_origin);
-        assert!(track.has_track_token(), "song.getData should return TRACK_TOKEN");
-        assert!(!track.md5_origin.is_empty(), "song.getData should return MD5_ORIGIN");
+        assert!(
+            track.has_track_token(),
+            "song.getData should return TRACK_TOKEN"
+        );
+        assert!(
+            !track.md5_origin.is_empty(),
+            "song.getData should return MD5_ORIGIN"
+        );
     }
 
     #[tokio::test]
     async fn test_master_key() {
         let client = DeezerClient::new().unwrap();
-        let key = crate::decrypt::fetch_master_key(client.http()).await
+        let key = crate::decrypt::fetch_master_key(client.http())
+            .await
             .expect("fetch_master_key failed");
         println!("Master key: {:02x?}", key);
         assert_eq!(key.len(), 16);

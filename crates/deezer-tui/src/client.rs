@@ -3,9 +3,13 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind};
-use crossterm::event::{EnableMouseCapture, DisableMouseCapture};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::Terminal;
@@ -18,8 +22,8 @@ use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::protocol::{
-    ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen, SearchCategory, ServerMessage,
-    read_line, socket_path,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen,
+    SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -93,17 +97,61 @@ impl PopupMenu {
             "Add to favorites"
         };
         let items = vec![
-            PopupMenuItem { label: "── Manage ──".into(), action: PopupAction::Header, is_header: true },
-            PopupMenuItem { label: fav_label.into(), action: PopupAction::ToggleFavorite, is_header: false },
-            PopupMenuItem { label: "Add to playlist".into(), action: PopupAction::AddToPlaylist, is_header: false },
-            PopupMenuItem { label: "Don't recommend this track".into(), action: PopupAction::DislikeTrack, is_header: false },
-            PopupMenuItem { label: "── Playback ──".into(), action: PopupAction::Header, is_header: true },
-            PopupMenuItem { label: "Play next".into(), action: PopupAction::PlayNext, is_header: false },
-            PopupMenuItem { label: "Add to queue".into(), action: PopupAction::AddToQueue, is_header: false },
-            PopupMenuItem { label: "Mix inspired by this track".into(), action: PopupAction::MixFromTrack, is_header: false },
-            PopupMenuItem { label: "── Media ──".into(), action: PopupAction::Header, is_header: true },
-            PopupMenuItem { label: "Share".into(), action: PopupAction::Share, is_header: false },
-            PopupMenuItem { label: "Track info".into(), action: PopupAction::TrackInfo, is_header: false },
+            PopupMenuItem {
+                label: "── Manage ──".into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: fav_label.into(),
+                action: PopupAction::ToggleFavorite,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Add to playlist".into(),
+                action: PopupAction::AddToPlaylist,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Don't recommend this track".into(),
+                action: PopupAction::DislikeTrack,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "── Playback ──".into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: "Play next".into(),
+                action: PopupAction::PlayNext,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Add to queue".into(),
+                action: PopupAction::AddToQueue,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Mix inspired by this track".into(),
+                action: PopupAction::MixFromTrack,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "── Media ──".into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: "Share".into(),
+                action: PopupAction::Share,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Track info".into(),
+                action: PopupAction::TrackInfo,
+                is_header: false,
+            },
         ];
         Self {
             title: None,
@@ -124,10 +172,26 @@ impl PopupMenu {
         };
         let title = format!("{} — {}", track.title, track.artist);
         let items = vec![
-            PopupMenuItem { label: "── Manage ──".into(), action: PopupAction::Header, is_header: true },
-            PopupMenuItem { label: fav_label.into(), action: PopupAction::ToggleFavorite, is_header: false },
-            PopupMenuItem { label: "Add to playlist".into(), action: PopupAction::AddToPlaylist, is_header: false },
-            PopupMenuItem { label: "Don't recommend this track".into(), action: PopupAction::DislikeTrack, is_header: false },
+            PopupMenuItem {
+                label: "── Manage ──".into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: fav_label.into(),
+                action: PopupAction::ToggleFavorite,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Add to playlist".into(),
+                action: PopupAction::AddToPlaylist,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: "Don't recommend this track".into(),
+                action: PopupAction::DislikeTrack,
+                is_header: false,
+            },
         ];
         Self {
             title: Some(title),
@@ -158,7 +222,11 @@ impl PopupMenu {
     /// Move selection to previous selectable item.
     fn select_prev(&mut self) {
         let len = self.items.len();
-        let mut prev = if self.selected == 0 { len - 1 } else { self.selected - 1 };
+        let mut prev = if self.selected == 0 {
+            len - 1
+        } else {
+            self.selected - 1
+        };
         for _ in 0..len {
             if !self.items[prev].is_header {
                 self.selected = prev;
@@ -326,7 +394,12 @@ impl ViewState {
         if !snap.playlists.is_empty() {
             self.playlists = snap.playlists;
             if let Some(ref mut popup) = self.popup {
-                if let Some(SubMenu::PlaylistPicker { ref mut playlists, ref mut loading, .. }) = popup.sub_menu {
+                if let Some(SubMenu::PlaylistPicker {
+                    ref mut playlists,
+                    ref mut loading,
+                    ..
+                }) = popup.sub_menu
+                {
                     if *loading {
                         *playlists = self.playlists.clone();
                         *loading = false;
@@ -388,9 +461,8 @@ impl Client {
 
     async fn send_cmd(&mut self, cmd: &Command) -> std::io::Result<()> {
         use tokio::io::AsyncWriteExt;
-        let mut json = serde_json::to_string(cmd).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
+        let mut json = serde_json::to_string(cmd)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         json.push('\n');
         self.writer.write_all(json.as_bytes()).await?;
         self.writer.flush().await
@@ -435,10 +507,10 @@ impl Client {
             // Poll for input events (non-blocking with short timeout)
             if event::poll(TICK_RATE)? {
                 let action = match event::read()? {
-                    Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        self.handle_key(key)
-                    }
-                    Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left) => {
+                    Event::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key),
+                    Event::Mouse(mouse)
+                        if mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
+                    {
                         self.handle_mouse_click(mouse.column, mouse.row)
                             .unwrap_or(KeyAction::Continue)
                     }
@@ -492,7 +564,12 @@ impl Client {
             }
 
             // Try to read messages from daemon (non-blocking)
-            match tokio::time::timeout(Duration::from_millis(1), read_line::<ServerMessage, _>(&mut self.reader)).await {
+            match tokio::time::timeout(
+                Duration::from_millis(1),
+                read_line::<ServerMessage, _>(&mut self.reader),
+            )
+            .await
+            {
                 Ok(Ok(Some(ServerMessage::Snapshot(snap)))) => {
                     self.view.update_from_snapshot(snap);
                 }
@@ -709,33 +786,21 @@ impl Client {
             }
 
             // Category navigation (h/l or left/right)
-            KeyCode::Char('h') | KeyCode::Left => {
-                KeyAction::SendCommand(Command::PrevCategory)
-            }
-            KeyCode::Char('l') | KeyCode::Right => {
-                KeyAction::SendCommand(Command::NextCategory)
-            }
+            KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
+            KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
 
             // List navigation
-            KeyCode::Up | KeyCode::Char('k') => {
-                KeyAction::SendCommand(Command::SelectUp)
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                KeyAction::SendCommand(Command::SelectDown)
-            }
+            KeyCode::Up | KeyCode::Char('k') => KeyAction::SendCommand(Command::SelectUp),
+            KeyCode::Down | KeyCode::Char('j') => KeyAction::SendCommand(Command::SelectDown),
 
             // Play selected track
             KeyCode::Enter => match self.view.active_tab {
-                ActiveTab::Search => {
-                    KeyAction::SendCommand(Command::PlayFromSearch {
-                        index: self.view.search_selected,
-                    })
-                }
-                ActiveTab::Favorites => {
-                    KeyAction::SendCommand(Command::PlayFromFavorites {
-                        index: self.view.favorites_selected,
-                    })
-                }
+                ActiveTab::Search => KeyAction::SendCommand(Command::PlayFromSearch {
+                    index: self.view.search_selected,
+                }),
+                ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
+                    index: self.view.favorites_selected,
+                }),
                 _ => KeyAction::Continue,
             },
 
@@ -748,9 +813,7 @@ impl Client {
             }
 
             // Player controls
-            KeyCode::Char('p') | KeyCode::Char(' ') => {
-                KeyAction::SendCommand(Command::TogglePause)
-            }
+            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('s') => KeyAction::SendCommand(Command::ToggleShuffle),
@@ -811,7 +874,8 @@ impl Client {
                             1 => {
                                 // Themes
                                 let current = Theme::current();
-                                let idx = ThemeId::ALL.iter().position(|&t| t == current).unwrap_or(0);
+                                let idx =
+                                    ThemeId::ALL.iter().position(|&t| t == current).unwrap_or(0);
                                 self.view.overlay = Some(Overlay::ThemePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
@@ -861,16 +925,16 @@ impl Client {
     /// Open the full track context menu for the selected track in the current list.
     fn open_track_popup(&mut self) {
         let track = match self.view.active_tab {
-            ActiveTab::Search => {
-                self.view.search_display
-                    .get(self.view.search_selected)
-                    .and_then(|d| d.track.clone())
-            }
-            ActiveTab::Favorites => {
-                self.view.favorites_display
-                    .get(self.view.favorites_selected)
-                    .and_then(|d| d.track.clone())
-            }
+            ActiveTab::Search => self
+                .view
+                .search_display
+                .get(self.view.search_selected)
+                .and_then(|d| d.track.clone()),
+            ActiveTab::Favorites => self
+                .view
+                .favorites_display
+                .get(self.view.favorites_selected)
+                .and_then(|d| d.track.clone()),
             _ => None,
         };
 
@@ -887,7 +951,11 @@ impl Client {
         // Handle playlist picker sub-menu
         if let Some(ref mut sub) = popup.sub_menu {
             match sub {
-                SubMenu::PlaylistPicker { playlists, selected, loading } => {
+                SubMenu::PlaylistPicker {
+                    playlists,
+                    selected,
+                    loading,
+                } => {
                     if *loading {
                         if key.code == KeyCode::Esc {
                             popup.sub_menu = None;
@@ -964,9 +1032,13 @@ impl Client {
             PopupAction::Header => KeyAction::Continue,
             PopupAction::ToggleFavorite => {
                 let cmd = if is_favorite {
-                    Command::RemoveFavorite { track_id: track.track_id }
+                    Command::RemoveFavorite {
+                        track_id: track.track_id,
+                    }
                 } else {
-                    Command::AddFavorite { track_id: track.track_id }
+                    Command::AddFavorite {
+                        track_id: track.track_id,
+                    }
                 };
                 self.view.popup = None;
                 KeyAction::SendCommand(cmd)
@@ -998,7 +1070,9 @@ impl Client {
             }
             PopupAction::DislikeTrack => {
                 self.view.popup = None;
-                KeyAction::SendCommand(Command::DislikeTrack { track_id: track.track_id })
+                KeyAction::SendCommand(Command::DislikeTrack {
+                    track_id: track.track_id,
+                })
             }
             PopupAction::PlayNext => {
                 self.view.popup = None;
@@ -1010,7 +1084,9 @@ impl Client {
             }
             PopupAction::MixFromTrack => {
                 self.view.popup = None;
-                KeyAction::SendCommand(Command::StartMix { track_id: track.track_id })
+                KeyAction::SendCommand(Command::StartMix {
+                    track_id: track.track_id,
+                })
             }
             PopupAction::Share => {
                 let url = format!("https://www.deezer.com/track/{}", track.track_id);

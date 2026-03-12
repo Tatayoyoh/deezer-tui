@@ -35,7 +35,12 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let track_info = if let Some(ref track) = view.current_track {
         Line::from(vec![
             status_icon,
-            Span::styled(&track.title, Style::default().fg(Theme::text_color()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                &track.title,
+                Style::default()
+                    .fg(Theme::text_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" - ", Theme::dim()),
             Span::styled(&track.artist, Style::default().fg(Theme::primary())),
             Span::styled(format!("  ({})", &track.album), Theme::dim()),
@@ -74,7 +79,9 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     // Controls line
     let vol_pct = (view.volume * 100.0) as u8;
     let shuffle_style = if view.shuffle {
-        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Theme::primary())
+            .add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
@@ -84,7 +91,9 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         RepeatMode::Track => "[r] Repeat One",
     };
     let repeat_style = if view.repeat != RepeatMode::Off {
-        Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Theme::primary())
+            .add_modifier(Modifier::BOLD)
     } else {
         Theme::dim()
     };
@@ -103,7 +112,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled("  ", Theme::dim()),
         Span::styled(repeat_label, repeat_style),
         Span::styled(format!("  [+/-] Vol: {vol_pct}%"), Theme::dim()),
-        Span::styled(format!("  {status_text}  "), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("  {status_text}  "),
+            Style::default().fg(Color::Cyan),
+        ),
         Span::styled("[?]", Theme::text()),
         Span::styled(" Help", Theme::dim()),
     ]);

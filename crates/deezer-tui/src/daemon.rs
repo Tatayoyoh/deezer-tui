@@ -13,8 +13,8 @@ use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
 use crate::protocol::{
-    ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen, SearchCategory, ServerMessage,
-    read_line, socket_path,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen,
+    SearchCategory, ServerMessage,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -405,40 +405,36 @@ impl Daemon {
                     ActiveTab::Downloads => ActiveTab::Radio,
                 };
             }
-            Command::NextCategory => {
-                match self.active_tab {
-                    ActiveTab::Search => {
-                        self.search_category = self.search_category.next();
-                        self.search_selected = 0;
-                        if !self.last_search_query.is_empty() {
-                            self.start_search(self.last_search_query.clone());
-                        }
+            Command::NextCategory => match self.active_tab {
+                ActiveTab::Search => {
+                    self.search_category = self.search_category.next();
+                    self.search_selected = 0;
+                    if !self.last_search_query.is_empty() {
+                        self.start_search(self.last_search_query.clone());
                     }
-                    ActiveTab::Favorites => {
-                        self.favorites_category = self.favorites_category.next();
-                        self.favorites_selected = 0;
-                        self.start_load_favorites_category();
-                    }
-                    _ => {}
                 }
-            }
-            Command::PrevCategory => {
-                match self.active_tab {
-                    ActiveTab::Search => {
-                        self.search_category = self.search_category.prev();
-                        self.search_selected = 0;
-                        if !self.last_search_query.is_empty() {
-                            self.start_search(self.last_search_query.clone());
-                        }
-                    }
-                    ActiveTab::Favorites => {
-                        self.favorites_category = self.favorites_category.prev();
-                        self.favorites_selected = 0;
-                        self.start_load_favorites_category();
-                    }
-                    _ => {}
+                ActiveTab::Favorites => {
+                    self.favorites_category = self.favorites_category.next();
+                    self.favorites_selected = 0;
+                    self.start_load_favorites_category();
                 }
-            }
+                _ => {}
+            },
+            Command::PrevCategory => match self.active_tab {
+                ActiveTab::Search => {
+                    self.search_category = self.search_category.prev();
+                    self.search_selected = 0;
+                    if !self.last_search_query.is_empty() {
+                        self.start_search(self.last_search_query.clone());
+                    }
+                }
+                ActiveTab::Favorites => {
+                    self.favorites_category = self.favorites_category.prev();
+                    self.favorites_selected = 0;
+                    self.start_load_favorites_category();
+                }
+                _ => {}
+            },
             Command::ShuffleFavorites => {
                 if !self.favorites.is_empty() {
                     // Set queue from favorites with shuffle enabled
@@ -469,7 +465,10 @@ impl Daemon {
             Command::RequestPlaylists => {
                 self.start_load_playlists();
             }
-            Command::AddToPlaylist { playlist_id, track_id } => {
+            Command::AddToPlaylist {
+                playlist_id,
+                track_id,
+            } => {
                 self.start_add_to_playlist(playlist_id, track_id);
             }
             Command::DislikeTrack { track_id } => {
@@ -725,8 +724,12 @@ impl Daemon {
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.add_favorite(&track_id).await {
-                Ok(()) => { let _ = tx.send(AsyncResult::FavoriteAdded(track_id)); }
-                Err(e) => { let _ = tx.send(AsyncResult::FavoriteError(e.to_string())); }
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::FavoriteAdded(track_id));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::FavoriteError(e.to_string()));
+                }
             }
         });
     }
@@ -737,8 +740,12 @@ impl Daemon {
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.remove_favorite(&track_id).await {
-                Ok(()) => { let _ = tx.send(AsyncResult::FavoriteRemoved(track_id)); }
-                Err(e) => { let _ = tx.send(AsyncResult::FavoriteError(e.to_string())); }
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::FavoriteRemoved(track_id));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::FavoriteError(e.to_string()));
+                }
             }
         });
     }
@@ -749,8 +756,12 @@ impl Daemon {
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.get_user_playlists_raw().await {
-                Ok(playlists) => { let _ = tx.send(AsyncResult::PlaylistsReady(playlists)); }
-                Err(e) => { let _ = tx.send(AsyncResult::PlaylistsError(e.to_string())); }
+                Ok(playlists) => {
+                    let _ = tx.send(AsyncResult::PlaylistsReady(playlists));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::PlaylistsError(e.to_string()));
+                }
             }
         });
     }
@@ -760,9 +771,16 @@ impl Daemon {
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
             let client = client.lock().await;
-            match client.add_to_playlist(&playlist_id, &[track_id.as_str()]).await {
-                Ok(()) => { let _ = tx.send(AsyncResult::AddedToPlaylist(playlist_id)); }
-                Err(e) => { let _ = tx.send(AsyncResult::AddToPlaylistError(e.to_string())); }
+            match client
+                .add_to_playlist(&playlist_id, &[track_id.as_str()])
+                .await
+            {
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::AddedToPlaylist(playlist_id));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::AddToPlaylistError(e.to_string()));
+                }
             }
         });
     }
@@ -773,8 +791,12 @@ impl Daemon {
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.dislike_track(&track_id).await {
-                Ok(()) => { let _ = tx.send(AsyncResult::DislikeOk); }
-                Err(e) => { let _ = tx.send(AsyncResult::DislikeError(e.to_string())); }
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::DislikeOk);
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::DislikeError(e.to_string()));
+                }
             }
         });
     }
@@ -786,8 +808,12 @@ impl Daemon {
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.get_smart_radio(&track_id).await {
-                Ok(tracks) => { let _ = tx.send(AsyncResult::MixReady(tracks)); }
-                Err(e) => { let _ = tx.send(AsyncResult::MixError(e.to_string())); }
+                Ok(tracks) => {
+                    let _ = tx.send(AsyncResult::MixReady(tracks));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::MixError(e.to_string()));
+                }
             }
         });
     }
@@ -1055,8 +1081,7 @@ impl Daemon {
         if let Ok(mut state) = self.player_state.lock() {
             if state.status == PlaybackStatus::Playing {
                 if let Some(started) = self.playback_started_at {
-                    state.position_secs =
-                        self.playback_offset_secs + started.elapsed().as_secs();
+                    state.position_secs = self.playback_offset_secs + started.elapsed().as_secs();
                     if state.duration_secs > 0 && state.position_secs >= state.duration_secs {
                         state.position_secs = state.duration_secs;
                     }
@@ -1090,9 +1115,8 @@ async fn send_line_writer<T: serde::Serialize>(
     msg: &T,
 ) -> std::io::Result<()> {
     use tokio::io::AsyncWriteExt;
-    let mut json = serde_json::to_string(msg).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let mut json = serde_json::to_string(msg)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     json.push('\n');
     writer.write_all(json.as_bytes()).await?;
     writer.flush().await

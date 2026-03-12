@@ -43,8 +43,7 @@ pub async fn fetch_master_key(http: &reqwest::Client) -> Result<[u8; 16], Deezer
         .map_err(|e| DeezerError::Http(e.to_string()))?;
 
     // Step 2: find the app-web JS bundle URL
-    let js_url_re =
-        Regex::new(r#"https://[^"]+/app-web[^"]*\.js"#).expect("valid regex");
+    let js_url_re = Regex::new(r#"https://[^"]+/app-web[^"]*\.js"#).expect("valid regex");
     let js_url = js_url_re
         .find(&html)
         .ok_or_else(|| DeezerError::Decrypt("Could not find app-web JS bundle URL".into()))?
@@ -64,16 +63,14 @@ pub async fn fetch_master_key(http: &reqwest::Client) -> Result<[u8; 16], Deezer
 
     // Step 4: extract two 8-byte halves
     // First half: starts with 0x61 ('a'), ends with 0x67 ('g')
-    let half_a_re =
-        Regex::new(r"0x61%2C(0x[0-9a-f]{2}%2C){6}0x67").expect("valid regex");
+    let half_a_re = Regex::new(r"0x61%2C(0x[0-9a-f]{2}%2C){6}0x67").expect("valid regex");
     let half_a_match = half_a_re
         .find(&js_source)
         .ok_or_else(|| DeezerError::Decrypt("Could not find first half of master key".into()))?
         .as_str();
 
     // Second half: starts with 0x31 ('1'), ends with 0x34 ('4')
-    let half_b_re =
-        Regex::new(r"0x31%2C(0x[0-9a-f]{2}%2C){6}0x34").expect("valid regex");
+    let half_b_re = Regex::new(r"0x31%2C(0x[0-9a-f]{2}%2C){6}0x34").expect("valid regex");
     let half_b_match = half_b_re
         .find(&js_source)
         .ok_or_else(|| DeezerError::Decrypt("Could not find second half of master key".into()))?

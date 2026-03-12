@@ -55,7 +55,10 @@ pub enum Command {
     /// Request the user's playlists (for playlist picker).
     RequestPlaylists,
     /// Add a track to a playlist.
-    AddToPlaylist { playlist_id: String, track_id: String },
+    AddToPlaylist {
+        playlist_id: String,
+        track_id: String,
+    },
     /// Mark a track as disliked (don't recommend).
     DislikeTrack { track_id: String },
     /// Insert a track to play next in the queue.
@@ -312,9 +315,8 @@ pub fn socket_path() -> PathBuf {
 
 /// Send a line-delimited JSON message over a Unix stream.
 pub async fn send_line<T: Serialize>(stream: &mut UnixStream, msg: &T) -> std::io::Result<()> {
-    let mut json = serde_json::to_string(msg).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let mut json = serde_json::to_string(msg)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     json.push('\n');
     stream.write_all(json.as_bytes()).await?;
     stream.flush().await
@@ -329,8 +331,7 @@ pub async fn read_line<T: for<'de> Deserialize<'de>, R: tokio::io::AsyncRead + U
     if n == 0 {
         return Ok(None); // EOF — peer disconnected
     }
-    let msg = serde_json::from_str(&line).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
+    let msg = serde_json::from_str(&line)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     Ok(Some(msg))
 }

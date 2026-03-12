@@ -5,8 +5,8 @@ pub mod models;
 
 use std::sync::Arc;
 
-use reqwest::Client;
 use reqwest::cookie::Jar;
+use reqwest::Client;
 
 use crate::api::auth::Session;
 use crate::api::models::DeezerError;

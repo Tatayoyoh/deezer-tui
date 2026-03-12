@@ -44,7 +44,8 @@ impl Default for Config {
 impl Config {
     /// Get the config directory path (XDG on Linux, AppData on Windows, etc.)
     pub fn dir() -> Option<PathBuf> {
-        ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME).map(|p| p.config_dir().to_path_buf())
+        ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME)
+            .map(|p| p.config_dir().to_path_buf())
     }
 
     /// Full path to the config file.
@@ -66,22 +67,18 @@ impl Config {
 
     /// Save config to disk.
     pub fn save(&self) -> Result<(), DeezerError> {
-        let dir = Self::dir().ok_or_else(|| {
-            DeezerError::Api("Could not determine config directory".into())
-        })?;
+        let dir = Self::dir()
+            .ok_or_else(|| DeezerError::Api("Could not determine config directory".into()))?;
 
-        fs::create_dir_all(&dir).map_err(|e| {
-            DeezerError::Api(format!("Failed to create config dir: {e}"))
-        })?;
+        fs::create_dir_all(&dir)
+            .map_err(|e| DeezerError::Api(format!("Failed to create config dir: {e}")))?;
 
         let path = dir.join("config.json");
-        let content = serde_json::to_string_pretty(self).map_err(|e| {
-            DeezerError::Api(format!("Failed to serialize config: {e}"))
-        })?;
+        let content = serde_json::to_string_pretty(self)
+            .map_err(|e| DeezerError::Api(format!("Failed to serialize config: {e}")))?;
 
-        fs::write(&path, content).map_err(|e| {
-            DeezerError::Api(format!("Failed to write config: {e}"))
-        })?;
+        fs::write(&path, content)
+            .map_err(|e| DeezerError::Api(format!("Failed to write config: {e}")))?;
 
         Ok(())
     }

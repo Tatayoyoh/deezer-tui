@@ -11,7 +11,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([
             Constraint::Length(1), // Category menu
             Constraint::Length(2), // Shuffle button
-            Constraint::Min(3),   // Favorites table
+            Constraint::Min(3),    // Favorites table
         ])
         .split(area);
 
@@ -68,8 +68,8 @@ fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
 
 fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     if view.favorites_loading {
-        let loading = Paragraph::new(Span::styled("Loading...", Theme::dim()))
-            .alignment(Alignment::Center);
+        let loading =
+            Paragraph::new(Span::styled("Loading...", Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(loading, area);
         return;
     }
