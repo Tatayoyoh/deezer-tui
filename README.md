@@ -3,38 +3,29 @@
 Bored to use 300M of RAM to play music ?
 
 * for developers <3
-* easy to use
+* easy account login
 * low memory footprint
+* compliant with deezer features
 
-Available :
-* Deezer
 
-Planned :
-* ✅ background player, still playeing music
-* ✅ login from browser/deezer.com link/backlink
-* 🔄 search and favorites categories
-* ✅ track context menus
-    [Gérer]
-    * Ajouter aux favoris (ou enlever des favoris)
-    * Ajouter à une playlist
-    * Ne pas me recommander ce titre
-    [Lecture]
-    * Ecouter juste après
-    * Ajouter à la file d'attente
-    * Mix inspiré de ce Titre
-    [Média]
-    * Partager
-    * informations
-	* Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui)
-* Artist page (or popup) when entering an artiste
-* Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung
-* ✅ shortcut modal
-* better UI
-* better shortcuts
-* Coninuours Integration
-* Parameters
-* Displayed sections
-* ✅ Themes
+## Planned
+
+✅ background player, still playeing music<br>
+✅ login from browser/deezer.com link/backlink<br>
+🔄 search and favorites categories<br>
+✅ playing track context menu [ctrl+p]
+✅ focused track context menu [m]
+⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
+⬜ Artist page (or popup) when entering an artiste <br>
+⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
+✅ shortcut modal <br>
+⬜ better UI <br>
+⬜ better shortcuts <br>
+✅ Contiuous Integration <br>
+✅ global app menu [ctrl+o]
+✅ Themes <br>
+⬜ Displayed sections <br>
+⬜ More app parameters <br>
 
 Maybe in futur :
 * Spotify
@@ -44,12 +35,18 @@ Maybe in futur :
 
 ## Build on your system
 
+First install
+```bash
 sudo apt install pkg-config
 sudo apt install libasound2-dev
 curl https://sh.rustup.rs -sSf | sh
 source ~/.bashrc
+```
 
+Build
+```bash
 cargo build --release
+```
 
 ## Other goods projects
 
