@@ -37,7 +37,7 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),  // Tab bar
+            Constraint::Length(3), // Tab bar
             Constraint::Min(5),    // Content area
             Constraint::Length(4), // Player bar
         ])

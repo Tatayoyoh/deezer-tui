@@ -98,7 +98,10 @@ impl SavedState {
             repeat: state.repeat,
             queue: state.queue.clone(),
             queue_index: state.queue_index,
-            was_playing: matches!(state.status, PlaybackStatus::Playing | PlaybackStatus::Paused),
+            was_playing: matches!(
+                state.status,
+                PlaybackStatus::Playing | PlaybackStatus::Paused
+            ),
         }
     }
 
@@ -106,9 +109,8 @@ impl SavedState {
         let Some(path) = Self::file_path() else {
             return Ok(());
         };
-        let json = serde_json::to_string(self).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, e)
-        })?;
+        let json = serde_json::to_string(self)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         std::fs::write(path, json)
     }
 

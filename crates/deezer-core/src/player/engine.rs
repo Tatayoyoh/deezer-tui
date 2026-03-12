@@ -43,17 +43,16 @@ impl PlayerEngine {
         quality: AudioQuality,
     ) -> Result<(), DeezerError> {
         let cursor = Cursor::new(audio_data);
-        let source = Decoder::new(cursor).map_err(|e| {
-            DeezerError::Playback(format!("Failed to decode audio: {e}"))
-        })?;
+        let source = Decoder::new(cursor)
+            .map_err(|e| DeezerError::Playback(format!("Failed to decode audio: {e}")))?;
 
         // Preserve current volume before recreating the sink
         let current_volume = self.state.lock().unwrap().volume;
 
         // Clear the current sink and create a fresh one (Sink can't be reused after stop)
         self.sink.stop();
-        self.sink = Sink::try_new(&self.stream_handle)
-            .map_err(|e| DeezerError::Playback(e.to_string()))?;
+        self.sink =
+            Sink::try_new(&self.stream_handle).map_err(|e| DeezerError::Playback(e.to_string()))?;
         self.sink.set_volume(current_volume);
         self.sink.append(source);
         self.sink.play();

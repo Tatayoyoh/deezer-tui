@@ -10,7 +10,7 @@ use std::fs;
 use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
-use crate::protocol::{socket_path, Command, send_line};
+use crate::protocol::{send_line, socket_path, Command};
 
 fn main() -> Result<()> {
     // Initialize logging to file (stdout/stderr conflict with TUI)
@@ -79,19 +79,17 @@ fn handle_quit() -> Result<()> {
                     return Ok(());
                 }
                 // Drain all data until EOF (daemon sends snapshots before closing)
-                let _ = tokio::time::timeout(
-                    std::time::Duration::from_secs(3),
-                    async {
-                        let mut buf = [0u8; 4096];
-                        loop {
-                            match stream.read(&mut buf).await {
-                                Ok(0) => break, // EOF — daemon closed
-                                Ok(_) => continue,
-                                Err(_) => break,
-                            }
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut buf).await {
+                            Ok(0) => break, // EOF — daemon closed
+                            Ok(_) => continue,
+                            Err(_) => break,
                         }
-                    },
-                ).await;
+                    }
+                })
+                .await;
                 eprintln!("deezer-tui: daemon stopped");
             }
             Err(_) => {

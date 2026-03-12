@@ -93,7 +93,11 @@ fn parse_arl(input: &str) -> Option<String> {
     if arl.len() >= 128 && arl.chars().all(|c| c.is_ascii_hexdigit()) {
         Some(arl.to_string())
     } else {
-        debug!("Invalid ARL format: len={}, input='{}'", arl.len(), &trimmed[..trimmed.len().min(40)]);
+        debug!(
+            "Invalid ARL format: len={}, input='{}'",
+            arl.len(),
+            &trimmed[..trimmed.len().min(40)]
+        );
         None
     }
 }
@@ -114,7 +118,10 @@ fn desktop_file_path() -> PathBuf {
 
 /// Path to the temporary handler script.
 fn handler_script_path() -> PathBuf {
-    PathBuf::from(format!("/tmp/deezer-tui-auth-handler-{}.sh", std::process::id()))
+    PathBuf::from(format!(
+        "/tmp/deezer-tui-auth-handler-{}.sh",
+        std::process::id()
+    ))
 }
 
 /// Path to `~/.config/mimeapps.list`.
@@ -145,7 +152,11 @@ fn setup_uri_handler(auth_file: &Path) -> Result<Option<String>> {
         .and_then(|o| {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if s.is_empty() { None } else { Some(s) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
             } else {
                 None
             }
@@ -159,8 +170,7 @@ fn setup_uri_handler(auth_file: &Path) -> Result<Option<String>> {
         "#!/bin/sh\nARL=\"${{1#deezer://autolog/}}\"\necho \"$ARL\" > '{}'\n",
         auth_file.display()
     );
-    fs::write(&script_path, &script_content)
-        .context("Failed to write handler script")?;
+    fs::write(&script_path, &script_content).context("Failed to write handler script")?;
 
     // Make executable
     Command::new("chmod")
@@ -184,14 +194,11 @@ fn setup_uri_handler(auth_file: &Path) -> Result<Option<String>> {
          Terminal=false\n",
         script_path.display()
     );
-    fs::write(&desktop_path, &desktop_content)
-        .context("Failed to write .desktop file")?;
+    fs::write(&desktop_path, &desktop_content).context("Failed to write .desktop file")?;
 
     // Update desktop database
     if let Some(parent) = desktop_path.parent() {
-        let _ = Command::new("update-desktop-database")
-            .arg(parent)
-            .output();
+        let _ = Command::new("update-desktop-database").arg(parent).output();
     }
 
     // Register as default handler
@@ -288,13 +295,21 @@ fn cleanup_uri_handler(old_handler: Option<&str>) {
     // Update desktop database
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let apps_dir = PathBuf::from(home).join(".local/share/applications");
-    let _ = Command::new("update-desktop-database").arg(&apps_dir).output();
+    let _ = Command::new("update-desktop-database")
+        .arg(&apps_dir)
+        .output();
 }
 
 /// Open a URL in the system browser.
 fn open_browser(url: &str) -> Result<()> {
     // Try xdg-open first (standard on Linux desktops)
-    let browsers = ["xdg-open", "firefox", "chromium", "chromium-browser", "google-chrome"];
+    let browsers = [
+        "xdg-open",
+        "firefox",
+        "chromium",
+        "chromium-browser",
+        "google-chrome",
+    ];
 
     for browser in &browsers {
         match Command::new(browser).arg(url).spawn() {

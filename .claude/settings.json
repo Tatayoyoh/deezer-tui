@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo clippy)",
+      "Read(//home/bob/Téléchargements/**)",
+      "Bash(find crates/deezer-tui/src/ui -name '*.rs' -exec sed -i -e 's/Theme::PRIMARY/Theme::primary\\(\\)/g' -e 's/Theme::SECONDARY/Theme::secondary\\(\\)/g' -e 's/Theme::BG/Theme::bg\\(\\)/g' -e 's/Theme::SURFACE/Theme::surface\\(\\)/g' -e 's/Theme::TEXT_DIM/Theme::text_dim_color\\(\\)/g' -e 's/Theme::TEXT\\\\b/Theme::text_color\\(\\)/g' -e 's/Theme::PROGRESS_FILL/Theme::progress_fill\\(\\)/g' -e 's/Theme::PROGRESS_BG/Theme::progress_bg\\(\\)/g' -e 's/Theme::SUCCESS/Theme::success\\(\\)/g' -e 's/Theme::BORDER_FOCUSED/Theme::border_focused_color\\(\\)/g' -e 's/Theme::BORDER/Theme::border_color\\(\\)/g' -e 's/Theme::TAB_ACTIVE/Theme::tab_active_color\\(\\)/g' -e 's/Theme::TAB_INACTIVE/Theme::tab_inactive_color\\(\\)/g' {} +)",
+      "Bash(cargo clippy -- -W clippy::all)",
+      "Bash(grep -A2 'cpal\\\\|rodio\\\\|alsa\\\\|symphonia' Cargo.toml crates/*/Cargo.toml)",
+      "Bash(circleci config validate .circleci/config.yml)",
+      "Bash(python3 -c \"import yaml; yaml.safe_load\\(open\\(''.circleci/config.yml''\\)\\); print\\(''YAML syntax OK''\\)\")",
+      "Bash(git remote get-url origin)",
+      "mcp__circleci-mcp-server__get_build_failure_logs",
+      "mcp__circleci-mcp-server__get_latest_pipeline_status",
+      "mcp__circleci-mcp-server__list_followed_projects",
+      "Bash(cargo fmt --all)",
+      "Bash(cargo fmt --all -- --check)",
+      "Bash(cargo check --workspace)"
+    ]
+  }
+}

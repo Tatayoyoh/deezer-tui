@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Clear};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::client::{LoginMode, ViewState};
 use crate::theme::Theme;
@@ -70,7 +70,9 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     };
 
     let button_style = if view.login_loading {
-        Style::default().fg(Theme::bg()).bg(Color::Rgb(100, 100, 100))
+        Style::default()
+            .fg(Theme::bg())
+            .bg(Color::Rgb(100, 100, 100))
     } else {
         Style::default()
             .fg(Color::White)
@@ -133,10 +135,7 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
         .title_style(Theme::title());
 
     let input_text = if view.login_input.is_empty() {
-        Span::styled(
-            "Paste your ARL token from browser cookies...",
-            Theme::dim(),
-        )
+        Span::styled("Paste your ARL token from browser cookies...", Theme::dim())
     } else {
         let masked: String = "*".repeat(view.login_input.len().min(40));
         let suffix = if view.login_input.len() > 40 {
@@ -161,10 +160,7 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     } else if let Some(ref error) = view.login_error {
         Span::styled(error.as_str(), Style::default().fg(Color::Red))
     } else {
-        Span::styled(
-            "Enter: connect | Esc: back",
-            Theme::dim(),
-        )
+        Span::styled("Enter: connect | Esc: back", Theme::dim())
     };
     let hint = Paragraph::new(hint_text).alignment(Alignment::Center);
     frame.render_widget(hint, chunks[4]);

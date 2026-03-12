@@ -24,9 +24,8 @@ impl DeezerClient {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, DeezerError> {
         let api_token = self.api_token()?;
-        let url = format!(
-            "{GW_LIGHT_URL}?method={method}&input=3&api_version=1.0&api_token={api_token}"
-        );
+        let url =
+            format!("{GW_LIGHT_URL}?method={method}&input=3&api_version=1.0&api_token={api_token}");
 
         debug!(method, "Gateway API call");
 
@@ -209,7 +208,10 @@ impl DeezerClient {
             .get("data")
             .ok_or_else(|| DeezerError::Api("Missing 'data' in favorite artists".into()))?;
 
-        debug!("favorite_artist sample: {:?}", data.as_array().and_then(|a| a.first()));
+        debug!(
+            "favorite_artist sample: {:?}",
+            data.as_array().and_then(|a| a.first())
+        );
 
         let artists: Vec<ArtistData> = serde_json::from_value(data.clone())
             .map_err(|e| DeezerError::Api(format!("Failed to parse favorite artists: {e}")))?;
@@ -294,13 +296,15 @@ impl DeezerClient {
                 }
                 // Try alternate structure: direct data array
                 if let Some(data) = res.get("data") {
-                    let tracks: Result<Vec<TrackData>, _> =
-                        serde_json::from_value(data.clone());
+                    let tracks: Result<Vec<TrackData>, _> = serde_json::from_value(data.clone());
                     if let Ok(tracks) = tracks {
                         return Ok(tracks);
                     }
                 }
-                debug!("History response structure: {:?}", res.as_object().map(|o| o.keys().collect::<Vec<_>>()));
+                debug!(
+                    "History response structure: {:?}",
+                    res.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                );
                 // Fallback to favorites
                 self.get_favorites().await
             }
@@ -354,10 +358,7 @@ impl DeezerClient {
         playlist_id: &str,
         song_ids: &[&str],
     ) -> Result<(), DeezerError> {
-        let songs: Vec<serde_json::Value> = song_ids
-            .iter()
-            .map(|id| json!([id, 0]))
-            .collect();
+        let songs: Vec<serde_json::Value> = song_ids.iter().map(|id| json!([id, 0])).collect();
         let params = json!({
             "playlist_id": playlist_id,
             "songs": songs,
@@ -413,7 +414,8 @@ impl DeezerClient {
 fn parse_search_section<T: serde::de::DeserializeOwned>(
     section: Option<&serde_json::Value>,
 ) -> Result<Vec<T>, DeezerError> {
-    let section = section.ok_or_else(|| DeezerError::Api("Section not found in search results".into()))?;
+    let section =
+        section.ok_or_else(|| DeezerError::Api("Section not found in search results".into()))?;
     let data = section
         .get("data")
         .ok_or_else(|| DeezerError::Api("Missing 'data' in search section".into()))?;
