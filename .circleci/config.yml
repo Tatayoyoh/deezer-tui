@@ -208,8 +208,7 @@ jobs:
               --generate-notes \
               /tmp/artifacts/deezer-tui-linux-x86_64 \
               /tmp/artifacts/deezer-tui-linux-aarch64 \
-              /tmp/artifacts/deezer-tui-macos-universal \
-              /tmp/artifacts/deezer-tui-windows-x86_64.exe
+              /tmp/artifacts/deezer-tui-macos-universal
 
 workflows:
   # CI on every push to main
@@ -241,18 +240,18 @@ workflows:
               only: /^v.*/
             branches:
               ignore: /.*/
-      - build-windows:
-          filters:
-            tags:
-              only: /^v.*/
-            branches:
-              ignore: /.*/
+      # - build-windows:
+      #     filters:
+      #       tags:
+      #         only: /^v.*/
+      #       branches:
+      #         ignore: /.*/
       - release:
           requires:
             - build-linux-x86_64
             - build-linux-aarch64
             - build-macos
-            - build-windows
+            # - build-windows
           filters:
             tags:
               only: /^v.*/
