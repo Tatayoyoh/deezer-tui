@@ -7,6 +7,14 @@ Bored to use 300M of RAM to play music ?
 * low memory footprint
 * compliant with deezer features
 
+## Install
+
+Linux / Mac
+```bash
+wget -qO deezer-tui "https://github.com/Tatayoyoh/deezer-tui/releases/latest/download/deezer-tui-linux-x86_64"
+chmod +x deezer-tui
+sudo mv deezer-tui /usr/local/bin/deezer-tui
+```
 
 ## Planned
 
