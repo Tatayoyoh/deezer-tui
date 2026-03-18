@@ -16,18 +16,18 @@ chmod +x deezer-tui
 sudo mv deezer-tui /usr/local/bin/deezer-tui
 ```
 
-## Planned
+## Features
 
 ✅ background player, still playeing music<br>
 ✅ login from browser/deezer.com link/backlink<br>
-🔄 search and favorites categories<br>
+✅ search and favorites pages<br>
 ✅ playing track context menu [ctrl+p]
 ✅ focused track context menu [m]
 ⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
 ✅ Album page (or popup) when entering an album <br>
 ⬜ Artist page (or popup) when entering an artiste <br>
 ⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
-⬜ Display waiting list as modal <br>
+✅ Display waiting list as modal <br>
 ✅ shortcut modal <br>
 ⬜ better UI <br>
 ⬜ better shortcuts <br>
@@ -37,11 +37,6 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ⬜ Displayed sections <br>
 ⬜ More app parameters <br>
 
-Maybe in futur :
-* Spotify
-* Youtube
-* SoundCloud
-* local music
 
 ## Build on your system
 
@@ -60,22 +55,15 @@ cargo build --release
 
 ## Other goods projects
 
-https://github.com/ravachol/kew
-
-https://tizonia.org/
-
-https://musikcube.com/
-
-https://github.com/timdubbins/tap
-
-https://github.com/tramhao/termusic
-
-https://www.kariliq.nl/siren/
-
-https://github.com/raziman18/gomu
-
-https://github.com/dhulihan/grump
-
-https://github.com/Kingtous/RustPlayer
+* https://github.com/yne/dzr
+* https://github.com/ravachol/kew
+* https://tizonia.org/
+* https://musikcube.com/
+* https://github.com/timdubbins/tap
+* https://github.com/tramhao/termusic
+* https://www.kariliq.nl/siren/
+* https://github.com/raziman18/gomu
+* https://github.com/dhulihan/grump
+* https://github.com/Kingtous/RustPlayer
 
 
