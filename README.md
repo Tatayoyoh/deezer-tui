@@ -27,6 +27,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Album page (or popup) when entering an album <br>
 ⬜ Artist page (or popup) when entering an artiste <br>
 ⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
+⬜ Display waiting list as modal <br>
 ✅ shortcut modal <br>
 ⬜ better UI <br>
 ⬜ better shortcuts <br>
