@@ -254,6 +254,8 @@ pub enum Overlay {
     ThemePicker { selected: usize },
     /// Album detail view.
     AlbumDetail,
+    /// Waiting list (upcoming tracks in queue).
+    WaitingList { selected: usize },
 }
 
 /// View state used by UI rendering functions.
@@ -745,14 +747,14 @@ impl Client {
     }
 
     fn handle_main_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Popup mode takes priority over overlays (popups can open on top of overlays)
+        if self.view.popup.is_some() {
+            return self.handle_popup_key(key);
+        }
+
         // Overlay mode — intercept all keys
         if self.view.overlay.is_some() {
             return self.handle_overlay_key(key);
-        }
-
-        // Popup mode — intercept all keys
-        if self.view.popup.is_some() {
-            return self.handle_popup_key(key);
         }
 
         // Typing mode (search input)
@@ -817,6 +819,14 @@ impl Client {
 
             // Open album detail page
             KeyCode::Char('a') => self.open_album_detail(),
+
+            // Open waiting list
+            KeyCode::Char('w') => {
+                if !self.view.queue.is_empty() {
+                    self.view.overlay = Some(Overlay::WaitingList { selected: 0 });
+                }
+                KeyAction::Continue
+            }
 
             // Category navigation (h/l or left/right)
             KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
@@ -953,6 +963,9 @@ impl Client {
             Overlay::AlbumDetail => {
                 self.handle_album_detail_key(key)
             }
+            Overlay::WaitingList { .. } => {
+                self.handle_waiting_list_key(key)
+            }
             Overlay::ThemePicker { selected } => {
                 let count = ThemeId::ALL.len();
                 match key.code {
@@ -1077,6 +1090,89 @@ impl Client {
         }
 
         KeyAction::Continue
+    }
+
+    /// Handle key events in the waiting list overlay.
+    fn handle_waiting_list_key(&mut self, key: KeyEvent) -> KeyAction {
+        let selected = match self.view.overlay {
+            Some(Overlay::WaitingList { selected }) => selected,
+            _ => return KeyAction::Continue,
+        };
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('w') => {
+                self.view.overlay = None;
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_sel = selected.saturating_sub(1);
+                self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = self.view.queue.len().saturating_sub(1);
+                let new_sel = (selected + 1).min(max);
+                self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
+                KeyAction::Continue
+            }
+            // Remove from queue (delete/backspace)
+            KeyCode::Delete | KeyCode::Char('d') => {
+                // Can't remove the currently playing track
+                if selected != self.view.queue_index && selected < self.view.queue.len() {
+                    let action =
+                        KeyAction::SendCommand(Command::RemoveFromQueue { index: selected });
+                    // Adjust selection if needed
+                    let new_sel = if selected >= self.view.queue.len().saturating_sub(1) {
+                        selected.saturating_sub(1)
+                    } else {
+                        selected
+                    };
+                    self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
+                    return action;
+                }
+                KeyAction::Continue
+            }
+            // Toggle favorite
+            KeyCode::Char('f') => {
+                if let Some(track) = self.view.queue.get(selected) {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    let cmd = if is_fav {
+                        Command::RemoveFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    } else {
+                        Command::AddFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    };
+                    return KeyAction::SendCommand(cmd);
+                }
+                KeyAction::Continue
+            }
+            // Open full context menu for selected track
+            KeyCode::Char('m') => {
+                if let Some(track) = self.view.queue.get(selected).cloned() {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    self.view.popup = Some(PopupMenu::full(track, is_fav));
+                }
+                KeyAction::Continue
+            }
+            // Player controls still work
+            KeyCode::Char('p') | KeyCode::Char(' ') => {
+                KeyAction::SendCommand(Command::TogglePause)
+            }
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
     }
 
     /// Handle key events when a popup menu is open.

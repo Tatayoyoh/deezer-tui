@@ -36,12 +36,21 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             // Album detail is rendered in the main content area, not as a popup
             return;
         }
+        Some(Overlay::WaitingList { selected }) => {
+            draw_waiting_list(frame, view, *selected);
+            // Don't return — let the popup (context menu) render on top if open
+        }
         None => {}
     }
 
     let Some(ref popup) = view.popup else {
         return;
     };
+
+    // When a popup opens on top of an overlay, add a second backdrop
+    if view.overlay.is_some() {
+        draw_backdrop(frame);
+    }
 
     match &popup.sub_menu {
         Some(SubMenu::PlaylistPicker {
@@ -247,6 +256,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         ("r", "Cycle repeat mode"),
         ("+/-", "Volume up / down"),
         ("a", "Album detail page"),
+        ("w", "Waiting list (queue)"),
         ("m", "Track context menu"),
         ("Ctrl+P", "Playing track menu"),
         ("g", "Shuffle favorites"),
@@ -388,6 +398,99 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
 
     let list = List::new(items);
     frame.render_widget(list, inner);
+}
+
+/// Draw the waiting list (queue) overlay.
+fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
+    let area = frame.area();
+    let queue = &view.queue;
+
+    let visible_count = (queue.len() as u16).min(area.height.saturating_sub(8));
+    let height = visible_count + 5; // header + footer + borders
+    let popup_area = centered_rect(70, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" Waiting List ({} tracks) ", queue.len());
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if queue.is_empty() {
+        let empty = Paragraph::new(Span::styled("Queue is empty", Theme::dim()))
+            .alignment(Alignment::Center);
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    // Split inner into list area + footer hint
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    let items: Vec<ListItem> = queue
+        .iter()
+        .enumerate()
+        .map(|(i, track)| {
+            let dur = track.duration_secs();
+            let is_current = i == view.queue_index;
+            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
+
+            let prefix = if is_current {
+                "▶ "
+            } else if i == selected {
+                "> "
+            } else {
+                "  "
+            };
+
+            let fav_marker = if is_fav { " ♥" } else { "" };
+            let dur_str = format!("{}:{:02}", dur / 60, dur % 60);
+            let line_text = format!(
+                "{}{} — {}  {}{}",
+                prefix, track.title, track.artist, dur_str, fav_marker
+            );
+
+            let style = if is_current {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else if i == selected {
+                Theme::highlight()
+            } else {
+                Theme::text()
+            };
+
+            ListItem::new(Line::from(Span::styled(line_text, style)))
+        })
+        .collect();
+
+    let list = List::new(items);
+    let mut list_state = ListState::default();
+    list_state.select(Some(selected));
+
+    frame.render_stateful_widget(list, chunks[0], &mut list_state);
+
+    // Footer hints
+    let hints = Line::from(vec![
+        Span::styled("d", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(" remove  ", Theme::dim()),
+        Span::styled("f", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(" favorite  ", Theme::dim()),
+        Span::styled("m", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(" menu  ", Theme::dim()),
+        Span::styled("Esc", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(" close", Theme::dim()),
+    ]);
+    let footer = Paragraph::new(hints).alignment(Alignment::Center);
+    frame.render_widget(footer, chunks[1]);
 }
 
 /// Draw a temporary toast notification at the bottom center of the screen.
