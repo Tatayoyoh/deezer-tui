@@ -544,11 +544,22 @@ impl Client {
                         running = false;
                     }
                     KeyAction::SendCommand(cmd) => {
-                        self.send_cmd(&cmd).await?;
+                        if let Err(e) = self.send_cmd(&cmd).await {
+                            debug!("Send command error: {e}");
+                            self.view.status_msg =
+                                Some("Daemon disconnected".into());
+                            running = false;
+                        }
                     }
                     KeyAction::MultiCommand(cmds) => {
                         for cmd in &cmds {
-                            self.send_cmd(cmd).await?;
+                            if let Err(e) = self.send_cmd(cmd).await {
+                                debug!("Send command error: {e}");
+                                self.view.status_msg =
+                                    Some("Daemon disconnected".into());
+                                running = false;
+                                break;
+                            }
                         }
                     }
                     KeyAction::WebLogin => {
@@ -598,9 +609,11 @@ impl Client {
                     self.view.status_msg = Some("Daemon disconnected".into());
                     running = false;
                 }
-                Ok(Err(_)) => {
-                    // Read error
-                    running = false;
+                Ok(Err(e)) => {
+                    // Read/parse error — log but don't crash immediately
+                    debug!("Read error from daemon: {e}");
+                    self.view.status_msg =
+                        Some(format!("Communication error: {e}"));
                 }
                 Err(_) => {
                     // Timeout — no data available, continue

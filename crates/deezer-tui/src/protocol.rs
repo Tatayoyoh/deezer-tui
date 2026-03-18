@@ -85,15 +85,17 @@ pub enum ServerMessage {
 }
 
 /// Screen the daemon is on (login vs main).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Screen {
+    #[default]
     Login,
     Main,
 }
 
 /// Active tab in main view.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ActiveTab {
+    #[default]
     Search,
     Favorites,
     Radio,
@@ -261,52 +263,88 @@ impl FavoritesCategory {
 }
 
 /// Complete state snapshot sent from daemon to client.
+/// All fields use `#[serde(default)]` for forward/backward compatibility
+/// when daemon and client are running different binary versions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DaemonSnapshot {
+    #[serde(default)]
     pub screen: Screen,
+    #[serde(default)]
     pub active_tab: ActiveTab,
 
     // Player state
+    #[serde(default)]
     pub status: PlaybackStatus,
+    #[serde(default)]
     pub current_track: Option<TrackData>,
+    #[serde(default)]
     pub quality: AudioQuality,
+    #[serde(default)]
     pub position_secs: u64,
+    #[serde(default)]
     pub duration_secs: u64,
+    #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default)]
     pub shuffle: bool,
+    #[serde(default)]
     pub repeat: RepeatMode,
 
     // Queue
+    #[serde(default)]
     pub queue: Vec<TrackData>,
+    #[serde(default)]
     pub queue_index: usize,
 
     // Search
+    #[serde(default)]
     pub search_results: Vec<TrackData>,
+    #[serde(default)]
     pub search_selected: usize,
+    #[serde(default)]
     pub search_loading: bool,
+    #[serde(default)]
     pub search_category: SearchCategory,
+    #[serde(default)]
     pub search_display: Vec<DisplayItem>,
 
     // Favorites
+    #[serde(default)]
     pub favorites: Vec<TrackData>,
+    #[serde(default)]
     pub favorites_selected: usize,
+    #[serde(default)]
     pub favorites_loading: bool,
+    #[serde(default)]
     pub favorites_category: FavoritesCategory,
+    #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
 
     // Playlists (for playlist picker in popup menu)
+    #[serde(default)]
     pub playlists: Vec<PlaylistData>,
 
     // Album detail
+    #[serde(default)]
     pub album_detail: Option<AlbumDetail>,
+    #[serde(default)]
     pub album_detail_selected: usize,
+    #[serde(default)]
     pub album_detail_loading: bool,
 
     // UI hints
+    #[serde(default)]
     pub status_msg: Option<String>,
+    #[serde(default)]
     pub login_error: Option<String>,
+    #[serde(default)]
     pub login_loading: bool,
+    #[serde(default)]
     pub user_name: Option<String>,
+}
+
+fn default_volume() -> f32 {
+    0.8
 }
 
 impl Default for DaemonSnapshot {
