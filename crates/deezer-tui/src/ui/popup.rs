@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState};
 
 use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
 use crate::theme::{Theme, ThemeId};
@@ -476,8 +476,18 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         chunks[0],
     );
 
-    // Track list
-    let items: Vec<ListItem> = tracks
+    // Table header
+    let header = Row::new(vec![
+        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::styled("Titre", Theme::dim())),
+        Cell::from(Span::styled("Artiste", Theme::dim())),
+        Cell::from(Span::styled("Album", Theme::dim())),
+        Cell::from(Span::styled("Durée", Theme::dim())),
+    ])
+    .height(1);
+
+    // Table rows
+    let rows: Vec<Row> = tracks
         .iter()
         .enumerate()
         .map(|(i, track)| {
@@ -488,37 +498,54 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
                 .as_ref()
                 .is_some_and(|ct| ct.track_id == track.track_id);
 
-            let prefix = if is_current {
-                "▶ "
-            } else {
-                "  "
-            };
+            let prefix = if is_current { "▶" } else { "" };
             let fav_marker = if is_fav { " ♥" } else { "" };
-            let dur_str = format!("{}:{:02}", dur / 60, dur % 60);
-            let line_text = format!(
-                "{}{} — {}  {}{}",
-                prefix, track.title, track.artist, dur_str, fav_marker
-            );
 
-            let style = if is_current {
+            let num_style = if is_current {
                 Style::default()
                     .fg(Theme::primary())
                     .add_modifier(Modifier::BOLD)
-            } else if i == selected {
-                Theme::highlight()
             } else {
-                Theme::text()
+                Theme::dim()
             };
 
-            ListItem::new(Line::from(Span::styled(line_text, style)))
+            Row::new(vec![
+                Cell::from(Span::styled(
+                    format!("{}{:>3}", prefix, i + 1),
+                    num_style,
+                )),
+                Cell::from(Span::styled(
+                    format!("{}{}", track.title, fav_marker),
+                    Theme::text(),
+                )),
+                Cell::from(Span::styled(
+                    &track.artist,
+                    Style::default().fg(Theme::primary()),
+                )),
+                Cell::from(Span::styled(&track.album, Theme::dim())),
+                Cell::from(Span::styled(
+                    format!("{}:{:02}", dur / 60, dur % 60),
+                    Theme::dim(),
+                )),
+            ])
         })
         .collect();
 
-    let list = List::new(items);
-    let mut list_state = ListState::default();
-    list_state.select(Some(selected));
+    let widths = [
+        Constraint::Length(5),
+        Constraint::Percentage(35),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Length(6),
+    ];
 
-    frame.render_stateful_widget(list, chunks[1], &mut list_state);
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(Theme::highlight())
+        .highlight_symbol("> ");
+
+    let mut table_state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, chunks[1], &mut table_state);
 
     // Footer hints
     let hints = Line::from(vec![
@@ -553,8 +580,8 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let queue = &view.queue;
 
     let visible_count = (queue.len() as u16).min(area.height.saturating_sub(8));
-    let height = visible_count + 5; // header + footer + borders
-    let popup_area = centered_rect(70, height, area);
+    let height = visible_count + 6; // header row + footer + borders
+    let popup_area = centered_rect(80, height, area);
 
     frame.render_widget(Clear, popup_area);
 
@@ -576,13 +603,23 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         return;
     }
 
-    // Split inner into list area + footer hint
+    // Split inner into table area + footer hint
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Min(1), Constraint::Length(1)])
         .split(inner);
 
-    let items: Vec<ListItem> = queue
+    // Table header
+    let header = Row::new(vec![
+        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::styled("Titre", Theme::dim())),
+        Cell::from(Span::styled("Artiste", Theme::dim())),
+        Cell::from(Span::styled("Album", Theme::dim())),
+        Cell::from(Span::styled("Durée", Theme::dim())),
+    ])
+    .height(1);
+
+    let rows: Vec<Row> = queue
         .iter()
         .enumerate()
         .map(|(i, track)| {
@@ -590,40 +627,54 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
             let is_current = i == view.queue_index;
             let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
 
-            let prefix = if is_current {
-                "▶ "
-            } else if i == selected {
-                "> "
-            } else {
-                "  "
-            };
-
+            let prefix = if is_current { "▶" } else { "" };
             let fav_marker = if is_fav { " ♥" } else { "" };
-            let dur_str = format!("{}:{:02}", dur / 60, dur % 60);
-            let line_text = format!(
-                "{}{} — {}  {}{}",
-                prefix, track.title, track.artist, dur_str, fav_marker
-            );
 
-            let style = if is_current {
+            let num_style = if is_current {
                 Style::default()
                     .fg(Theme::primary())
                     .add_modifier(Modifier::BOLD)
-            } else if i == selected {
-                Theme::highlight()
             } else {
-                Theme::text()
+                Theme::dim()
             };
 
-            ListItem::new(Line::from(Span::styled(line_text, style)))
+            Row::new(vec![
+                Cell::from(Span::styled(
+                    format!("{}{:>3}", prefix, i + 1),
+                    num_style,
+                )),
+                Cell::from(Span::styled(
+                    format!("{}{}", track.title, fav_marker),
+                    Theme::text(),
+                )),
+                Cell::from(Span::styled(
+                    &track.artist,
+                    Style::default().fg(Theme::primary()),
+                )),
+                Cell::from(Span::styled(&track.album, Theme::dim())),
+                Cell::from(Span::styled(
+                    format!("{}:{:02}", dur / 60, dur % 60),
+                    Theme::dim(),
+                )),
+            ])
         })
         .collect();
 
-    let list = List::new(items);
-    let mut list_state = ListState::default();
-    list_state.select(Some(selected));
+    let widths = [
+        Constraint::Length(5),
+        Constraint::Percentage(35),
+        Constraint::Percentage(25),
+        Constraint::Percentage(25),
+        Constraint::Length(6),
+    ];
 
-    frame.render_stateful_widget(list, chunks[0], &mut list_state);
+    let table = Table::new(rows, widths)
+        .header(header)
+        .row_highlight_style(Theme::highlight())
+        .highlight_symbol("> ");
+
+    let mut table_state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, chunks[0], &mut table_state);
 
     // Footer hints
     let hints = Line::from(vec![
