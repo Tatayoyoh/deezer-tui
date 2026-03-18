@@ -12,20 +12,23 @@ use tracing_subscriber::EnvFilter;
 
 use crate::protocol::{send_line, socket_path, Command};
 
-fn main() -> Result<()> {
-    // Initialize logging to file (stdout/stderr conflict with TUI)
+/// Initialize file-based logging (no-op if RUST_LOG is not set).
+fn init_logging(path: &str) {
     if std::env::var("RUST_LOG").is_ok() {
-        let log_file = fs::File::create("/tmp/deezer-tui.log")?;
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
-            .with_target(false)
-            .with_file(true)
-            .with_line_number(true)
-            .with_writer(log_file)
-            .with_ansi(false)
-            .init();
+        if let Ok(log_file) = fs::File::create(path) {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .with_target(false)
+                .with_file(true)
+                .with_line_number(true)
+                .with_writer(log_file)
+                .with_ansi(false)
+                .try_init();
+        }
     }
+}
 
+fn main() -> Result<()> {
     // Check for --quit / -q flag
     let args: Vec<String> = std::env::args().collect();
     let quit_mode = args.iter().any(|a| a == "-q" || a == "--quit");
@@ -38,6 +41,7 @@ fn main() -> Result<()> {
     let sock_path = socket_path();
     if try_connect_sync(&sock_path) {
         // Daemon is running — launch as client
+        init_logging("/tmp/deezer-tui.log");
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async {
             let mut client = client::Client::connect().await?;
@@ -142,6 +146,9 @@ fn start_with_fork() -> Result<()> {
                 libc::dup2(devnull.as_raw_fd(), 2); // stderr
             }
 
+            // Initialize daemon logging to its own file (after fork)
+            init_logging("/tmp/deezer-daemon.log");
+
             // Build tokio runtime AFTER fork (no inherited threads)
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
@@ -161,6 +168,8 @@ fn start_with_fork() -> Result<()> {
         }
         _child_pid => {
             // === PARENT: wait for daemon socket, then run as client ===
+            init_logging("/tmp/deezer-tui.log");
+
             // Wait for the daemon to start listening (up to 3 seconds)
             for _ in 0..60 {
                 std::thread::sleep(std::time::Duration::from_millis(50));

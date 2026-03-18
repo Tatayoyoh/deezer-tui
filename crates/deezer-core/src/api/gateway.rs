@@ -2,7 +2,7 @@ use serde_json::json;
 use tracing::debug;
 
 use super::models::{
-    AlbumData, AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData,
+    AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData,
     PodcastData, ProfileData, SearchResults, TrackData,
 };
 use super::DeezerClient;
@@ -234,78 +234,149 @@ impl DeezerClient {
         Ok(items)
     }
 
-    /// Get favorite artists.
+    /// Get favorite artists via the public API.
     pub async fn get_favorite_artists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let params = json!({
-            "user_id": session.user_id,
-            "start": 0,
-            "nb": 2000,
-        });
+        let url = format!("https://api.deezer.com/user/{}/artists?limit=2000", session.user_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
 
-        let results = self.gw_call("favorite_artist.getList", params).await?;
-        let data = results
+        let data = resp
             .get("data")
+            .and_then(|d| d.as_array())
             .ok_or_else(|| DeezerError::Api("Missing 'data' in favorite artists".into()))?;
 
-        debug!(
-            "favorite_artist sample: {:?}",
-            data.as_array().and_then(|a| a.first())
-        );
+        debug!("favorite_artists: {} items", data.len());
 
-        let artists: Vec<ArtistData> = serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse favorite artists: {e}")))?;
-        Ok(artists.iter().map(DisplayItem::from_artist).collect())
+        let items = data
+            .iter()
+            .map(|entry| {
+                let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let nb_fan = entry.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
+                DisplayItem {
+                    col1: name.to_string(),
+                    col2: format_fans(nb_fan),
+                    col3: String::new(),
+                    col4: String::new(),
+                    track: None,
+                    album_id: None,
+                }
+            })
+            .collect();
+
+        Ok(items)
     }
 
-    /// Get favorite albums.
+    /// Get favorite albums via the public API.
     pub async fn get_favorite_albums(&self) -> Result<Vec<DisplayItem>, DeezerError> {
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let params = json!({
-            "user_id": session.user_id,
-            "start": 0,
-            "nb": 2000,
-        });
+        let url = format!("https://api.deezer.com/user/{}/albums?limit=2000", session.user_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
 
-        let results = self.gw_call("favorite_album.getList", params).await?;
-        let data = results
+        let data = resp
             .get("data")
+            .and_then(|d| d.as_array())
             .ok_or_else(|| DeezerError::Api("Missing 'data' in favorite albums".into()))?;
 
-        let albums: Vec<AlbumData> = serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse favorite albums: {e}")))?;
-        Ok(albums.iter().map(DisplayItem::from_album).collect())
+        debug!("favorite_albums: {} items", data.len());
+
+        let items = data
+            .iter()
+            .map(|entry| {
+                let album_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
+                let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let artist = entry
+                    .get("artist")
+                    .and_then(|a| a.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
+                let release_date = entry.get("release_date").and_then(|v| v.as_str()).unwrap_or("");
+                DisplayItem {
+                    col1: title.to_string(),
+                    col2: artist.to_string(),
+                    col3: release_date.to_string(),
+                    col4: format!("{} titres", nb_tracks),
+                    track: None,
+                    album_id,
+                }
+            })
+            .collect();
+
+        Ok(items)
     }
 
     /// Get user playlists.
+    /// Get user playlists via the public API.
     pub async fn get_playlists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let params = json!({
-            "user_id": session.user_id,
-            "start": 0,
-            "nb": 2000,
-        });
+        let url = format!("https://api.deezer.com/user/{}/playlists?limit=2000", session.user_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
 
-        let results = self.gw_call("playlist.getList", params).await?;
-        let data = results
+        let data = resp
             .get("data")
+            .and_then(|d| d.as_array())
             .ok_or_else(|| DeezerError::Api("Missing 'data' in playlists".into()))?;
 
-        let playlists: Vec<PlaylistData> = serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))?;
-        Ok(playlists.iter().map(DisplayItem::from_playlist).collect())
+        debug!("favorite_playlists: {} items", data.len());
+
+        let items = data
+            .iter()
+            .map(|entry| {
+                let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
+                let author = entry
+                    .get("creator")
+                    .and_then(|c| c.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                DisplayItem {
+                    col1: title.to_string(),
+                    col2: author.to_string(),
+                    col3: format!("{} titres", nb_tracks),
+                    col4: String::new(),
+                    track: None,
+                    album_id: None,
+                }
+            })
+            .collect();
+
+        Ok(items)
     }
 
     /// Get listening history (recently played tracks).
@@ -359,27 +430,47 @@ impl DeezerClient {
         }
     }
 
-    /// Get followed users/profiles.
+    /// Get followed users/profiles via the public API.
     pub async fn get_following(&self) -> Result<Vec<DisplayItem>, DeezerError> {
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let params = json!({
-            "user_id": session.user_id,
-            "start": 0,
-            "nb": 2000,
-        });
+        let url = format!("https://api.deezer.com/user/{}/followings?limit=2000", session.user_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
 
-        let results = self.gw_call("user.getFollowings", params).await?;
-        let data = results
+        let data = resp
             .get("data")
+            .and_then(|d| d.as_array())
             .ok_or_else(|| DeezerError::Api("Missing 'data' in following".into()))?;
 
-        let profiles: Vec<ProfileData> = serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse following: {e}")))?;
-        Ok(profiles.iter().map(DisplayItem::from_profile).collect())
+        debug!("following: {} items", data.len());
+
+        let items = data
+            .iter()
+            .map(|entry| {
+                let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                DisplayItem {
+                    col1: name.to_string(),
+                    col2: String::new(),
+                    col3: String::new(),
+                    col4: String::new(),
+                    track: None,
+                    album_id: None,
+                }
+            })
+            .collect();
+
+        Ok(items)
     }
 
     /// Add a track to the user's favorites.
@@ -539,4 +630,14 @@ fn parse_search_section<T: serde::de::DeserializeOwned>(
         .ok_or_else(|| DeezerError::Api("Missing 'data' in search section".into()))?;
     serde_json::from_value(data.clone())
         .map_err(|e| DeezerError::Api(format!("Failed to parse search section: {e}")))
+}
+
+fn format_fans(n: u64) -> String {
+    if n >= 1_000_000 {
+        format!("{:.1}M fans", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K fans", n as f64 / 1_000.0)
+    } else {
+        format!("{n} fans")
+    }
 }
