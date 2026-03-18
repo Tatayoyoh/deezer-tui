@@ -6,7 +6,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
 use deezer_core::api::DeezerClient;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
@@ -50,6 +50,8 @@ enum AsyncResult {
     MixError(String),
     AlbumDetailReady(AlbumDetail),
     AlbumDetailError(String),
+    PlaylistDetailReady(PlaylistDetail),
+    PlaylistDetailError(String),
 }
 
 pub struct Daemon {
@@ -85,6 +87,11 @@ pub struct Daemon {
     album_detail: Option<AlbumDetail>,
     album_detail_selected: usize,
     album_detail_loading: bool,
+
+    // Playlist detail
+    playlist_detail: Option<PlaylistDetail>,
+    playlist_detail_selected: usize,
+    playlist_detail_loading: bool,
 
     // Player
     player_state: Arc<Mutex<PlayerState>>,
@@ -141,6 +148,10 @@ impl Daemon {
             album_detail: None,
             album_detail_selected: 0,
             album_detail_loading: false,
+
+            playlist_detail: None,
+            playlist_detail_selected: 0,
+            playlist_detail_loading: false,
 
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
@@ -531,6 +542,20 @@ impl Daemon {
                     }
                 }
             }
+            Command::GetPlaylistDetail { playlist_id } => {
+                self.start_load_playlist_detail(playlist_id);
+            }
+            Command::PlayFromPlaylist { index } => {
+                if let Some(ref detail) = self.playlist_detail {
+                    if let Some(track) = detail.tracks.get(index).cloned() {
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = detail.tracks.clone();
+                            state.queue_index = index;
+                        }
+                        self.start_play_track(track);
+                    }
+                }
+            }
             Command::Shutdown => {
                 // Handled in the main loop
             }
@@ -566,6 +591,9 @@ impl Daemon {
             album_detail: self.album_detail.clone(),
             album_detail_selected: self.album_detail_selected,
             album_detail_loading: self.album_detail_loading,
+            playlist_detail: self.playlist_detail.clone(),
+            playlist_detail_selected: self.playlist_detail_selected,
+            playlist_detail_loading: self.playlist_detail_loading,
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
@@ -878,6 +906,26 @@ impl Daemon {
         });
     }
 
+    fn start_load_playlist_detail(&mut self, playlist_id: String) {
+        self.playlist_detail_loading = true;
+        self.playlist_detail = None;
+        self.playlist_detail_selected = 0;
+        self.status_msg = Some("Loading playlist...".into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_playlist_detail(&playlist_id).await {
+                Ok(detail) => {
+                    let _ = tx.send(AsyncResult::PlaylistDetailReady(detail));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::PlaylistDetailError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_play_track(&mut self, track: TrackData) {
         let Some(master_key) = self.master_key else {
             self.status_msg = Some("Player not ready yet".into());
@@ -1113,6 +1161,17 @@ impl Daemon {
                 AsyncResult::AlbumDetailError(err) => {
                     self.album_detail_loading = false;
                     self.status_msg = Some(format!("Album error: {err}"));
+                }
+                AsyncResult::PlaylistDetailReady(detail) => {
+                    self.playlist_detail_loading = false;
+                    self.status_msg =
+                        Some(format!("{} — {} tracks", detail.title, detail.tracks.len()));
+                    self.playlist_detail = Some(detail);
+                    self.playlist_detail_selected = 0;
+                }
+                AsyncResult::PlaylistDetailError(err) => {
+                    self.playlist_detail_loading = false;
+                    self.status_msg = Some(format!("Playlist error: {err}"));
                 }
                 AsyncResult::TrackReady {
                     audio_data,

@@ -36,6 +36,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             // Album detail is rendered in the main content area, not as a popup
             return;
         }
+        Some(Overlay::PlaylistDetail { selected }) => {
+            draw_playlist_detail(frame, view, *selected);
+            // Don't return — let the popup (context menu) render on top if open
+        }
         Some(Overlay::WaitingList { selected }) => {
             draw_waiting_list(frame, view, *selected);
             // Don't return — let the popup (context menu) render on top if open
@@ -401,6 +405,149 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
 }
 
 /// Draw the waiting list (queue) overlay.
+/// Draw the playlist detail modal.
+fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
+    let area = frame.area();
+
+    let detail = match &view.playlist_detail {
+        Some(d) => d,
+        None => {
+            // Loading state
+            let popup_area = centered_rect(60, 5, area);
+            frame.render_widget(Clear, popup_area);
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Theme::border_focused())
+                .style(Style::default().bg(Theme::surface()))
+                .title(" Playlist ")
+                .title_style(Theme::title());
+            let msg = Paragraph::new(Span::styled("Loading...", Theme::dim()))
+                .alignment(Alignment::Center)
+                .block(block);
+            frame.render_widget(msg, popup_area);
+            return;
+        }
+    };
+
+    let tracks = &detail.tracks;
+    let visible_count = (tracks.len() as u16).min(area.height.saturating_sub(8));
+    let height = visible_count + 7; // header + title line + separator + footer + borders
+    let popup_area = centered_rect(80, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" {} ", detail.title);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    if tracks.is_empty() {
+        let empty = Paragraph::new(Span::styled("No tracks", Theme::dim()))
+            .alignment(Alignment::Center);
+        frame.render_widget(empty, inner);
+        return;
+    }
+
+    // Split inner: subtitle + list + footer
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // subtitle
+            Constraint::Min(1),   // track list
+            Constraint::Length(1), // footer hints
+        ])
+        .split(inner);
+
+    // Subtitle: creator + track count
+    let subtitle = Line::from(vec![
+        Span::styled(
+            format!("{} — {} titres", detail.creator, detail.nb_tracks),
+            Theme::dim(),
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(subtitle).alignment(Alignment::Center),
+        chunks[0],
+    );
+
+    // Track list
+    let items: Vec<ListItem> = tracks
+        .iter()
+        .enumerate()
+        .map(|(i, track)| {
+            let dur = track.duration_secs();
+            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
+            let is_current = view
+                .current_track
+                .as_ref()
+                .is_some_and(|ct| ct.track_id == track.track_id);
+
+            let prefix = if is_current {
+                "▶ "
+            } else {
+                "  "
+            };
+            let fav_marker = if is_fav { " ♥" } else { "" };
+            let dur_str = format!("{}:{:02}", dur / 60, dur % 60);
+            let line_text = format!(
+                "{}{} — {}  {}{}",
+                prefix, track.title, track.artist, dur_str, fav_marker
+            );
+
+            let style = if is_current {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else if i == selected {
+                Theme::highlight()
+            } else {
+                Theme::text()
+            };
+
+            ListItem::new(Line::from(Span::styled(line_text, style)))
+        })
+        .collect();
+
+    let list = List::new(items);
+    let mut list_state = ListState::default();
+    list_state.select(Some(selected));
+
+    frame.render_stateful_widget(list, chunks[1], &mut list_state);
+
+    // Footer hints
+    let hints = Line::from(vec![
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" play  ", Theme::dim()),
+        Span::styled(
+            "m",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" menu  ", Theme::dim()),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" close", Theme::dim()),
+    ]);
+    let footer = Paragraph::new(hints).alignment(Alignment::Center);
+    frame.render_widget(footer, chunks[2]);
+}
+
 fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let area = frame.area();
     let queue = &view.queue;

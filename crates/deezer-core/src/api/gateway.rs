@@ -2,7 +2,7 @@ use serde_json::json;
 use tracing::debug;
 
 use super::models::{
-    AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData,
+    AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData, PlaylistDetail,
     PodcastData, ProfileData, SearchResults, TrackData,
 };
 use super::DeezerClient;
@@ -227,6 +227,7 @@ impl DeezerClient {
                     col4: format!("{} titres", nb_tracks),
                     track: None,
                     album_id,
+                    playlist_id: None,
                 }
             })
             .collect();
@@ -271,6 +272,7 @@ impl DeezerClient {
                     col4: String::new(),
                     track: None,
                     album_id: None,
+                    playlist_id: None,
                 }
             })
             .collect();
@@ -322,6 +324,7 @@ impl DeezerClient {
                     col4: format!("{} titres", nb_tracks),
                     track: None,
                     album_id,
+                    playlist_id: None,
                 }
             })
             .collect();
@@ -358,6 +361,7 @@ impl DeezerClient {
         let items = data
             .iter()
             .map(|entry| {
+                let playlist_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
                 let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
                 let author = entry
@@ -372,6 +376,7 @@ impl DeezerClient {
                     col4: String::new(),
                     track: None,
                     album_id: None,
+                    playlist_id,
                 }
             })
             .collect();
@@ -466,6 +471,7 @@ impl DeezerClient {
                     col4: String::new(),
                     track: None,
                     album_id: None,
+                    playlist_id: None,
                 }
             })
             .collect();
@@ -601,6 +607,69 @@ impl DeezerClient {
             release_date,
             cover_url,
             label,
+            tracks,
+        })
+    }
+
+    /// Get playlist details (title, creator, tracks) via the public API.
+    pub async fn get_playlist_detail(
+        &self,
+        playlist_id: &str,
+    ) -> Result<PlaylistDetail, DeezerError> {
+        let url = format!("https://api.deezer.com/playlist/{}", playlist_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        if let Some(err) = resp.get("error") {
+            return Err(DeezerError::Api(
+                err.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown playlist error")
+                    .to_string(),
+            ));
+        }
+
+        let title = resp.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let creator = resp
+            .get("creator")
+            .and_then(|c| c.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let nb_tracks = resp.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // Parse track IDs from the "tracks.data" array
+        let track_ids: Vec<String> = resp
+            .get("tracks")
+            .and_then(|t| t.get("data"))
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Fetch full track data via gw-light (includes TRACK_TOKEN)
+        let track_id_refs: Vec<&str> = track_ids.iter().map(|s| s.as_str()).collect();
+        let tracks = if !track_id_refs.is_empty() {
+            self.get_tracks(&track_id_refs).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PlaylistDetail {
+            playlist_id: playlist_id.to_string(),
+            title,
+            creator,
+            nb_tracks,
             tracks,
         })
     }
