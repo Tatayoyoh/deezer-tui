@@ -53,6 +53,12 @@ Build
 cargo build --release
 ```
 
+## Made with our brave Claude Code
+
+And drived by human goods ideas.
+
+To be honest, I am not a Rust developer :p. Rust was a good match for this project 👍.
+
 ## Other goods projects
 
 * https://github.com/yne/dzr
