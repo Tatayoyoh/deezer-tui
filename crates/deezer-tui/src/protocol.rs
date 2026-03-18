@@ -67,6 +67,8 @@ pub enum Command {
     AddToQueue { track: TrackData },
     /// Start a mix inspired by a track.
     StartMix { track_id: String },
+    /// Remove a track from the queue by index.
+    RemoveFromQueue { index: usize },
     /// Load album detail (tracks, metadata).
     GetAlbumDetail { album_id: String },
     /// Play a track from the album detail view.

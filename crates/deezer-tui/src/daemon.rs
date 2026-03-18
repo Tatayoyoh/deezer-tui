@@ -502,6 +502,17 @@ impl Daemon {
                 }
                 self.status_msg = Some(format!("\"{}\" added to queue", track.title));
             }
+            Command::RemoveFromQueue { index } => {
+                if let Ok(mut state) = self.player_state.lock() {
+                    if index < state.queue.len() && index != state.queue_index {
+                        state.queue.remove(index);
+                        // Adjust queue_index if the removed track was before the current one
+                        if index < state.queue_index {
+                            state.queue_index = state.queue_index.saturating_sub(1);
+                        }
+                    }
+                }
+            }
             Command::StartMix { track_id } => {
                 self.start_mix(track_id);
             }
