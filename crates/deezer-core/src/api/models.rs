@@ -24,9 +24,10 @@ pub enum DeezerError {
     TrackUnavailable(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AudioQuality {
     Mp3_64,
+    #[default]
     Mp3_128,
     Mp3_320,
     Flac,

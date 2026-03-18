@@ -5,16 +5,18 @@ use serde::{Deserialize, Serialize};
 use crate::api::models::{AudioQuality, TrackData};
 use crate::Config;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PlaybackStatus {
+    #[default]
     Stopped,
     Playing,
     Paused,
     Loading,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RepeatMode {
+    #[default]
     Off,
     Track,
     Queue,
