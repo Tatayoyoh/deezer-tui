@@ -211,7 +211,10 @@ impl DeezerClient {
         let items = data
             .iter()
             .map(|entry| {
-                let album_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
+                let album_id = entry
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string());
                 let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let artist = entry
                     .get("artist")
@@ -242,7 +245,10 @@ impl DeezerClient {
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let url = format!("https://api.deezer.com/user/{}/artists?limit=2000", session.user_id);
+        let url = format!(
+            "https://api.deezer.com/user/{}/artists?limit=2000",
+            session.user_id
+        );
         let resp: serde_json::Value = self
             .http
             .get(&url)
@@ -287,7 +293,10 @@ impl DeezerClient {
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let url = format!("https://api.deezer.com/user/{}/albums?limit=2000", session.user_id);
+        let url = format!(
+            "https://api.deezer.com/user/{}/albums?limit=2000",
+            session.user_id
+        );
         let resp: serde_json::Value = self
             .http
             .get(&url)
@@ -308,7 +317,10 @@ impl DeezerClient {
         let items = data
             .iter()
             .map(|entry| {
-                let album_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
+                let album_id = entry
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string());
                 let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let artist = entry
                     .get("artist")
@@ -316,7 +328,10 @@ impl DeezerClient {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
-                let release_date = entry.get("release_date").and_then(|v| v.as_str()).unwrap_or("");
+                let release_date = entry
+                    .get("release_date")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 DisplayItem {
                     col1: title.to_string(),
                     col2: artist.to_string(),
@@ -340,7 +355,10 @@ impl DeezerClient {
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let url = format!("https://api.deezer.com/user/{}/playlists?limit=2000", session.user_id);
+        let url = format!(
+            "https://api.deezer.com/user/{}/playlists?limit=2000",
+            session.user_id
+        );
         let resp: serde_json::Value = self
             .http
             .get(&url)
@@ -361,7 +379,10 @@ impl DeezerClient {
         let items = data
             .iter()
             .map(|entry| {
-                let playlist_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
+                let playlist_id = entry
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string());
                 let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
                 let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
                 let author = entry
@@ -442,7 +463,10 @@ impl DeezerClient {
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let url = format!("https://api.deezer.com/user/{}/followings?limit=2000", session.user_id);
+        let url = format!(
+            "https://api.deezer.com/user/{}/followings?limit=2000",
+            session.user_id
+        );
         let resp: serde_json::Value = self
             .http
             .get(&url)
@@ -538,10 +562,7 @@ impl DeezerClient {
     }
 
     /// Get album details (title, artist, tracks, cover, release date) via the public API.
-    pub async fn get_album_detail(
-        &self,
-        album_id: &str,
-    ) -> Result<AlbumDetail, DeezerError> {
+    pub async fn get_album_detail(&self, album_id: &str) -> Result<AlbumDetail, DeezerError> {
         let url = format!("https://api.deezer.com/album/{}", album_id);
         let resp: serde_json::Value = self
             .http
@@ -562,7 +583,11 @@ impl DeezerClient {
             ));
         }
 
-        let title = resp.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = resp
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let artist = resp
             .get("artist")
             .and_then(|a| a.get("name"))
@@ -570,14 +595,22 @@ impl DeezerClient {
             .unwrap_or("")
             .to_string();
         let nb_tracks = resp.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
-        let release_date = resp.get("release_date").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let release_date = resp
+            .get("release_date")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let cover_url = resp
             .get("cover_medium")
             .or_else(|| resp.get("cover_small"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let label = resp.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let label = resp
+            .get("label")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         // Parse tracks from the "tracks.data" array
         let track_ids: Vec<String> = resp
@@ -636,7 +669,11 @@ impl DeezerClient {
             ));
         }
 
-        let title = resp.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let title = resp
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let creator = resp
             .get("creator")
             .and_then(|c| c.get("name"))

@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
+use deezer_core::api::models::{
+    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.

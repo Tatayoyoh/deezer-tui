@@ -6,7 +6,9 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
+use deezer_core::api::models::{
+    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+};
 use deezer_core::api::DeezerClient;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};

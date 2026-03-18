@@ -17,7 +17,9 @@ use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tracing::debug;
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
+use deezer_core::api::models::{
+    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+};
 use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
@@ -557,8 +559,7 @@ impl Client {
                     KeyAction::SendCommand(cmd) => {
                         if let Err(e) = self.send_cmd(&cmd).await {
                             debug!("Send command error: {e}");
-                            self.view.status_msg =
-                                Some("Daemon disconnected".into());
+                            self.view.status_msg = Some("Daemon disconnected".into());
                             running = false;
                         }
                     }
@@ -566,8 +567,7 @@ impl Client {
                         for cmd in &cmds {
                             if let Err(e) = self.send_cmd(cmd).await {
                                 debug!("Send command error: {e}");
-                                self.view.status_msg =
-                                    Some("Daemon disconnected".into());
+                                self.view.status_msg = Some("Daemon disconnected".into());
                                 running = false;
                                 break;
                             }
@@ -623,8 +623,7 @@ impl Client {
                 Ok(Err(e)) => {
                     // Read/parse error — log but don't crash immediately
                     debug!("Read error from daemon: {e}");
-                    self.view.status_msg =
-                        Some(format!("Communication error: {e}"));
+                    self.view.status_msg = Some(format!("Communication error: {e}"));
                 }
                 Err(_) => {
                     // Timeout — no data available, continue
@@ -849,12 +848,11 @@ impl Client {
             KeyCode::Enter => {
                 // Check if the selected item is an album (has album_id but no track)
                 let item = match self.view.active_tab {
-                    ActiveTab::Search => {
-                        self.view.search_display.get(self.view.search_selected)
-                    }
-                    ActiveTab::Favorites => {
-                        self.view.favorites_display.get(self.view.favorites_selected)
-                    }
+                    ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
+                    ActiveTab::Favorites => self
+                        .view
+                        .favorites_display
+                        .get(self.view.favorites_selected),
                     _ => None,
                 };
                 if let Some(item) = item {
@@ -862,13 +860,10 @@ impl Client {
                         if let Some(album_id) = item.album_id.clone() {
                             self.view.overlay = Some(Overlay::AlbumDetail);
                             self.view.album_detail_selected = 0;
-                            return KeyAction::SendCommand(Command::GetAlbumDetail {
-                                album_id,
-                            });
+                            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
                         if let Some(playlist_id) = item.playlist_id.clone() {
-                            self.view.overlay =
-                                Some(Overlay::PlaylistDetail { selected: 0 });
+                            self.view.overlay = Some(Overlay::PlaylistDetail { selected: 0 });
                             return KeyAction::SendCommand(Command::GetPlaylistDetail {
                                 playlist_id,
                             });
@@ -879,11 +874,9 @@ impl Client {
                     ActiveTab::Search => KeyAction::SendCommand(Command::PlayFromSearch {
                         index: self.view.search_selected,
                     }),
-                    ActiveTab::Favorites => {
-                        KeyAction::SendCommand(Command::PlayFromFavorites {
-                            index: self.view.favorites_selected,
-                        })
-                    }
+                    ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
+                        index: self.view.favorites_selected,
+                    }),
                     _ => KeyAction::Continue,
                 }
             }
@@ -976,15 +969,9 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            Overlay::AlbumDetail => {
-                self.handle_album_detail_key(key)
-            }
-            Overlay::PlaylistDetail { .. } => {
-                self.handle_playlist_detail_key(key)
-            }
-            Overlay::WaitingList { .. } => {
-                self.handle_waiting_list_key(key)
-            }
+            Overlay::AlbumDetail => self.handle_album_detail_key(key),
+            Overlay::PlaylistDetail { .. } => self.handle_playlist_detail_key(key),
+            Overlay::WaitingList { .. } => self.handle_waiting_list_key(key),
             Overlay::ThemePicker { selected } => {
                 let count = ThemeId::ALL.len();
                 match key.code {
@@ -1045,15 +1032,14 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.view.album_detail_selected =
-                    self.view.album_detail_selected.saturating_sub(1);
+                self.view.album_detail_selected = self.view.album_detail_selected.saturating_sub(1);
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 if let Some(ref detail) = self.view.album_detail {
                     if !detail.tracks.is_empty() {
-                        self.view.album_detail_selected = (self.view.album_detail_selected + 1)
-                            .min(detail.tracks.len() - 1);
+                        self.view.album_detail_selected =
+                            (self.view.album_detail_selected + 1).min(detail.tracks.len() - 1);
                     }
                 }
                 KeyAction::Continue
@@ -1063,9 +1049,7 @@ impl Client {
                 KeyAction::SendCommand(Command::PlayFromAlbum { index })
             }
             // Player controls still work in album detail
-            KeyCode::Char('p') | KeyCode::Char(' ') => {
-                KeyAction::SendCommand(Command::TogglePause)
-            }
+            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -1141,9 +1125,7 @@ impl Client {
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Enter => {
-                KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected })
-            }
+            KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
             // Context menu for selected track
             KeyCode::Char('m') => {
                 if let Some(track) = self
@@ -1159,9 +1141,7 @@ impl Client {
                 KeyAction::Continue
             }
             // Player controls
-            KeyCode::Char('p') | KeyCode::Char(' ') => {
-                KeyAction::SendCommand(Command::TogglePause)
-            }
+            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -1242,9 +1222,7 @@ impl Client {
                 KeyAction::Continue
             }
             // Player controls still work
-            KeyCode::Char('p') | KeyCode::Char(' ') => {
-                KeyAction::SendCommand(Command::TogglePause)
-            }
+            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {

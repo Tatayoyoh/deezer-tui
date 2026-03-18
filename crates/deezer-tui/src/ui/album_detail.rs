@@ -16,9 +16,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     }
 
     let Some(ref detail) = view.album_detail else {
-        let msg =
-            Paragraph::new(Span::styled("No album loaded", Theme::dim()))
-                .alignment(Alignment::Center);
+        let msg = Paragraph::new(Span::styled("No album loaded", Theme::dim()))
+            .alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
     };
@@ -48,7 +47,7 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
         .constraints([
             Constraint::Length(12), // Album art placeholder
             Constraint::Length(1),  // Spacer
-            Constraint::Min(6),    // Metadata
+            Constraint::Min(6),     // Metadata
         ])
         .split(inner);
 
@@ -76,7 +75,10 @@ fn draw_album_art(frame: &mut Frame, area: Rect) {
 
     // Top border
     let top = "┌".to_string() + &"─".repeat((width - 2) as usize) + "┐";
-    lines.push(Line::from(Span::styled(top, Style::default().fg(dim_color))));
+    lines.push(Line::from(Span::styled(
+        top,
+        Style::default().fg(dim_color),
+    )));
 
     // Inner area with music note
     let inner_h = height.saturating_sub(2) as usize;
@@ -84,28 +86,13 @@ fn draw_album_art(frame: &mut Frame, area: Rect) {
 
     for i in 0..inner_h {
         let content = if i == mid.saturating_sub(1) {
-            format!(
-                "│{:^w$}│",
-                "♫  ♪  ♫",
-                w = (width - 2) as usize
-            )
+            format!("│{:^w$}│", "♫  ♪  ♫", w = (width - 2) as usize)
         } else if i == mid {
-            format!(
-                "│{:^w$}│",
-                "♪  ♫  ♪",
-                w = (width - 2) as usize
-            )
+            format!("│{:^w$}│", "♪  ♫  ♪", w = (width - 2) as usize)
         } else if i == mid + 1 {
-            format!(
-                "│{:^w$}│",
-                "♫  ♪  ♫",
-                w = (width - 2) as usize
-            )
+            format!("│{:^w$}│", "♫  ♪  ♫", w = (width - 2) as usize)
         } else {
-            format!(
-                "│{}│",
-                " ".repeat((width - 2) as usize)
-            )
+            format!("│{}│", " ".repeat((width - 2) as usize))
         };
 
         let style = if i >= mid.saturating_sub(1) && i <= mid + 1 {
@@ -162,29 +149,18 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "Esc  Back",
-        Theme::dim(),
-    )));
-    lines.push(Line::from(Span::styled(
-        "Enter  Play track",
-        Theme::dim(),
-    )));
+    lines.push(Line::from(Span::styled("Esc  Back", Theme::dim())));
+    lines.push(Line::from(Span::styled("Enter  Play track", Theme::dim())));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
 }
 
 /// Draw the right column: track list.
-fn draw_track_list(
-    frame: &mut Frame,
-    detail: &AlbumDetail,
-    selected: usize,
-    area: Rect,
-) {
+fn draw_track_list(frame: &mut Frame, detail: &AlbumDetail, selected: usize, area: Rect) {
     if detail.tracks.is_empty() {
-        let msg = Paragraph::new(Span::styled("No tracks", Theme::dim()))
-            .alignment(Alignment::Center);
+        let msg =
+            Paragraph::new(Span::styled("No tracks", Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
     }
