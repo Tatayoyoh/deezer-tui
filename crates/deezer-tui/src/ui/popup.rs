@@ -32,6 +32,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             draw_theme_picker(frame, *selected);
             return;
         }
+        Some(Overlay::AlbumDetail) => {
+            // Album detail is rendered in the main content area, not as a popup
+            return;
+        }
         None => {}
     }
 
@@ -242,6 +246,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         ("s", "Toggle shuffle"),
         ("r", "Cycle repeat mode"),
         ("+/-", "Volume up / down"),
+        ("a", "Album detail page"),
         ("m", "Track context menu"),
         ("Ctrl+P", "Playing track menu"),
         ("g", "Shuffle favorites"),

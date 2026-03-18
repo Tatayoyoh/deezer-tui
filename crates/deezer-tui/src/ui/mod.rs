@@ -1,3 +1,4 @@
+pub mod album_detail;
 pub mod common;
 pub mod downloads;
 pub mod favorites;
@@ -10,7 +11,7 @@ pub mod search;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Tabs};
 
-use crate::client::ViewState;
+use crate::client::{Overlay, ViewState};
 use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
 
@@ -46,12 +47,16 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
     // Tab bar
     draw_tabs(frame, view, chunks[0]);
 
-    // Content area (based on active tab)
-    match view.active_tab {
-        ActiveTab::Search => search::draw(frame, view, chunks[1]),
-        ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
-        ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
-        ActiveTab::Downloads => downloads::draw(frame, chunks[1]),
+    // Content area: album detail overlay replaces tab content
+    if view.overlay == Some(Overlay::AlbumDetail) {
+        album_detail::draw(frame, view, chunks[1]);
+    } else {
+        match view.active_tab {
+            ActiveTab::Search => search::draw(frame, view, chunks[1]),
+            ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
+            ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
+            ActiveTab::Downloads => downloads::draw(frame, chunks[1]),
+        }
     }
 
     // Player bar

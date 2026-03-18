@@ -24,6 +24,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ playing track context menu [ctrl+p]
 ✅ focused track context menu [m]
 ⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
+✅ Album page (or popup) when entering an album <br>
 ⬜ Artist page (or popup) when entering an artiste <br>
 ⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
 ✅ shortcut modal <br>

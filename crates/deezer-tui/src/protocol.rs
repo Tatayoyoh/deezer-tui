@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -67,6 +67,10 @@ pub enum Command {
     AddToQueue { track: TrackData },
     /// Start a mix inspired by a track.
     StartMix { track_id: String },
+    /// Load album detail (tracks, metadata).
+    GetAlbumDetail { album_id: String },
+    /// Play a track from the album detail view.
+    PlayFromAlbum { index: usize },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -150,11 +154,39 @@ impl SearchCategory {
         match self {
             Self::Track => ["Titre", "Artiste", "Album", "Durée"],
             Self::Artist => ["Artiste", "Fans", "", ""],
-            Self::Album => ["Album", "Artiste", "Titres", ""],
+            Self::Album => ["Album", "Artiste", "", "Titres"],
             Self::Playlist => ["Playlist", "Auteur", "Titres", ""],
             Self::Podcast => ["Podcast", "Description", "", ""],
             Self::Episode => ["Épisode", "Podcast", "", "Durée"],
             Self::Profile => ["Profil", "", "", ""],
+        }
+    }
+
+    /// Column width constraints for this category's table.
+    pub fn column_widths(&self) -> [ratatui::prelude::Constraint; 5] {
+        use ratatui::prelude::Constraint;
+        match self {
+            Self::Album => [
+                Constraint::Length(4),
+                Constraint::Percentage(40),
+                Constraint::Percentage(30),
+                Constraint::Length(0),
+                Constraint::Length(10),
+            ],
+            Self::Artist => [
+                Constraint::Length(4),
+                Constraint::Percentage(45),
+                Constraint::Percentage(25),
+                Constraint::Length(0),
+                Constraint::Length(0),
+            ],
+            _ => [
+                Constraint::Length(4),
+                Constraint::Percentage(35),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Length(6),
+            ],
         }
     }
 
@@ -209,7 +241,7 @@ impl FavoritesCategory {
         match self {
             Self::RecentlyPlayed | Self::Tracks => ["Titre", "Artiste", "Album", "Durée"],
             Self::Artists => ["Artiste", "Fans", "", ""],
-            Self::Albums => ["Album", "Artiste", "Titres", ""],
+            Self::Albums => ["Album", "Artiste", "", "Titres"],
             Self::Playlists => ["Playlist", "Auteur", "Titres", ""],
             Self::Following => ["Profil", "", "", ""],
         }
@@ -265,6 +297,11 @@ pub struct DaemonSnapshot {
     // Playlists (for playlist picker in popup menu)
     pub playlists: Vec<PlaylistData>,
 
+    // Album detail
+    pub album_detail: Option<AlbumDetail>,
+    pub album_detail_selected: usize,
+    pub album_detail_loading: bool,
+
     // UI hints
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
@@ -298,6 +335,9 @@ impl Default for DaemonSnapshot {
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
             playlists: Vec::new(),
+            album_detail: None,
+            album_detail_selected: 0,
+            album_detail_loading: false,
             status_msg: None,
             login_error: None,
             login_loading: false,

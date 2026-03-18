@@ -103,6 +103,10 @@ pub struct TrackData {
     #[serde(rename = "ALB_PICTURE")]
     #[serde(default)]
     pub album_picture: String,
+    #[serde(rename = "ALB_ID")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_optional_id")]
+    pub album_id: Option<String>,
     #[serde(rename = "TRACK_TOKEN")]
     #[serde(default)]
     pub track_token: Option<String>,
@@ -163,9 +167,15 @@ pub struct AlbumData {
     #[serde(rename = "ART_NAME")]
     #[serde(default)]
     pub artist: String,
-    #[serde(rename = "NUMBER_TRACK")]
+    #[serde(rename = "NUMBER_TRACK", alias = "NB_SONG")]
     #[serde(default)]
     pub nb_tracks: u64,
+    #[serde(rename = "PHYSICAL_RELEASE_DATE", alias = "DIGITAL_RELEASE_DATE")]
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(rename = "NB_FAN")]
+    #[serde(default)]
+    pub nb_fan: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +233,19 @@ pub struct ProfileData {
     pub name: String,
 }
 
+/// Full album detail returned from the public API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlbumDetail {
+    pub album_id: String,
+    pub title: String,
+    pub artist: String,
+    pub nb_tracks: u64,
+    pub release_date: String,
+    pub cover_url: String,
+    pub label: String,
+    pub tracks: Vec<TrackData>,
+}
+
 /// A unified display item for rendering in tables.
 /// Adapts different Deezer data types into a common 4-column format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -233,6 +256,9 @@ pub struct DisplayItem {
     pub col4: String,
     /// Original track data, if this item is playable.
     pub track: Option<TrackData>,
+    /// Album ID, if this item represents or belongs to an album.
+    #[serde(default)]
+    pub album_id: Option<String>,
 }
 
 impl DisplayItem {
@@ -244,6 +270,7 @@ impl DisplayItem {
             col3: track.album.clone(),
             col4: format!("{}:{:02}", dur / 60, dur % 60),
             track: Some(track.clone()),
+            album_id: None,
         }
     }
 
@@ -254,6 +281,7 @@ impl DisplayItem {
             col3: String::new(),
             col4: String::new(),
             track: None,
+            album_id: None,
         }
     }
 
@@ -261,9 +289,10 @@ impl DisplayItem {
         Self {
             col1: album.title.clone(),
             col2: album.artist.clone(),
-            col3: format!("{} titres", album.nb_tracks),
-            col4: String::new(),
+            col3: album.release_date.clone(),
+            col4: format!("{} titres", album.nb_tracks),
             track: None,
+            album_id: Some(album.album_id.clone()),
         }
     }
 
@@ -274,6 +303,7 @@ impl DisplayItem {
             col3: format!("{} titres", playlist.nb_songs),
             col4: String::new(),
             track: None,
+            album_id: None,
         }
     }
 
@@ -284,6 +314,7 @@ impl DisplayItem {
             col3: String::new(),
             col4: String::new(),
             track: None,
+            album_id: None,
         }
     }
 
@@ -295,6 +326,7 @@ impl DisplayItem {
             col3: String::new(),
             col4: format!("{}:{:02}", dur / 60, dur % 60),
             track: None,
+            album_id: None,
         }
     }
 
@@ -305,6 +337,7 @@ impl DisplayItem {
             col3: String::new(),
             col4: String::new(),
             track: None,
+            album_id: None,
         }
     }
 }
@@ -349,6 +382,58 @@ where
     }
 
     deserializer.deserialize_any(StringOrNumber)
+}
+
+/// Deezer sends IDs as either strings or numbers, or may be missing. Returns Option<String>.
+fn deserialize_optional_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct OptionalId;
+
+    impl<'de> de::Visitor<'de> for OptionalId {
+        type Value = Option<String>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a string, number, or null")
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Option<String>, E> {
+            if v == 0 {
+                Ok(None)
+            } else {
+                Ok(Some(v.to_string()))
+            }
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Option<String>, E> {
+            if v <= 0 {
+                Ok(None)
+            } else {
+                Ok(Some(v.to_string()))
+            }
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<String>, E> {
+            if v.is_empty() || v == "0" {
+                Ok(None)
+            } else {
+                Ok(Some(v.to_string()))
+            }
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Option<String>, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Option<String>, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(OptionalId)
 }
 
 /// Deezer sends IDs as either strings or numbers. This always returns a String.
