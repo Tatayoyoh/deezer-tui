@@ -1,5 +1,7 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+};
 
 use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
 use crate::theme::{Theme, ThemeId};
@@ -448,8 +450,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
     frame.render_widget(block, popup_area);
 
     if tracks.is_empty() {
-        let empty = Paragraph::new(Span::styled("No tracks", Theme::dim()))
-            .alignment(Alignment::Center);
+        let empty =
+            Paragraph::new(Span::styled("No tracks", Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(empty, inner);
         return;
     }
@@ -459,18 +461,16 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // subtitle
-            Constraint::Min(1),   // track list
+            Constraint::Min(1),    // track list
             Constraint::Length(1), // footer hints
         ])
         .split(inner);
 
     // Subtitle: creator + track count
-    let subtitle = Line::from(vec![
-        Span::styled(
-            format!("{} — {} titres", detail.creator, detail.nb_tracks),
-            Theme::dim(),
-        ),
-    ]);
+    let subtitle = Line::from(vec![Span::styled(
+        format!("{} — {} titres", detail.creator, detail.nb_tracks),
+        Theme::dim(),
+    )]);
     frame.render_widget(
         Paragraph::new(subtitle).alignment(Alignment::Center),
         chunks[0],
@@ -510,10 +510,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
             };
 
             Row::new(vec![
-                Cell::from(Span::styled(
-                    format!("{}{:>3}", prefix, i + 1),
-                    num_style,
-                )),
+                Cell::from(Span::styled(format!("{}{:>3}", prefix, i + 1), num_style)),
                 Cell::from(Span::styled(
                     format!("{}{}", track.title, fav_marker),
                     Theme::text(),
@@ -639,10 +636,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
             };
 
             Row::new(vec![
-                Cell::from(Span::styled(
-                    format!("{}{:>3}", prefix, i + 1),
-                    num_style,
-                )),
+                Cell::from(Span::styled(format!("{}{:>3}", prefix, i + 1), num_style)),
                 Cell::from(Span::styled(
                     format!("{}{}", track.title, fav_marker),
                     Theme::text(),
@@ -678,13 +672,33 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     // Footer hints
     let hints = Line::from(vec![
-        Span::styled("d", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "d",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" remove  ", Theme::dim()),
-        Span::styled("f", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "f",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" favorite  ", Theme::dim()),
-        Span::styled("m", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "m",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" menu  ", Theme::dim()),
-        Span::styled("Esc", Style::default().fg(Theme::primary()).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" close", Theme::dim()),
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);

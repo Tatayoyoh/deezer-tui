@@ -131,15 +131,15 @@ fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     let title = format!(" Results ({}) ", view.search_display.len());
     let widths = view.search_category.column_widths();
     let table = Table::new(rows, widths)
-    .header(header)
-    .block(
-        Block::default()
-            .borders(Borders::NONE)
-            .title(title)
-            .title_style(Theme::title()),
-    )
-    .row_highlight_style(Theme::highlight())
-    .highlight_symbol("> ");
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .title(title)
+                .title_style(Theme::title()),
+        )
+        .row_highlight_style(Theme::highlight())
+        .highlight_symbol("> ");
 
     let mut table_state = TableState::default().with_selected(Some(view.search_selected));
     frame.render_stateful_widget(table, area, &mut table_state);
