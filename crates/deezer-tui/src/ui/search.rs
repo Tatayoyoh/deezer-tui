@@ -129,16 +129,8 @@ fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         .collect();
 
     let title = format!(" Results ({}) ", view.search_display.len());
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Length(4),
-            Constraint::Percentage(35),
-            Constraint::Percentage(25),
-            Constraint::Percentage(25),
-            Constraint::Length(6),
-        ],
-    )
+    let widths = view.search_category.column_widths();
+    let table = Table::new(rows, widths)
     .header(header)
     .block(
         Block::default()

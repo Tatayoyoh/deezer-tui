@@ -17,7 +17,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tracing::debug;
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
@@ -59,6 +59,7 @@ pub enum PopupAction {
     MixFromTrack,
     Share,
     TrackInfo,
+    ViewAlbum,
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +142,11 @@ impl PopupMenu {
                 label: "── Media ──".into(),
                 action: PopupAction::Header,
                 is_header: true,
+            },
+            PopupMenuItem {
+                label: "Track album".into(),
+                action: PopupAction::ViewAlbum,
+                is_header: false,
             },
             PopupMenuItem {
                 label: "Share".into(),
@@ -246,6 +252,8 @@ pub enum Overlay {
     Settings { selected: usize },
     /// Theme picker.
     ThemePicker { selected: usize },
+    /// Album detail view.
+    AlbumDetail,
 }
 
 /// View state used by UI rendering functions.
@@ -275,6 +283,9 @@ pub struct ViewState {
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
     pub playlists: Vec<PlaylistData>,
+    pub album_detail: Option<AlbumDetail>,
+    pub album_detail_selected: usize,
+    pub album_detail_loading: bool,
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
     pub login_loading: bool,
@@ -342,6 +353,9 @@ impl ViewState {
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
             playlists: snap.playlists.clone(),
+            album_detail: snap.album_detail.clone(),
+            album_detail_selected: snap.album_detail_selected,
+            album_detail_loading: snap.album_detail_loading,
             status_msg: snap.status_msg.clone(),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
@@ -385,6 +399,9 @@ impl ViewState {
         self.favorites_loading = snap.favorites_loading;
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
+        self.album_detail = snap.album_detail;
+        // Don't overwrite album_detail_selected — it's managed client-side
+        self.album_detail_loading = snap.album_detail_loading;
         self.status_msg = snap.status_msg;
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
@@ -785,6 +802,9 @@ impl Client {
                 KeyAction::Continue
             }
 
+            // Open album detail page
+            KeyCode::Char('a') => self.open_album_detail(),
+
             // Category navigation (h/l or left/right)
             KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
             KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
@@ -793,16 +813,41 @@ impl Client {
             KeyCode::Up | KeyCode::Char('k') => KeyAction::SendCommand(Command::SelectUp),
             KeyCode::Down | KeyCode::Char('j') => KeyAction::SendCommand(Command::SelectDown),
 
-            // Play selected track
-            KeyCode::Enter => match self.view.active_tab {
-                ActiveTab::Search => KeyAction::SendCommand(Command::PlayFromSearch {
-                    index: self.view.search_selected,
-                }),
-                ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
-                    index: self.view.favorites_selected,
-                }),
-                _ => KeyAction::Continue,
-            },
+            // Play selected track or open album detail
+            KeyCode::Enter => {
+                // Check if the selected item is an album (has album_id but no track)
+                let item = match self.view.active_tab {
+                    ActiveTab::Search => {
+                        self.view.search_display.get(self.view.search_selected)
+                    }
+                    ActiveTab::Favorites => {
+                        self.view.favorites_display.get(self.view.favorites_selected)
+                    }
+                    _ => None,
+                };
+                if let Some(item) = item {
+                    if item.track.is_none() {
+                        if let Some(album_id) = item.album_id.clone() {
+                            self.view.overlay = Some(Overlay::AlbumDetail);
+                            self.view.album_detail_selected = 0;
+                            return KeyAction::SendCommand(Command::GetAlbumDetail {
+                                album_id,
+                            });
+                        }
+                    }
+                }
+                match self.view.active_tab {
+                    ActiveTab::Search => KeyAction::SendCommand(Command::PlayFromSearch {
+                        index: self.view.search_selected,
+                    }),
+                    ActiveTab::Favorites => {
+                        KeyAction::SendCommand(Command::PlayFromFavorites {
+                            index: self.view.favorites_selected,
+                        })
+                    }
+                    _ => KeyAction::Continue,
+                }
+            }
 
             // Shuffle favorites
             KeyCode::Char('g') => {
@@ -892,6 +937,9 @@ impl Client {
                 }
                 KeyAction::Continue
             }
+            Overlay::AlbumDetail => {
+                self.handle_album_detail_key(key)
+            }
             Overlay::ThemePicker { selected } => {
                 let count = ThemeId::ALL.len();
                 match key.code {
@@ -942,6 +990,80 @@ impl Client {
             let is_fav = self.view.is_track_favorite(&track.track_id);
             self.view.popup = Some(PopupMenu::full(track, is_fav));
         }
+    }
+
+    /// Handle key events in the album detail overlay.
+    fn handle_album_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.view.overlay = None;
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.view.album_detail_selected =
+                    self.view.album_detail_selected.saturating_sub(1);
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if let Some(ref detail) = self.view.album_detail {
+                    if !detail.tracks.is_empty() {
+                        self.view.album_detail_selected = (self.view.album_detail_selected + 1)
+                            .min(detail.tracks.len() - 1);
+                    }
+                }
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                let index = self.view.album_detail_selected;
+                KeyAction::SendCommand(Command::PlayFromAlbum { index })
+            }
+            // Player controls still work in album detail
+            KeyCode::Char('p') | KeyCode::Char(' ') => {
+                KeyAction::SendCommand(Command::TogglePause)
+            }
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Open the album detail overlay for the selected item.
+    fn open_album_detail(&mut self) -> KeyAction {
+        let item = match self.view.active_tab {
+            ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
+            ActiveTab::Favorites => self
+                .view
+                .favorites_display
+                .get(self.view.favorites_selected),
+            _ => None,
+        };
+
+        // Try to get album_id from the DisplayItem directly (album search/favorites)
+        if let Some(album_id) = item.and_then(|i| i.album_id.clone()) {
+            self.view.overlay = Some(Overlay::AlbumDetail);
+            self.view.album_detail_selected = 0;
+            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
+        }
+
+        // For tracks, get album_id from the embedded TrackData
+        if let Some(album_id) = item
+            .and_then(|i| i.track.as_ref())
+            .and_then(|t| t.album_id.clone())
+        {
+            self.view.overlay = Some(Overlay::AlbumDetail);
+            self.view.album_detail_selected = 0;
+            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
+        }
+
+        KeyAction::Continue
     }
 
     /// Handle key events when a popup menu is open.
@@ -1112,6 +1234,22 @@ impl Client {
                     popup.sub_menu = Some(SubMenu::TrackInfo);
                 }
                 KeyAction::Continue
+            }
+            PopupAction::ViewAlbum => {
+                if let Some(ref album_id) = track.album_id {
+                    let album_id = album_id.clone();
+                    self.view.popup = None;
+                    self.view.overlay = Some(Overlay::AlbumDetail);
+                    self.view.album_detail_selected = 0;
+                    KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
+                } else {
+                    self.view.popup = None;
+                    self.view.toast = Some(Toast::new(
+                        "No album info available".into(),
+                        Duration::from_secs(2),
+                    ));
+                    KeyAction::Continue
+                }
             }
         }
     }

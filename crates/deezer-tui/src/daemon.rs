@@ -6,7 +6,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
-use deezer_core::api::models::{AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
 use deezer_core::api::DeezerClient;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
@@ -48,6 +48,8 @@ enum AsyncResult {
     DislikeError(String),
     MixReady(Vec<TrackData>),
     MixError(String),
+    AlbumDetailReady(AlbumDetail),
+    AlbumDetailError(String),
 }
 
 pub struct Daemon {
@@ -78,6 +80,11 @@ pub struct Daemon {
 
     // Playlists (for popup menu playlist picker)
     playlists: Vec<PlaylistData>,
+
+    // Album detail
+    album_detail: Option<AlbumDetail>,
+    album_detail_selected: usize,
+    album_detail_loading: bool,
 
     // Player
     player_state: Arc<Mutex<PlayerState>>,
@@ -130,6 +137,10 @@ impl Daemon {
             favorites_display: Vec::new(),
 
             playlists: Vec::new(),
+
+            album_detail: None,
+            album_detail_selected: 0,
+            album_detail_loading: false,
 
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
@@ -494,6 +505,21 @@ impl Daemon {
             Command::StartMix { track_id } => {
                 self.start_mix(track_id);
             }
+            Command::GetAlbumDetail { album_id } => {
+                self.start_load_album_detail(album_id);
+            }
+            Command::PlayFromAlbum { index } => {
+                if let Some(ref detail) = self.album_detail {
+                    if let Some(track) = detail.tracks.get(index).cloned() {
+                        // Set queue from album tracks
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = detail.tracks.clone();
+                            state.queue_index = index;
+                        }
+                        self.start_play_track(track);
+                    }
+                }
+            }
             Command::Shutdown => {
                 // Handled in the main loop
             }
@@ -526,6 +552,9 @@ impl Daemon {
             favorites_category: self.favorites_category,
             favorites_display: self.favorites_display.clone(),
             playlists: self.playlists.clone(),
+            album_detail: self.album_detail.clone(),
+            album_detail_selected: self.album_detail_selected,
+            album_detail_loading: self.album_detail_loading,
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
@@ -818,6 +847,26 @@ impl Daemon {
         });
     }
 
+    fn start_load_album_detail(&mut self, album_id: String) {
+        self.album_detail_loading = true;
+        self.album_detail = None;
+        self.album_detail_selected = 0;
+        self.status_msg = Some("Loading album...".into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_album_detail(&album_id).await {
+                Ok(detail) => {
+                    let _ = tx.send(AsyncResult::AlbumDetailReady(detail));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::AlbumDetailError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_play_track(&mut self, track: TrackData) {
         let Some(master_key) = self.master_key else {
             self.status_msg = Some("Player not ready yet".into());
@@ -1042,6 +1091,17 @@ impl Daemon {
                 }
                 AsyncResult::MixError(err) => {
                     self.status_msg = Some(format!("Mix error: {err}"));
+                }
+                AsyncResult::AlbumDetailReady(detail) => {
+                    self.album_detail_loading = false;
+                    self.status_msg =
+                        Some(format!("{} — {} tracks", detail.title, detail.tracks.len()));
+                    self.album_detail = Some(detail);
+                    self.album_detail_selected = 0;
+                }
+                AsyncResult::AlbumDetailError(err) => {
+                    self.album_detail_loading = false;
+                    self.status_msg = Some(format!("Album error: {err}"));
                 }
                 AsyncResult::TrackReady {
                     audio_data,

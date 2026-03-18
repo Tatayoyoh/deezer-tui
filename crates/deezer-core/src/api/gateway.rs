@@ -2,8 +2,8 @@ use serde_json::json;
 use tracing::debug;
 
 use super::models::{
-    AlbumData, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData, PodcastData,
-    ProfileData, SearchResults, TrackData,
+    AlbumData, AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData,
+    PodcastData, ProfileData, SearchResults, TrackData,
 };
 use super::DeezerClient;
 
@@ -140,6 +140,11 @@ impl DeezerClient {
         query: &str,
         category: &str,
     ) -> Result<Vec<DisplayItem>, DeezerError> {
+        // Use the public API for album search (richer data: nested artist, nb_tracks).
+        if category == "ALBUM" {
+            return self.search_albums_public(query).await;
+        }
+
         let params = json!({
             "query": query,
             "filter": "ALL",
@@ -160,11 +165,6 @@ impl DeezerClient {
                 let section = results.get("ARTIST");
                 let artists: Vec<ArtistData> = parse_search_section(section)?;
                 Ok(artists.iter().map(DisplayItem::from_artist).collect())
-            }
-            "ALBUM" => {
-                let section = results.get("ALBUM");
-                let albums: Vec<AlbumData> = parse_search_section(section)?;
-                Ok(albums.iter().map(DisplayItem::from_album).collect())
             }
             "PLAYLIST" => {
                 let section = results.get("PLAYLIST");
@@ -188,6 +188,50 @@ impl DeezerClient {
             }
             _ => Ok(Vec::new()),
         }
+    }
+
+    /// Search albums via the Deezer public API (returns richer data than gw-light).
+    async fn search_albums_public(&self, query: &str) -> Result<Vec<DisplayItem>, DeezerError> {
+        let resp: serde_json::Value = self
+            .http
+            .get("https://api.deezer.com/search/album")
+            .query(&[("q", query), ("limit", "40")])
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let data = resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in album search".into()))?;
+
+        let items = data
+            .iter()
+            .map(|entry| {
+                let album_id = entry.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string());
+                let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                let artist = entry
+                    .get("artist")
+                    .and_then(|a| a.get("name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                DisplayItem {
+                    col1: title.to_string(),
+                    col2: artist.to_string(),
+                    col3: String::new(),
+                    col4: format!("{} titres", nb_tracks),
+                    track: None,
+                    album_id,
+                }
+            })
+            .collect();
+
+        Ok(items)
     }
 
     /// Get favorite artists.
@@ -394,6 +438,80 @@ impl DeezerClient {
 
         serde_json::from_value(data.clone())
             .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))
+    }
+
+    /// Get album details (title, artist, tracks, cover, release date) via the public API.
+    pub async fn get_album_detail(
+        &self,
+        album_id: &str,
+    ) -> Result<AlbumDetail, DeezerError> {
+        let url = format!("https://api.deezer.com/album/{}", album_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        if let Some(err) = resp.get("error") {
+            return Err(DeezerError::Api(
+                err.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown album error")
+                    .to_string(),
+            ));
+        }
+
+        let title = resp.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let artist = resp
+            .get("artist")
+            .and_then(|a| a.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let nb_tracks = resp.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
+        let release_date = resp.get("release_date").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let cover_url = resp
+            .get("cover_medium")
+            .or_else(|| resp.get("cover_small"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let label = resp.get("label").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+        // Parse tracks from the "tracks.data" array
+        let track_ids: Vec<String> = resp
+            .get("tracks")
+            .and_then(|t| t.get("data"))
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Fetch full track data via gw-light (includes TRACK_TOKEN)
+        let track_id_refs: Vec<&str> = track_ids.iter().map(|s| s.as_str()).collect();
+        let tracks = if !track_id_refs.is_empty() {
+            self.get_tracks(&track_id_refs).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        Ok(AlbumDetail {
+            album_id: album_id.to_string(),
+            title,
+            artist,
+            nb_tracks,
+            release_date,
+            cover_url,
+            label,
+            tracks,
+        })
     }
 
     /// Get a smart radio mix inspired by a track.
