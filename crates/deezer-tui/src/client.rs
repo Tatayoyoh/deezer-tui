@@ -17,7 +17,7 @@ use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tracing::debug;
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
 use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
@@ -254,6 +254,8 @@ pub enum Overlay {
     ThemePicker { selected: usize },
     /// Album detail view.
     AlbumDetail,
+    /// Playlist detail modal.
+    PlaylistDetail { selected: usize },
     /// Waiting list (upcoming tracks in queue).
     WaitingList { selected: usize },
 }
@@ -288,6 +290,8 @@ pub struct ViewState {
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
     pub album_detail_loading: bool,
+    pub playlist_detail: Option<PlaylistDetail>,
+    pub playlist_detail_loading: bool,
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
     pub login_loading: bool,
@@ -358,6 +362,8 @@ impl ViewState {
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
             album_detail_loading: snap.album_detail_loading,
+            playlist_detail: snap.playlist_detail.clone(),
+            playlist_detail_loading: snap.playlist_detail_loading,
             status_msg: snap.status_msg.clone(),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
@@ -404,6 +410,9 @@ impl ViewState {
         self.album_detail = snap.album_detail;
         // Don't overwrite album_detail_selected — it's managed client-side
         self.album_detail_loading = snap.album_detail_loading;
+        self.playlist_detail = snap.playlist_detail;
+        // Don't overwrite playlist_detail selected — it's managed client-side via Overlay
+        self.playlist_detail_loading = snap.playlist_detail_loading;
         self.status_msg = snap.status_msg;
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
@@ -857,6 +866,13 @@ impl Client {
                                 album_id,
                             });
                         }
+                        if let Some(playlist_id) = item.playlist_id.clone() {
+                            self.view.overlay =
+                                Some(Overlay::PlaylistDetail { selected: 0 });
+                            return KeyAction::SendCommand(Command::GetPlaylistDetail {
+                                playlist_id,
+                            });
+                        }
                     }
                 }
                 match self.view.active_tab {
@@ -962,6 +978,9 @@ impl Client {
             }
             Overlay::AlbumDetail => {
                 self.handle_album_detail_key(key)
+            }
+            Overlay::PlaylistDetail { .. } => {
+                self.handle_playlist_detail_key(key)
             }
             Overlay::WaitingList { .. } => {
                 self.handle_waiting_list_key(key)
@@ -1090,6 +1109,71 @@ impl Client {
         }
 
         KeyAction::Continue
+    }
+
+    /// Handle key events in the playlist detail overlay.
+    fn handle_playlist_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        let selected = match self.view.overlay {
+            Some(Overlay::PlaylistDetail { selected }) => selected,
+            _ => return KeyAction::Continue,
+        };
+
+        let track_count = self
+            .view
+            .playlist_detail
+            .as_ref()
+            .map(|d| d.tracks.len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc => {
+                self.view.overlay = None;
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_sel = selected.saturating_sub(1);
+                self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = track_count.saturating_sub(1);
+                let new_sel = (selected + 1).min(max);
+                self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected })
+            }
+            // Context menu for selected track
+            KeyCode::Char('m') => {
+                if let Some(track) = self
+                    .view
+                    .playlist_detail
+                    .as_ref()
+                    .and_then(|d| d.tracks.get(selected))
+                    .cloned()
+                {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    self.view.popup = Some(PopupMenu::full(track, is_fav));
+                }
+                KeyAction::Continue
+            }
+            // Player controls
+            KeyCode::Char('p') | KeyCode::Char(' ') => {
+                KeyAction::SendCommand(Command::TogglePause)
+            }
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
     }
 
     /// Handle key events in the waiting list overlay.

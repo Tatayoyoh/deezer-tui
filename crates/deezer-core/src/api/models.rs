@@ -247,6 +247,16 @@ pub struct AlbumDetail {
     pub tracks: Vec<TrackData>,
 }
 
+/// Full playlist detail returned from the public API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlaylistDetail {
+    pub playlist_id: String,
+    pub title: String,
+    pub creator: String,
+    pub nb_tracks: u64,
+    pub tracks: Vec<TrackData>,
+}
+
 /// A unified display item for rendering in tables.
 /// Adapts different Deezer data types into a common 4-column format.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +270,9 @@ pub struct DisplayItem {
     /// Album ID, if this item represents or belongs to an album.
     #[serde(default)]
     pub album_id: Option<String>,
+    /// Playlist ID, if this item represents a playlist.
+    #[serde(default)]
+    pub playlist_id: Option<String>,
 }
 
 impl DisplayItem {
@@ -272,6 +285,7 @@ impl DisplayItem {
             col4: format!("{}:{:02}", dur / 60, dur % 60),
             track: Some(track.clone()),
             album_id: None,
+            playlist_id: None,
         }
     }
 
@@ -283,6 +297,7 @@ impl DisplayItem {
             col4: String::new(),
             track: None,
             album_id: None,
+            playlist_id: None,
         }
     }
 
@@ -294,6 +309,7 @@ impl DisplayItem {
             col4: format!("{} titres", album.nb_tracks),
             track: None,
             album_id: Some(album.album_id.clone()),
+            playlist_id: None,
         }
     }
 
@@ -305,6 +321,7 @@ impl DisplayItem {
             col4: String::new(),
             track: None,
             album_id: None,
+            playlist_id: Some(playlist.playlist_id.clone()),
         }
     }
 
@@ -316,6 +333,7 @@ impl DisplayItem {
             col4: String::new(),
             track: None,
             album_id: None,
+            playlist_id: None,
         }
     }
 
@@ -328,6 +346,7 @@ impl DisplayItem {
             col4: format!("{}:{:02}", dur / 60, dur % 60),
             track: None,
             album_id: None,
+            playlist_id: None,
         }
     }
 
@@ -339,6 +358,7 @@ impl DisplayItem {
             col4: String::new(),
             track: None,
             album_id: None,
+            playlist_id: None,
         }
     }
 }

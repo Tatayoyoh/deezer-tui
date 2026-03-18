@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, TrackData};
+use deezer_core::api::models::{AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -73,6 +73,10 @@ pub enum Command {
     GetAlbumDetail { album_id: String },
     /// Play a track from the album detail view.
     PlayFromAlbum { index: usize },
+    /// Load playlist detail (tracks, metadata).
+    GetPlaylistDetail { playlist_id: String },
+    /// Play a track from the playlist detail view.
+    PlayFromPlaylist { index: usize },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -334,6 +338,14 @@ pub struct DaemonSnapshot {
     #[serde(default)]
     pub album_detail_loading: bool,
 
+    // Playlist detail
+    #[serde(default)]
+    pub playlist_detail: Option<PlaylistDetail>,
+    #[serde(default)]
+    pub playlist_detail_selected: usize,
+    #[serde(default)]
+    pub playlist_detail_loading: bool,
+
     // UI hints
     #[serde(default)]
     pub status_msg: Option<String>,
@@ -378,6 +390,9 @@ impl Default for DaemonSnapshot {
             album_detail: None,
             album_detail_selected: 0,
             album_detail_loading: false,
+            playlist_detail: None,
+            playlist_detail_selected: 0,
+            playlist_detail_loading: false,
             status_msg: None,
             login_error: None,
             login_loading: false,
