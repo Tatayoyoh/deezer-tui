@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::client::ViewState;
+use crate::i18n::t;
 use crate::theme::Theme;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
@@ -48,7 +49,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     } else {
         Line::from(vec![
             status_icon,
-            Span::styled("No track loaded", Theme::dim()),
+            Span::styled(t().no_track_loaded, Theme::dim()),
         ])
     };
     frame.render_widget(Paragraph::new(track_info), chunks[0]);
@@ -85,10 +86,11 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     } else {
         Theme::dim()
     };
+    let s = t();
     let repeat_label = match view.repeat {
-        RepeatMode::Off => "[r] Repeat",
-        RepeatMode::Queue => "[r] Repeat All",
-        RepeatMode::Track => "[r] Repeat One",
+        RepeatMode::Off => format!("[r] {}", s.repeat),
+        RepeatMode::Queue => format!("[r] {}", s.repeat_all),
+        RepeatMode::Track => format!("[r] {}", s.repeat_one),
     };
     let repeat_style = if view.repeat != RepeatMode::Off {
         Style::default()
@@ -103,21 +105,21 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let controls = Line::from(vec![
         Span::styled("  ", Theme::dim()),
         Span::styled("[p]", Theme::text()),
-        Span::styled(" Play/Pause  ", Theme::dim()),
+        Span::styled(format!(" {}  ", s.play_pause), Theme::dim()),
         Span::styled("[n]", Theme::text()),
-        Span::styled(" Next  ", Theme::dim()),
+        Span::styled(format!(" {}  ", s.next), Theme::dim()),
         Span::styled("[b]", Theme::text()),
-        Span::styled(" Prev  ", Theme::dim()),
-        Span::styled("[s] Shuffle", shuffle_style),
+        Span::styled(format!(" {}  ", s.prev), Theme::dim()),
+        Span::styled(format!("[s] {}", s.shuffle), shuffle_style),
         Span::styled("  ", Theme::dim()),
-        Span::styled(repeat_label, repeat_style),
-        Span::styled(format!("  [+/-] Vol: {vol_pct}%"), Theme::dim()),
+        Span::styled(&repeat_label, repeat_style),
+        Span::styled(format!("  [+/-] {}: {vol_pct}%", s.vol), Theme::dim()),
         Span::styled(
             format!("  {status_text}  "),
             Style::default().fg(Color::Cyan),
         ),
         Span::styled("[?]", Theme::text()),
-        Span::styled(" Help", Theme::dim()),
+        Span::styled(format!(" {}", s.help), Theme::dim()),
     ]);
 
     frame.render_widget(Paragraph::new(controls), chunks[2]);

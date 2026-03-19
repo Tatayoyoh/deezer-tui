@@ -34,7 +34,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Contiuous Integration <br>
 ✅ global app menu [ctrl+o]
 ✅ Themes <br>
-⬜ Displayed sections <br>
+✅ Translations <br>
 ⬜ More app parameters <br>
 
 

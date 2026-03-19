@@ -2,6 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
 use crate::client::ViewState;
+use crate::i18n::t;
 use crate::protocol::FavoritesCategory;
 use crate::theme::Theme;
 
@@ -26,6 +27,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
 }
 
 fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect) {
+    let s = t();
     let spans: Vec<Span> = FavoritesCategory::ALL
         .iter()
         .enumerate()
@@ -36,13 +38,13 @@ fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect)
             }
             if *cat == current {
                 parts.push(Span::styled(
-                    cat.label(),
+                    s.favorites_category_label(*cat),
                     Style::default()
                         .fg(Theme::primary())
                         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                 ));
             } else {
-                parts.push(Span::styled(cat.label(), Theme::dim()));
+                parts.push(Span::styled(s.favorites_category_label(*cat), Theme::dim()));
             }
             parts
         })
@@ -57,7 +59,7 @@ fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
     let button = Paragraph::new(Line::from(vec![
         Span::styled("  [g] ", Theme::dim()),
         Span::styled(
-            "Jouer al\u{00e9}atoirement mes favoris",
+            t().shuffle_favorites,
             Style::default()
                 .fg(Theme::secondary())
                 .add_modifier(Modifier::BOLD),
@@ -67,24 +69,22 @@ fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
 }
 
 fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
     if view.favorites_loading {
         let loading =
-            Paragraph::new(Span::styled("Loading...", Theme::dim())).alignment(Alignment::Center);
+            Paragraph::new(Span::styled(s.loading, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(loading, area);
         return;
     }
 
     if view.favorites_display.is_empty() {
-        let empty = Paragraph::new(Span::styled(
-            "No favorites yet \u{2014} add some on Deezer!",
-            Theme::dim(),
-        ))
-        .alignment(Alignment::Center);
+        let empty =
+            Paragraph::new(Span::styled(s.no_favorites, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(empty, area);
         return;
     }
 
-    let headers = view.favorites_category.headers();
+    let headers = s.favorites_category_headers(view.favorites_category);
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
         Cell::from(Span::styled(headers[0], Theme::dim())),
@@ -112,7 +112,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         })
         .collect();
 
-    let title = format!(" Favorites ({}) ", view.favorites_display.len());
+    let title = s.favorites_title(view.favorites_display.len());
     let table = Table::new(
         rows,
         [
