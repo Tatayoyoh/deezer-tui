@@ -29,8 +29,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
 ✅ Display waiting list as modal <br>
 ✅ shortcut modal <br>
-⬜ better UI <br>
-⬜ better shortcuts <br>
+🔄 better UI <br>
+🔄 better shortcuts <br>
 ✅ Contiuous Integration <br>
 ✅ global app menu [ctrl+o]
 ✅ Themes <br>

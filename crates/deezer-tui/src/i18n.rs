@@ -151,9 +151,8 @@ pub struct Strings {
     pub settings: &'static str,
     pub settings_shortcuts: &'static str,
     pub settings_themes: &'static str,
-    pub settings_sections: &'static str,
-    pub settings_parameters: &'static str,
     pub settings_language: &'static str,
+    pub settings_logout: &'static str,
 
     // --- Themes ---
     pub themes: &'static str,
@@ -183,8 +182,16 @@ pub struct Strings {
     pub hint_remove: &'static str,
     pub hint_favorite: &'static str,
 
-    // --- Radio / Downloads ---
-    pub radios_placeholder: &'static str,
+    // --- Radio ---
+    pub radios_loading: &'static str,
+    pub radios_no_results: &'static str,
+    pub radios_filter_typing: &'static str,
+    pub radios_filter_normal: &'static str,
+    pub radios_filter_placeholder: &'static str,
+    pub radios_title: &'static str,
+    pub header_radio: &'static str,
+
+    // --- Downloads ---
     pub downloads_placeholder: &'static str,
 
     // --- Toasts / status ---
@@ -336,13 +343,18 @@ impl Strings {
     pub fn playlist_item(&self, name: &str, count: u64) -> String {
         format!("{} ({} {})", name, count, self.header_tracks)
     }
+
+    /// Format "Radios (N)"
+    pub fn radios_count_title(&self, count: usize) -> String {
+        format!(" {} ({}) ", self.radios_title, count)
+    }
 }
 
 // ── English ──────────────────────────────────────────────────────────
 static EN: Strings = Strings {
     tab_search: " Search ",
     tab_favorites: " Favorites ",
-    tab_radios: " Radios / Podcasts ",
+    tab_radios: " Radios ",
     tab_downloads: " Downloads ",
 
     login_connecting: "Connecting...",
@@ -426,9 +438,8 @@ static EN: Strings = Strings {
     settings: " Settings ",
     settings_shortcuts: "Keyboard shortcuts",
     settings_themes: "Themes",
-    settings_sections: "Displayed sections",
-    settings_parameters: "Parameters",
     settings_language: "Language",
+    settings_logout: "Logout",
 
     themes: " Themes ",
     official_deezer_themes: "  Official Deezer themes",
@@ -453,7 +464,14 @@ static EN: Strings = Strings {
     hint_remove: " remove  ",
     hint_favorite: " favorite  ",
 
-    radios_placeholder: "Radios and podcasts will appear here",
+    radios_loading: "Loading radios...",
+    radios_no_results: "No radios found",
+    radios_filter_typing: " Filter (Enter to confirm, Esc to cancel) ",
+    radios_filter_normal: " Filter (press / to type) ",
+    radios_filter_placeholder: "Press / or Ctrl+F to filter radios...",
+    radios_title: "Radios",
+    header_radio: "Radio",
+
     downloads_placeholder: "Downloads \u{2014} coming soon",
 
     link_copied: "Link copied to clipboard!",
@@ -491,7 +509,7 @@ static EN: Strings = Strings {
 static FR: Strings = Strings {
     tab_search: " Recherche ",
     tab_favorites: " Favoris ",
-    tab_radios: " Radios / Podcasts ",
+    tab_radios: " Radios ",
     tab_downloads: " Téléchargements ",
 
     login_connecting: "Connexion...",
@@ -575,9 +593,8 @@ static FR: Strings = Strings {
     settings: " Paramètres ",
     settings_shortcuts: "Raccourcis clavier",
     settings_themes: "Thèmes",
-    settings_sections: "Sections affichées",
-    settings_parameters: "Paramètres",
     settings_language: "Langue",
+    settings_logout: "Déconnexion",
 
     themes: " Thèmes ",
     official_deezer_themes: "  Thèmes officiels Deezer",
@@ -602,7 +619,14 @@ static FR: Strings = Strings {
     hint_remove: " supprimer  ",
     hint_favorite: " favori  ",
 
-    radios_placeholder: "Les radios et podcasts apparaîtront ici",
+    radios_loading: "Chargement des radios...",
+    radios_no_results: "Aucune radio trouvée",
+    radios_filter_typing: " Filtre (Entrée pour valider, Esc pour annuler) ",
+    radios_filter_normal: " Filtre (appuyez sur / pour écrire) ",
+    radios_filter_placeholder: "Appuyez sur / ou Ctrl+F pour filtrer les radios...",
+    radios_title: "Radios",
+    header_radio: "Radio",
+
     downloads_placeholder: "Téléchargements \u{2014} bientôt disponible",
 
     link_copied: "Lien copié dans le presse-papiers !",
@@ -639,7 +663,7 @@ static FR: Strings = Strings {
 static ES: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
-    tab_radios: " Radios / Podcasts ",
+    tab_radios: " Radios ",
     tab_downloads: " Descargas ",
 
     login_connecting: "Conectando...",
@@ -723,9 +747,8 @@ static ES: Strings = Strings {
     settings: " Ajustes ",
     settings_shortcuts: "Atajos de teclado",
     settings_themes: "Temas",
-    settings_sections: "Secciones mostradas",
-    settings_parameters: "Parámetros",
     settings_language: "Idioma",
+    settings_logout: "Cerrar sesión",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiales de Deezer",
@@ -750,7 +773,14 @@ static ES: Strings = Strings {
     hint_remove: " quitar  ",
     hint_favorite: " favorito  ",
 
-    radios_placeholder: "Las radios y podcasts aparecerán aquí",
+    radios_loading: "Cargando radios...",
+    radios_no_results: "No se encontraron radios",
+    radios_filter_typing: " Filtro (Enter para confirmar, Esc para cancelar) ",
+    radios_filter_normal: " Filtro (presiona / para escribir) ",
+    radios_filter_placeholder: "Presiona / o Ctrl+F para filtrar radios...",
+    radios_title: "Radios",
+    header_radio: "Radio",
+
     downloads_placeholder: "Descargas \u{2014} próximamente",
 
     link_copied: "¡Enlace copiado al portapapeles!",
@@ -787,7 +817,7 @@ static ES: Strings = Strings {
 static PT: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
-    tab_radios: " Rádios / Podcasts ",
+    tab_radios: " Rádios ",
     tab_downloads: " Downloads ",
 
     login_connecting: "Conectando...",
@@ -871,9 +901,8 @@ static PT: Strings = Strings {
     settings: " Configurações ",
     settings_shortcuts: "Atalhos do teclado",
     settings_themes: "Temas",
-    settings_sections: "Seções exibidas",
-    settings_parameters: "Parâmetros",
     settings_language: "Idioma",
+    settings_logout: "Sair",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiais do Deezer",
@@ -898,7 +927,14 @@ static PT: Strings = Strings {
     hint_remove: " remover  ",
     hint_favorite: " favorito  ",
 
-    radios_placeholder: "Rádios e podcasts aparecerão aqui",
+    radios_loading: "Carregando rádios...",
+    radios_no_results: "Nenhuma rádio encontrada",
+    radios_filter_typing: " Filtro (Enter para confirmar, Esc para cancelar) ",
+    radios_filter_normal: " Filtro (pressione / para digitar) ",
+    radios_filter_placeholder: "Pressione / ou Ctrl+F para filtrar rádios...",
+    radios_title: "Rádios",
+    header_radio: "Rádio",
+
     downloads_placeholder: "Downloads \u{2014} em breve",
 
     link_copied: "Link copiado para a área de transferência!",
@@ -935,7 +971,7 @@ static PT: Strings = Strings {
 static DE: Strings = Strings {
     tab_search: " Suche ",
     tab_favorites: " Favoriten ",
-    tab_radios: " Radios / Podcasts ",
+    tab_radios: " Radios ",
     tab_downloads: " Downloads ",
 
     login_connecting: "Verbindung...",
@@ -1019,9 +1055,8 @@ static DE: Strings = Strings {
     settings: " Einstellungen ",
     settings_shortcuts: "Tastenkürzel",
     settings_themes: "Themen",
-    settings_sections: "Angezeigte Bereiche",
-    settings_parameters: "Parameter",
     settings_language: "Sprache",
+    settings_logout: "Abmelden",
 
     themes: " Themen ",
     official_deezer_themes: "  Offizielle Deezer-Themen",
@@ -1046,7 +1081,14 @@ static DE: Strings = Strings {
     hint_remove: " entfernen  ",
     hint_favorite: " Favorit  ",
 
-    radios_placeholder: "Radios und Podcasts werden hier angezeigt",
+    radios_loading: "Radios werden geladen...",
+    radios_no_results: "Keine Radios gefunden",
+    radios_filter_typing: " Filter (Enter zum Bestätigen, Esc zum Abbrechen) ",
+    radios_filter_normal: " Filter (/ drücken zum Tippen) ",
+    radios_filter_placeholder: "/ oder Ctrl+F drücken um Radios zu filtern...",
+    radios_title: "Radios",
+    header_radio: "Radio",
+
     downloads_placeholder: "Downloads \u{2014} demnächst verfügbar",
 
     link_copied: "Link in die Zwischenablage kopiert!",

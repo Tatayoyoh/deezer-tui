@@ -234,6 +234,15 @@ pub struct ProfileData {
     pub name: String,
 }
 
+/// A radio station from the Deezer public API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadioData {
+    pub id: u64,
+    pub title: String,
+    #[serde(default)]
+    pub description: String,
+}
+
 /// Full album detail returned from the public API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumDetail {

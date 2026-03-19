@@ -15,8 +15,8 @@ use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen,
-    SearchCategory, ServerMessage,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, RadioItem,
+    Screen, SearchCategory, ServerMessage,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -54,6 +54,10 @@ enum AsyncResult {
     AlbumDetailError(String),
     PlaylistDetailReady(PlaylistDetail),
     PlaylistDetailError(String),
+    RadiosReady(Vec<RadioItem>),
+    RadiosError(String),
+    RadioTracksReady(Vec<TrackData>),
+    RadioTracksError(String),
 }
 
 pub struct Daemon {
@@ -81,6 +85,11 @@ pub struct Daemon {
     favorites_loading: bool,
     favorites_category: FavoritesCategory,
     favorites_display: Vec<DisplayItem>,
+
+    // Radios
+    radios: Vec<RadioItem>,
+    radios_selected: usize,
+    radios_loading: bool,
 
     // Playlists (for popup menu playlist picker)
     playlists: Vec<PlaylistData>,
@@ -144,6 +153,10 @@ impl Daemon {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+
+            radios: Vec::new(),
+            radios_selected: 0,
+            radios_loading: false,
 
             playlists: Vec::new(),
 
@@ -396,6 +409,9 @@ impl Daemon {
                 ActiveTab::Favorites => {
                     self.favorites_selected = self.favorites_selected.saturating_sub(1);
                 }
+                ActiveTab::Radio => {
+                    self.radios_selected = self.radios_selected.saturating_sub(1);
+                }
                 _ => {}
             },
             Command::SelectDown => match self.active_tab {
@@ -409,6 +425,12 @@ impl Daemon {
                     if !self.favorites_display.is_empty() {
                         self.favorites_selected =
                             (self.favorites_selected + 1).min(self.favorites_display.len() - 1);
+                    }
+                }
+                ActiveTab::Radio => {
+                    if !self.radios.is_empty() {
+                        self.radios_selected =
+                            (self.radios_selected + 1).min(self.radios.len() - 1);
                     }
                 }
                 _ => {}
@@ -558,6 +580,39 @@ impl Daemon {
                     }
                 }
             }
+            Command::Logout => {
+                // Clear ARL, stop playback, return to login screen
+                self.config.arl = None;
+                let _ = self.config.save();
+                self.screen = Screen::Login;
+                self.user_name = None;
+                self.master_key = None;
+                self.engine = None;
+                if let Ok(mut state) = self.player_state.lock() {
+                    state.status = PlaybackStatus::Stopped;
+                    state.current_track = None;
+                    state.queue.clear();
+                    state.queue_index = 0;
+                }
+                self.search_results.clear();
+                self.search_display.clear();
+                self.favorites.clear();
+                self.favorites_display.clear();
+                self.radios.clear();
+                self.playlists.clear();
+                self.status_msg = None;
+                self.login_error = None;
+                self.login_loading = false;
+            }
+            Command::LoadRadios => {
+                self.start_load_radios();
+            }
+            Command::PlayFromRadio { index } => {
+                if let Some(radio) = self.radios.get(index) {
+                    let radio_id = radio.id;
+                    self.start_play_radio(radio_id);
+                }
+            }
             Command::Shutdown => {
                 // Handled in the main loop
             }
@@ -589,6 +644,9 @@ impl Daemon {
             favorites_loading: self.favorites_loading,
             favorites_category: self.favorites_category,
             favorites_display: self.favorites_display.clone(),
+            radios: self.radios.clone(),
+            radios_selected: self.radios_selected,
+            radios_loading: self.radios_loading,
             playlists: self.playlists.clone(),
             album_detail: self.album_detail.clone(),
             album_detail_selected: self.album_detail_selected,
@@ -928,6 +986,49 @@ impl Daemon {
         });
     }
 
+    fn start_load_radios(&mut self) {
+        self.radios_loading = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_radios().await {
+                Ok(radios) => {
+                    let items: Vec<RadioItem> = radios
+                        .iter()
+                        .map(|r| RadioItem {
+                            id: r.id,
+                            title: r.title.clone(),
+                        })
+                        .collect();
+                    let _ = tx.send(AsyncResult::RadiosReady(items));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::RadiosError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_play_radio(&mut self, radio_id: u64) {
+        self.status_msg = Some("Loading radio tracks...".into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_radio_tracks(radio_id).await {
+                Ok(tracks) => {
+                    let _ = tx.send(AsyncResult::RadioTracksReady(tracks));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::RadioTracksError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_play_track(&mut self, track: TrackData) {
         let Some(master_key) = self.master_key else {
             self.status_msg = Some("Player not ready yet".into());
@@ -1063,6 +1164,7 @@ impl Daemon {
                         }
                     }
                     self.start_load_favorites_category();
+                    self.start_load_radios();
                 }
                 AsyncResult::MasterKeyError(err) => {
                     self.status_msg = Some(format!("Key error: {err}"));
@@ -1174,6 +1276,32 @@ impl Daemon {
                 AsyncResult::PlaylistDetailError(err) => {
                     self.playlist_detail_loading = false;
                     self.status_msg = Some(format!("Playlist error: {err}"));
+                }
+                AsyncResult::RadiosReady(items) => {
+                    self.radios_loading = false;
+                    self.status_msg = Some(format!("{} radios loaded", items.len()));
+                    self.radios = items;
+                    self.radios_selected = 0;
+                }
+                AsyncResult::RadiosError(err) => {
+                    self.radios_loading = false;
+                    self.status_msg = Some(format!("Radios error: {err}"));
+                }
+                AsyncResult::RadioTracksReady(tracks) => {
+                    if tracks.is_empty() {
+                        self.status_msg = Some("No tracks in this radio".into());
+                    } else {
+                        self.status_msg = Some(format!("Radio: {} tracks", tracks.len()));
+                        let first = tracks[0].clone();
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = 0;
+                        }
+                        self.start_play_track(first);
+                    }
+                }
+                AsyncResult::RadioTracksError(err) => {
+                    self.status_msg = Some(format!("Radio tracks error: {err}"));
                 }
                 AsyncResult::TrackReady {
                     audio_data,

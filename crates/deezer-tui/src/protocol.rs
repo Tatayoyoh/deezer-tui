@@ -79,6 +79,12 @@ pub enum Command {
     GetPlaylistDetail { playlist_id: String },
     /// Play a track from the playlist detail view.
     PlayFromPlaylist { index: usize },
+    /// Logout — clear ARL, return to login screen.
+    Logout,
+    /// Load radio stations from Deezer.
+    LoadRadios,
+    /// Play the selected radio station's tracks.
+    PlayFromRadio { index: usize },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -223,6 +229,13 @@ impl FavoritesCategory {
     }
 }
 
+/// A radio station item for display.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RadioItem {
+    pub id: u64,
+    pub title: String,
+}
+
 /// Complete state snapshot sent from daemon to client.
 /// All fields use `#[serde(default)]` for forward/backward compatibility
 /// when daemon and client are running different binary versions.
@@ -280,6 +293,14 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
+
+    // Radios
+    #[serde(default)]
+    pub radios: Vec<RadioItem>,
+    #[serde(default)]
+    pub radios_selected: usize,
+    #[serde(default)]
+    pub radios_loading: bool,
 
     // Playlists (for playlist picker in popup menu)
     #[serde(default)]
@@ -341,6 +362,9 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            radios: Vec::new(),
+            radios_selected: 0,
+            radios_loading: false,
             playlists: Vec::new(),
             album_detail: None,
             album_detail_selected: 0,
