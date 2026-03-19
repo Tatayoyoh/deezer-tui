@@ -1078,6 +1078,8 @@ impl Daemon {
     }
 
     fn play_next(&mut self) {
+        let was_paused = self.player_state.lock().unwrap().status == PlaybackStatus::Paused;
+
         let next_track = {
             let mut state = self.player_state.lock().unwrap();
             if state.queue.is_empty() {
@@ -1095,7 +1097,14 @@ impl Daemon {
                 if next >= state.queue.len() {
                     match state.repeat {
                         RepeatMode::Queue => 0,
-                        _ => return,
+                        _ => {
+                            // End of queue, no repeat — resume current track if paused
+                            if was_paused {
+                                drop(state);
+                                self.resume_playback();
+                            }
+                            return;
+                        }
                     }
                 } else {
                     next
@@ -1112,6 +1121,8 @@ impl Daemon {
     }
 
     fn play_prev(&mut self) {
+        let was_paused = self.player_state.lock().unwrap().status == PlaybackStatus::Paused;
+
         let prev_track = {
             let mut state = self.player_state.lock().unwrap();
             if state.queue.is_empty() {
@@ -1121,7 +1132,14 @@ impl Daemon {
             let prev_idx = if state.queue_index == 0 {
                 match state.repeat {
                     RepeatMode::Queue => state.queue.len() - 1,
-                    _ => 0,
+                    _ => {
+                        // Already at start — resume current track if paused
+                        if was_paused {
+                            drop(state);
+                            self.resume_playback();
+                        }
+                        return;
+                    }
                 }
             } else {
                 state.queue_index - 1
@@ -1133,6 +1151,14 @@ impl Daemon {
 
         if let Some(track) = prev_track {
             self.start_play_track(track);
+        }
+    }
+
+    /// Resume playback from pause, updating position tracking.
+    fn resume_playback(&mut self) {
+        if let Some(ref engine) = self.engine {
+            engine.resume();
+            self.playback_started_at = Some(Instant::now());
         }
     }
 
