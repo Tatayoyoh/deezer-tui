@@ -1,5 +1,7 @@
 # Deezer TUI
 
+![text](assets/logo.png)
+
 Bored to use 300M of RAM to play music ?
 
 * for developers <3
@@ -33,10 +35,11 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 🔄 better shortcuts <br>
 ✅ Contiuous Integration <br>
 ✅ global app menu [ctrl+o]
-✅ Themes <br>
+✅ Themes, from official Deezer themes<br>
 ✅ Translations <br>
-⬜ More app parameters <br>
+⬜ Offline mode <br>
 
+<video controls src="assets/themes.mp4" title="Title"></video>
 
 ## Build on your system
 
