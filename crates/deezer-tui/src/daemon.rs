@@ -14,6 +14,7 @@ use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
+use crate::i18n::t;
 use crate::protocol::{
     read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, RadioItem,
     Screen, SearchCategory, ServerMessage,
@@ -199,7 +200,7 @@ impl Daemon {
 
         // If we have an ARL, auto-login
         if let Some(arl) = self.config.arl.clone() {
-            self.status_msg = Some("Connecting...".into());
+            self.status_msg = Some(t().login_connecting.into());
             self.start_login(arl);
         }
 
@@ -529,13 +530,13 @@ impl Daemon {
                         state.queue.push(track.clone());
                     }
                 }
-                self.status_msg = Some(format!("\"{}\" will play next", track.title));
+                self.status_msg = Some(t().fmt_play_next(&track.title));
             }
             Command::AddToQueue { track } => {
                 if let Ok(mut state) = self.player_state.lock() {
                     state.queue.push(track.clone());
                 }
-                self.status_msg = Some(format!("\"{}\" added to queue", track.title));
+                self.status_msg = Some(t().fmt_added_to_queue(&track.title));
             }
             Command::RemoveFromQueue { index } => {
                 if let Ok(mut state) = self.player_state.lock() {
@@ -683,7 +684,7 @@ impl Daemon {
     }
 
     fn start_fetch_master_key(&mut self) {
-        self.status_msg = Some("Fetching decryption key...".into());
+        self.status_msg = Some(t().status_fetching_key.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
@@ -930,7 +931,7 @@ impl Daemon {
     }
 
     fn start_mix(&mut self, track_id: String) {
-        self.status_msg = Some("Loading mix...".into());
+        self.status_msg = Some(t().status_loading_mix.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
@@ -950,7 +951,7 @@ impl Daemon {
         self.album_detail_loading = true;
         self.album_detail = None;
         self.album_detail_selected = 0;
-        self.status_msg = Some("Loading album...".into());
+        self.status_msg = Some(t().status_loading_album.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
@@ -970,7 +971,7 @@ impl Daemon {
         self.playlist_detail_loading = true;
         self.playlist_detail = None;
         self.playlist_detail_selected = 0;
-        self.status_msg = Some("Loading playlist...".into());
+        self.status_msg = Some(t().status_loading_playlist.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
@@ -1012,7 +1013,7 @@ impl Daemon {
     }
 
     fn start_play_radio(&mut self, radio_id: u64) {
-        self.status_msg = Some("Loading radio tracks...".into());
+        self.status_msg = Some(t().status_loading_radio_tracks.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
@@ -1031,7 +1032,7 @@ impl Daemon {
 
     fn start_play_track(&mut self, track: TrackData) {
         let Some(master_key) = self.master_key else {
-            self.status_msg = Some("Player not ready yet".into());
+            self.status_msg = Some(t().status_player_not_ready.into());
             return;
         };
 
@@ -1042,7 +1043,7 @@ impl Daemon {
             state.position_secs = 0;
         }
 
-        self.status_msg = Some(format!("Loading {} - {}...", track.title, track.artist));
+        self.status_msg = Some(t().fmt_loading_track(&track.title, &track.artist));
 
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -1142,7 +1143,7 @@ impl Daemon {
                     self.login_loading = false;
                     self.screen = Screen::Main;
                     self.user_name = Some(name.clone());
-                    self.status_msg = Some(format!("Connected as {name}"));
+                    self.status_msg = Some(t().fmt_connected_as(&name));
                     self.start_fetch_master_key();
                 }
                 AsyncResult::LoginError(err) => {
@@ -1152,7 +1153,7 @@ impl Daemon {
                 }
                 AsyncResult::MasterKeyReady(key) => {
                     self.master_key = Some(key);
-                    self.status_msg = Some("Ready to play".into());
+                    self.status_msg = Some(t().status_ready.into());
                     match PlayerEngine::new(key) {
                         Ok(engine) => {
                             engine.set_volume(self.config.volume);
@@ -1160,43 +1161,43 @@ impl Daemon {
                             self.engine = Some(engine);
                         }
                         Err(e) => {
-                            self.status_msg = Some(format!("Audio init error: {e}"));
+                            self.status_msg = Some(t().fmt_error(t().status_audio_init_error, &e.to_string()));
                         }
                     }
                     self.start_load_favorites_category();
                     self.start_load_radios();
                 }
                 AsyncResult::MasterKeyError(err) => {
-                    self.status_msg = Some(format!("Key error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_key_error, &err));
                 }
                 AsyncResult::SearchResults(tracks) => {
                     self.search_loading = false;
-                    self.status_msg = Some(format!("{} results", tracks.len()));
+                    self.status_msg = Some(t().fmt_results(tracks.len()));
                     self.search_display = tracks.iter().map(DisplayItem::from_track).collect();
                     self.search_results = tracks;
                     self.search_selected = 0;
                 }
                 AsyncResult::SearchDisplayResults(items) => {
                     self.search_loading = false;
-                    self.status_msg = Some(format!("{} results", items.len()));
+                    self.status_msg = Some(t().fmt_results(items.len()));
                     self.search_results.clear();
                     self.search_display = items;
                     self.search_selected = 0;
                 }
                 AsyncResult::SearchError(err) => {
                     self.search_loading = false;
-                    self.status_msg = Some(format!("Search error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_search_error, &err));
                 }
                 AsyncResult::FavoritesLoaded(tracks) => {
                     self.favorites_loading = false;
-                    self.status_msg = Some(format!("{} loaded", tracks.len()));
+                    self.status_msg = Some(t().fmt_loaded(tracks.len()));
                     self.favorites_display = tracks.iter().map(DisplayItem::from_track).collect();
                     self.favorites = tracks;
                     self.favorites_selected = 0;
                 }
                 AsyncResult::FavoritesDisplayLoaded(items) => {
                     self.favorites_loading = false;
-                    self.status_msg = Some(format!("{} loaded", items.len()));
+                    self.status_msg = Some(t().fmt_loaded(items.len()));
                     self.favorites.clear();
                     self.favorites_display = items;
                     self.favorites_selected = 0;
@@ -1206,44 +1207,44 @@ impl Daemon {
                     self.favorites_display.clear();
                     self.favorites.clear();
                     self.favorites_selected = 0;
-                    self.status_msg = Some(format!("Favorites error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_favorites_error, &err));
                 }
                 AsyncResult::FavoriteAdded(_track_id) => {
-                    self.status_msg = Some("Added to favorites".into());
+                    self.status_msg = Some(t().status_added_to_favorites.into());
                     // Reload favorites to reflect the change
                     self.start_load_favorites();
                 }
                 AsyncResult::FavoriteRemoved(_track_id) => {
-                    self.status_msg = Some("Removed from favorites".into());
+                    self.status_msg = Some(t().status_removed_from_favorites.into());
                     self.start_load_favorites();
                 }
                 AsyncResult::FavoriteError(err) => {
-                    self.status_msg = Some(format!("Favorite error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_favorite_error, &err));
                 }
                 AsyncResult::PlaylistsReady(playlists) => {
                     self.playlists = playlists;
-                    self.status_msg = Some(format!("{} playlists loaded", self.playlists.len()));
+                    self.status_msg = Some(t().fmt_playlists_loaded(self.playlists.len()));
                 }
                 AsyncResult::PlaylistsError(err) => {
-                    self.status_msg = Some(format!("Playlists error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_playlists_error, &err));
                 }
                 AsyncResult::AddedToPlaylist(_playlist_id) => {
-                    self.status_msg = Some("Added to playlist".into());
+                    self.status_msg = Some(t().status_added_to_playlist.into());
                 }
                 AsyncResult::AddToPlaylistError(err) => {
-                    self.status_msg = Some(format!("Add to playlist error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_add_to_playlist_error, &err));
                 }
                 AsyncResult::DislikeOk => {
-                    self.status_msg = Some("Track marked as disliked".into());
+                    self.status_msg = Some(t().status_track_disliked.into());
                 }
                 AsyncResult::DislikeError(err) => {
-                    self.status_msg = Some(format!("Dislike error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_dislike_error, &err));
                 }
                 AsyncResult::MixReady(tracks) => {
                     if tracks.is_empty() {
-                        self.status_msg = Some("No mix tracks found".into());
+                        self.status_msg = Some(t().status_no_mix_tracks.into());
                     } else {
-                        self.status_msg = Some(format!("Mix: {} tracks", tracks.len()));
+                        self.status_msg = Some(t().fmt_mix_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
@@ -1253,45 +1254,45 @@ impl Daemon {
                     }
                 }
                 AsyncResult::MixError(err) => {
-                    self.status_msg = Some(format!("Mix error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_mix_error, &err));
                 }
                 AsyncResult::AlbumDetailReady(detail) => {
                     self.album_detail_loading = false;
                     self.status_msg =
-                        Some(format!("{} — {} tracks", detail.title, detail.tracks.len()));
+                        Some(t().fmt_album_tracks_status(&detail.title, detail.tracks.len()));
                     self.album_detail = Some(detail);
                     self.album_detail_selected = 0;
                 }
                 AsyncResult::AlbumDetailError(err) => {
                     self.album_detail_loading = false;
-                    self.status_msg = Some(format!("Album error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_album_error, &err));
                 }
                 AsyncResult::PlaylistDetailReady(detail) => {
                     self.playlist_detail_loading = false;
                     self.status_msg =
-                        Some(format!("{} — {} tracks", detail.title, detail.tracks.len()));
+                        Some(t().fmt_playlist_tracks_status(&detail.title, detail.tracks.len()));
                     self.playlist_detail = Some(detail);
                     self.playlist_detail_selected = 0;
                 }
                 AsyncResult::PlaylistDetailError(err) => {
                     self.playlist_detail_loading = false;
-                    self.status_msg = Some(format!("Playlist error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_playlist_error, &err));
                 }
                 AsyncResult::RadiosReady(items) => {
                     self.radios_loading = false;
-                    self.status_msg = Some(format!("{} radios loaded", items.len()));
+                    self.status_msg = Some(t().fmt_radios_loaded(items.len()));
                     self.radios = items;
                     self.radios_selected = 0;
                 }
                 AsyncResult::RadiosError(err) => {
                     self.radios_loading = false;
-                    self.status_msg = Some(format!("Radios error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_radios_error, &err));
                 }
                 AsyncResult::RadioTracksReady(tracks) => {
                     if tracks.is_empty() {
-                        self.status_msg = Some("No tracks in this radio".into());
+                        self.status_msg = Some(t().status_no_radio_tracks.into());
                     } else {
-                        self.status_msg = Some(format!("Radio: {} tracks", tracks.len()));
+                        self.status_msg = Some(t().fmt_radio_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
@@ -1301,7 +1302,7 @@ impl Daemon {
                     }
                 }
                 AsyncResult::RadioTracksError(err) => {
-                    self.status_msg = Some(format!("Radio tracks error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_radio_tracks_error, &err));
                 }
                 AsyncResult::TrackReady {
                     audio_data,
@@ -1321,13 +1322,13 @@ impl Daemon {
                                 ));
                             }
                             Err(e) => {
-                                self.status_msg = Some(format!("Playback error: {e}"));
+                                self.status_msg = Some(t().fmt_error(t().status_playback_error, &e.to_string()));
                             }
                         }
                     }
                 }
                 AsyncResult::TrackFetchError(err) => {
-                    self.status_msg = Some(format!("Track error: {err}"));
+                    self.status_msg = Some(t().fmt_error(t().status_track_error, &err));
                     if let Ok(mut state) = self.player_state.lock() {
                         state.status = PlaybackStatus::Stopped;
                     }

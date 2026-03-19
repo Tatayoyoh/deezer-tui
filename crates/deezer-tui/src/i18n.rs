@@ -200,6 +200,45 @@ pub struct Strings {
     pub daemon_disconnected: &'static str,
     pub detach_message: &'static str,
 
+    // --- Daemon status messages ---
+    pub status_fetching_key: &'static str,
+    pub status_loading_mix: &'static str,
+    pub status_loading_album: &'static str,
+    pub status_loading_playlist: &'static str,
+    pub status_loading_radio_tracks: &'static str,
+    pub status_player_not_ready: &'static str,
+    pub status_connected_as: &'static str,
+    pub status_ready: &'static str,
+    pub status_audio_init_error: &'static str,
+    pub status_key_error: &'static str,
+    pub status_results: &'static str,
+    pub status_loaded: &'static str,
+    pub status_search_error: &'static str,
+    pub status_favorites_error: &'static str,
+    pub status_added_to_favorites: &'static str,
+    pub status_removed_from_favorites: &'static str,
+    pub status_favorite_error: &'static str,
+    pub status_playlists_loaded: &'static str,
+    pub status_playlists_error: &'static str,
+    pub status_added_to_playlist: &'static str,
+    pub status_add_to_playlist_error: &'static str,
+    pub status_track_disliked: &'static str,
+    pub status_dislike_error: &'static str,
+    pub status_no_mix_tracks: &'static str,
+    pub status_mix_tracks: &'static str,
+    pub status_mix_error: &'static str,
+    pub status_album_error: &'static str,
+    pub status_playlist_error: &'static str,
+    pub status_radios_loaded: &'static str,
+    pub status_radios_error: &'static str,
+    pub status_no_radio_tracks: &'static str,
+    pub status_radio_tracks: &'static str,
+    pub status_radio_tracks_error: &'static str,
+    pub status_playback_error: &'static str,
+    pub status_track_error: &'static str,
+    pub status_play_next: &'static str,
+    pub status_added_to_queue: &'static str,
+
     // --- Table headers ---
     pub header_title: &'static str,
     pub header_artist: &'static str,
@@ -348,6 +387,71 @@ impl Strings {
     pub fn radios_count_title(&self, count: usize) -> String {
         format!(" {} ({}) ", self.radios_title, count)
     }
+
+    /// Format "Connected as {name}"
+    pub fn fmt_connected_as(&self, name: &str) -> String {
+        format!("{} {}", self.status_connected_as, name)
+    }
+
+    /// Format "{N} results"
+    pub fn fmt_results(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_results)
+    }
+
+    /// Format "{N} loaded"
+    pub fn fmt_loaded(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_loaded)
+    }
+
+    /// Format "{N} playlists loaded"
+    pub fn fmt_playlists_loaded(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_playlists_loaded)
+    }
+
+    /// Format "{N} radios loaded"
+    pub fn fmt_radios_loaded(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_radios_loaded)
+    }
+
+    /// Format "Mix: {N} tracks"
+    pub fn fmt_mix_tracks(&self, count: usize) -> String {
+        format!("{} {}", self.status_mix_tracks, count)
+    }
+
+    /// Format "Radio: {N} tracks"
+    pub fn fmt_radio_tracks(&self, count: usize) -> String {
+        format!("{} {}", self.status_radio_tracks, count)
+    }
+
+    /// Format "\"title\" will play next"
+    pub fn fmt_play_next(&self, title: &str) -> String {
+        format!("\"{}\" {}", title, self.status_play_next)
+    }
+
+    /// Format "\"title\" added to queue"
+    pub fn fmt_added_to_queue(&self, title: &str) -> String {
+        format!("\"{}\" {}", title, self.status_added_to_queue)
+    }
+
+    /// Format "Loading title - artist..."
+    pub fn fmt_loading_track(&self, title: &str, artist: &str) -> String {
+        format!("{} {} - {}...", self.loading, title, artist)
+    }
+
+    /// Format "Album — N tracks"
+    pub fn fmt_album_tracks_status(&self, title: &str, count: usize) -> String {
+        format!("{} — {} {}", title, count, self.header_tracks)
+    }
+
+    /// Format "Playlist — N tracks"
+    pub fn fmt_playlist_tracks_status(&self, title: &str, count: usize) -> String {
+        format!("{} — {} {}", title, count, self.header_tracks)
+    }
+
+    /// Format error with prefix
+    pub fn fmt_error(&self, prefix: &str, err: &str) -> String {
+        format!("{}: {}", prefix, err)
+    }
 }
 
 // ── English ──────────────────────────────────────────────────────────
@@ -479,6 +583,44 @@ static EN: Strings = Strings {
     daemon_disconnected: "Daemon disconnected",
     detach_message:
         "deezer-tui: music continues in background. Run \"deezer-tui\" to restore the player.",
+
+    status_fetching_key: "Fetching decryption key...",
+    status_loading_mix: "Loading mix...",
+    status_loading_album: "Loading album...",
+    status_loading_playlist: "Loading playlist...",
+    status_loading_radio_tracks: "Loading radio tracks...",
+    status_player_not_ready: "Player not ready yet",
+    status_connected_as: "Connected as",
+    status_ready: "Ready to play",
+    status_audio_init_error: "Audio init error",
+    status_key_error: "Key error",
+    status_results: "results",
+    status_loaded: "loaded",
+    status_search_error: "Search error",
+    status_favorites_error: "Favorites error",
+    status_added_to_favorites: "Added to favorites",
+    status_removed_from_favorites: "Removed from favorites",
+    status_favorite_error: "Favorite error",
+    status_playlists_loaded: "playlists loaded",
+    status_playlists_error: "Playlists error",
+    status_added_to_playlist: "Added to playlist",
+    status_add_to_playlist_error: "Add to playlist error",
+    status_track_disliked: "Track marked as disliked",
+    status_dislike_error: "Dislike error",
+    status_no_mix_tracks: "No mix tracks found",
+    status_mix_tracks: "Mix:",
+    status_mix_error: "Mix error",
+    status_album_error: "Album error",
+    status_playlist_error: "Playlist error",
+    status_radios_loaded: "radios loaded",
+    status_radios_error: "Radios error",
+    status_no_radio_tracks: "No tracks in this radio",
+    status_radio_tracks: "Radio:",
+    status_radio_tracks_error: "Radio tracks error",
+    status_playback_error: "Playback error",
+    status_track_error: "Track error",
+    status_play_next: "will play next",
+    status_added_to_queue: "added to queue",
 
     header_title: "Title",
     header_artist: "Artist",
@@ -634,6 +776,44 @@ static FR: Strings = Strings {
     daemon_disconnected: "Démon déconnecté",
     detach_message: "deezer-tui : la musique continue en arrière-plan. Lancez \"deezer-tui\" pour restaurer le lecteur.",
 
+    status_fetching_key: "Récupération de la clé de déchiffrement...",
+    status_loading_mix: "Chargement du mix...",
+    status_loading_album: "Chargement de l'album...",
+    status_loading_playlist: "Chargement de la playlist...",
+    status_loading_radio_tracks: "Chargement des titres de la radio...",
+    status_player_not_ready: "Lecteur pas encore prêt",
+    status_connected_as: "Connecté en tant que",
+    status_ready: "Prêt à lire",
+    status_audio_init_error: "Erreur d'initialisation audio",
+    status_key_error: "Erreur de clé",
+    status_results: "résultats",
+    status_loaded: "chargé(s)",
+    status_search_error: "Erreur de recherche",
+    status_favorites_error: "Erreur des favoris",
+    status_added_to_favorites: "Ajouté aux favoris",
+    status_removed_from_favorites: "Retiré des favoris",
+    status_favorite_error: "Erreur de favori",
+    status_playlists_loaded: "playlists chargées",
+    status_playlists_error: "Erreur des playlists",
+    status_added_to_playlist: "Ajouté à la playlist",
+    status_add_to_playlist_error: "Erreur d'ajout à la playlist",
+    status_track_disliked: "Titre marqué comme non recommandé",
+    status_dislike_error: "Erreur de non-recommandation",
+    status_no_mix_tracks: "Aucun titre de mix trouvé",
+    status_mix_tracks: "Mix :",
+    status_mix_error: "Erreur du mix",
+    status_album_error: "Erreur de l'album",
+    status_playlist_error: "Erreur de la playlist",
+    status_radios_loaded: "radios chargées",
+    status_radios_error: "Erreur des radios",
+    status_no_radio_tracks: "Aucun titre dans cette radio",
+    status_radio_tracks: "Radio :",
+    status_radio_tracks_error: "Erreur des titres radio",
+    status_playback_error: "Erreur de lecture",
+    status_track_error: "Erreur du titre",
+    status_play_next: "sera lu ensuite",
+    status_added_to_queue: "ajouté à la file d'attente",
+
     header_title: "Titre",
     header_artist: "Artiste",
     header_album: "Album",
@@ -787,6 +967,44 @@ static ES: Strings = Strings {
     no_album_info: "No hay info del álbum disponible",
     daemon_disconnected: "Demonio desconectado",
     detach_message: "deezer-tui: la música sigue en segundo plano. Ejecuta \"deezer-tui\" para restaurar el reproductor.",
+
+    status_fetching_key: "Obteniendo clave de descifrado...",
+    status_loading_mix: "Cargando mix...",
+    status_loading_album: "Cargando álbum...",
+    status_loading_playlist: "Cargando playlist...",
+    status_loading_radio_tracks: "Cargando canciones de la radio...",
+    status_player_not_ready: "Reproductor aún no listo",
+    status_connected_as: "Conectado como",
+    status_ready: "Listo para reproducir",
+    status_audio_init_error: "Error de inicio de audio",
+    status_key_error: "Error de clave",
+    status_results: "resultados",
+    status_loaded: "cargado(s)",
+    status_search_error: "Error de búsqueda",
+    status_favorites_error: "Error de favoritos",
+    status_added_to_favorites: "Agregado a favoritos",
+    status_removed_from_favorites: "Eliminado de favoritos",
+    status_favorite_error: "Error de favorito",
+    status_playlists_loaded: "playlists cargadas",
+    status_playlists_error: "Error de playlists",
+    status_added_to_playlist: "Agregado a la playlist",
+    status_add_to_playlist_error: "Error al agregar a la playlist",
+    status_track_disliked: "Canción marcada como no recomendada",
+    status_dislike_error: "Error de no recomendar",
+    status_no_mix_tracks: "No se encontraron canciones del mix",
+    status_mix_tracks: "Mix:",
+    status_mix_error: "Error del mix",
+    status_album_error: "Error del álbum",
+    status_playlist_error: "Error de la playlist",
+    status_radios_loaded: "radios cargadas",
+    status_radios_error: "Error de radios",
+    status_no_radio_tracks: "No hay canciones en esta radio",
+    status_radio_tracks: "Radio:",
+    status_radio_tracks_error: "Error de canciones de radio",
+    status_playback_error: "Error de reproducción",
+    status_track_error: "Error de canción",
+    status_play_next: "se reproducirá después",
+    status_added_to_queue: "agregado a la cola",
 
     header_title: "Título",
     header_artist: "Artista",
@@ -942,6 +1160,44 @@ static PT: Strings = Strings {
     daemon_disconnected: "Daemon desconectado",
     detach_message: "deezer-tui: a música continua em segundo plano. Execute \"deezer-tui\" para restaurar o player.",
 
+    status_fetching_key: "Obtendo chave de descriptografia...",
+    status_loading_mix: "Carregando mix...",
+    status_loading_album: "Carregando álbum...",
+    status_loading_playlist: "Carregando playlist...",
+    status_loading_radio_tracks: "Carregando músicas da rádio...",
+    status_player_not_ready: "Player ainda não pronto",
+    status_connected_as: "Conectado como",
+    status_ready: "Pronto para reproduzir",
+    status_audio_init_error: "Erro de inicialização de áudio",
+    status_key_error: "Erro de chave",
+    status_results: "resultados",
+    status_loaded: "carregado(s)",
+    status_search_error: "Erro de busca",
+    status_favorites_error: "Erro dos favoritos",
+    status_added_to_favorites: "Adicionado aos favoritos",
+    status_removed_from_favorites: "Removido dos favoritos",
+    status_favorite_error: "Erro de favorito",
+    status_playlists_loaded: "playlists carregadas",
+    status_playlists_error: "Erro das playlists",
+    status_added_to_playlist: "Adicionado à playlist",
+    status_add_to_playlist_error: "Erro ao adicionar à playlist",
+    status_track_disliked: "Música marcada como não recomendada",
+    status_dislike_error: "Erro de não recomendar",
+    status_no_mix_tracks: "Nenhuma música do mix encontrada",
+    status_mix_tracks: "Mix:",
+    status_mix_error: "Erro do mix",
+    status_album_error: "Erro do álbum",
+    status_playlist_error: "Erro da playlist",
+    status_radios_loaded: "rádios carregadas",
+    status_radios_error: "Erro das rádios",
+    status_no_radio_tracks: "Nenhuma música nesta rádio",
+    status_radio_tracks: "Rádio:",
+    status_radio_tracks_error: "Erro das músicas da rádio",
+    status_playback_error: "Erro de reprodução",
+    status_track_error: "Erro da música",
+    status_play_next: "será reproduzida em seguida",
+    status_added_to_queue: "adicionado à fila",
+
     header_title: "Título",
     header_artist: "Artista",
     header_album: "Álbum",
@@ -1095,6 +1351,44 @@ static DE: Strings = Strings {
     no_album_info: "Keine Album-Info verfügbar",
     daemon_disconnected: "Daemon getrennt",
     detach_message: "deezer-tui: Musik läuft im Hintergrund weiter. Starte \"deezer-tui\" um den Player wiederherzustellen.",
+
+    status_fetching_key: "Entschlüsselungsschlüssel wird abgerufen...",
+    status_loading_mix: "Mix wird geladen...",
+    status_loading_album: "Album wird geladen...",
+    status_loading_playlist: "Playlist wird geladen...",
+    status_loading_radio_tracks: "Radio-Titel werden geladen...",
+    status_player_not_ready: "Player noch nicht bereit",
+    status_connected_as: "Verbunden als",
+    status_ready: "Bereit zur Wiedergabe",
+    status_audio_init_error: "Audio-Initialisierungsfehler",
+    status_key_error: "Schlüsselfehler",
+    status_results: "Ergebnisse",
+    status_loaded: "geladen",
+    status_search_error: "Suchfehler",
+    status_favorites_error: "Favoritenfehler",
+    status_added_to_favorites: "Zu Favoriten hinzugefügt",
+    status_removed_from_favorites: "Aus Favoriten entfernt",
+    status_favorite_error: "Favoritenfehler",
+    status_playlists_loaded: "Playlists geladen",
+    status_playlists_error: "Playlist-Fehler",
+    status_added_to_playlist: "Zur Playlist hinzugefügt",
+    status_add_to_playlist_error: "Fehler beim Hinzufügen zur Playlist",
+    status_track_disliked: "Titel als nicht empfohlen markiert",
+    status_dislike_error: "Fehler beim Nicht-Empfehlen",
+    status_no_mix_tracks: "Keine Mix-Titel gefunden",
+    status_mix_tracks: "Mix:",
+    status_mix_error: "Mix-Fehler",
+    status_album_error: "Album-Fehler",
+    status_playlist_error: "Playlist-Fehler",
+    status_radios_loaded: "Radios geladen",
+    status_radios_error: "Radio-Fehler",
+    status_no_radio_tracks: "Keine Titel in diesem Radio",
+    status_radio_tracks: "Radio:",
+    status_radio_tracks_error: "Radio-Titel-Fehler",
+    status_playback_error: "Wiedergabefehler",
+    status_track_error: "Titelfehler",
+    status_play_next: "wird als Nächstes abgespielt",
+    status_added_to_queue: "zur Warteschlange hinzugefügt",
 
     header_title: "Titel",
     header_artist: "Künstler",
