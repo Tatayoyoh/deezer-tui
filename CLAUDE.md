@@ -17,6 +17,7 @@ deezer-tui/
 ├── Cargo.toml              # Workspace root
 ├── CLAUDE.md
 ├── README.md
+├── .circleci/config.yml    # CI/CD (CircleCI)
 ├── crates/
 │   ├── deezer-core/        # Library crate — all business logic, no UI
 │   │   ├── Cargo.toml
@@ -39,18 +40,23 @@ deezer-tui/
 │   └── deezer-tui/         # Binary crate — terminal UI only
 │       ├── Cargo.toml
 │       └── src/
-│           ├── main.rs
-│           ├── app.rs      # App state, event loop
-│           ├── event.rs    # Input/event handling
-│           ├── ui/         # Ratatui rendering
-│           │   ├── mod.rs
-│           │   ├── login.rs      # Login screen
-│           │   ├── player.rs     # Bottom player bar
-│           │   ├── search.rs     # Search tab
-│           │   ├── favorites.rs  # Favorites tab
-│           │   ├── radio.rs      # Radios / Podcasts tab
-│           │   └── common.rs     # Shared widgets, Deezer logo pixel art
-│           └── theme.rs    # Colors, styles
+│           ├── main.rs           # Entry point, fork logic (daemon/client)
+│           ├── daemon.rs         # Background daemon (Unix socket server)
+│           ├── client.rs         # TUI client (connects to daemon)
+│           ├── protocol.rs       # IPC protocol (Command/ServerMessage enums)
+│           ├── web_login.rs      # Browser-based OAuth login flow
+│           ├── theme.rs          # Colors, styles, Deezer themes
+│           └── ui/               # Ratatui rendering
+│               ├── mod.rs
+│               ├── login.rs      # Login screen
+│               ├── player.rs     # Bottom player bar
+│               ├── search.rs     # Search tab (multi-category)
+│               ├── favorites.rs  # Favorites tab (multi-category)
+│               ├── radio.rs      # Radios / Podcasts tab
+│               ├── downloads.rs  # Downloads tab
+│               ├── album_detail.rs # Album detail overlay
+│               ├── popup.rs      # Context menus, modals, playlist picker
+│               └── common.rs     # Shared widgets, Deezer logo pixel art
 ```
 
 **Rule: `deezer-core` must NEVER depend on any TUI/UI crate.**
@@ -71,9 +77,10 @@ It exposes a clean async API that any frontend (TUI, GUI, web, CLI) can consume.
 Deezer does NOT provide full-track streaming via its public API (only 30s previews).
 We use the **private/undocumented API** (same as the web player).
 
-Two auth methods supported:
+Three auth methods supported:
 1. **ARL token** — a 192-char cookie from a logged-in browser session (easiest)
 2. **Email/password** — MD5 hash + auth hash → obtain ARL programmatically
+3. **Web browser login** — opens deezer.com in the user's browser, intercepts ARL via URI handler (`web_login.rs`)
 
 Auth flow:
 1. Set ARL as cookie on `.deezer.com`
@@ -119,12 +126,15 @@ The binary is fully self-contained on all platforms:
 | Platform | Audio Backend | System Dependency          |
 |----------|---------------|----------------------------|
 | Linux    | ALSA          | `libasound2` (pre-installed on most distros) |
-| Windows  | WASAPI        | None (built into Windows)  |
 | macOS    | CoreAudio     | None (built into macOS)    |
 
 Stack: `rodio` (high-level) → `cpal` (low-level, platform backends) → OS audio API
 
 Audio decoding is pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
+
+**Windows:** Not natively supported (Unix sockets, `fork()`, `libc` used for IPC).
+Windows users should use **WSL2** (Windows 11) with the Linux binary — audio works
+out of the box via WSLg/PulseAudio. Install `libasound2` in WSL.
 
 ## Key Dependencies
 
@@ -139,18 +149,21 @@ Audio decoding is pure Rust via `symphonia` (MP3 + FLAC), no system codecs neede
 | Serialization| `serde`, `serde_json`     | API response parsing                   |
 | TUI          | `ratatui`, `crossterm`    | Terminal UI rendering                  |
 | Config       | `directories`             | XDG/platform config paths              |
+| IPC          | `tokio::net::UnixStream`  | Daemon/client socket communication     |
+| Process      | `libc`                    | fork(), setsid(), dup2() (Unix only)   |
 
-## UI Design (from README)
+## UI Design
 
 ### Login Screen
 - Shown when no ARL/credentials are configured
 - Deezer logo in pixel art (Unicode block characters)
 - ARL token input or email/password fields
+- Web browser login option (`w` key)
 
 ### Main Layout
 ```
 ┌──────────────────────────────────────────────────┐
-│  [Search]    [Favorites]    [Radios/Podcasts]    │  ← Tab bar
+│  [Search]  [Favorites]  [Radios]  [Downloads]   │  ← Tab bar
 ├──────────────────────────────────────────────────┤
 │                                                  │
 │              Content area                        │  ← Changes per tab
@@ -161,6 +174,19 @@ Audio decoding is pure Rust via `symphonia` (MP3 + FLAC), no system codecs neede
 │  ◀◀  ▶/❚❚  ▶▶   🔊 ━━━━━   🔀  🔁             │
 └──────────────────────────────────────────────────┘
 ```
+
+### Overlays & Modals
+- **Context menu** (`m`): Play next, Add to queue, Add to playlist, Start mix, Dislike
+- **Queue / Waiting list** (`w`): View and manage the play queue (delete, reorder, favorite)
+- **Album detail** (`a`): Full track listing for an album
+- **Playlist detail** (`Enter` on playlist): Track listing for a playlist
+- **Shortcuts help** (`?`): Keyboard shortcuts reference
+- **Settings** (`Ctrl+O`): Theme selection (official Deezer dark themes)
+
+### Search & Favorites Categories
+Both tabs support multi-category browsing (`h`/`l` to switch):
+- **Search**: Tracks, Artists, Albums, Playlists, Podcasts, Episodes, Profiles
+- **Favorites**: Recently Played, Tracks, Artists, Albums, Playlists, Following
 
 ## Reference Projects
 
@@ -183,57 +209,100 @@ The Blowfish master secret is extracted at runtime from Deezer's web player Java
 
 Implemented in `deezer-core/src/decrypt.rs::fetch_master_key()`.
 
-## Async Architecture
+## Daemon / Client Architecture
 
-The TUI runs on the main thread (required for terminal I/O and audio output).
-Background tasks use `tokio::spawn` with results sent back via `mpsc::unbounded_channel`:
+The application uses a **daemon + client** model over Unix domain sockets:
 
 ```
-Main thread                          Background tasks (tokio::spawn)
------------                          --------------------------------
-App::run() event loop
-  ├─ draw UI (ratatui)
-  ├─ poll keyboard events
-  ├─ process_async_results()  <───── LoginSuccess / LoginError
-  │                            <───── MasterKeyReady / MasterKeyError
-  │                            <───── SearchResults / SearchError
-  │                            <───── FavoritesLoaded / FavoritesError
-  │                            <───── TrackReady { audio_data, ... }
-  └─ on_tick() (position, auto-advance)
+┌─────────────────────────┐       Unix socket        ┌─────────────────────────┐
+│      deezer-tui         │    (daemon.sock in        │      deezer-tui         │
+│      (daemon)           │◄──  XDG config dir)  ───► │      (client/TUI)       │
+│                         │                           │                         │
+│  PlayerEngine (rodio)   │   JSON-line protocol:     │  Ratatui rendering      │
+│  API client (reqwest)   │   Command ──────────►     │  Keyboard input         │
+│  State management       │   ◄──────── Snapshot      │  ViewState (from snap)  │
+│  tokio::spawn tasks     │                           │                         │
+└─────────────────────────┘                           └─────────────────────────┘
+```
 
-PlayerEngine stays on main thread (rodio/cpal are !Send).
+### Startup Flow (Unix)
+1. First invocation: `main.rs` calls `fork()` — child becomes daemon, parent becomes client
+2. Subsequent invocations: detects existing `daemon.sock` → connects as client directly
+3. `deezer-tui -q` / `--quit`: sends `Shutdown` command to daemon
+
+### IPC Protocol (`protocol.rs`)
+- **Transport**: Unix domain socket at `<config_dir>/daemon.sock`
+- **Format**: Line-delimited JSON (newline-separated)
+- **Client → Daemon**: `Command` enum (GetSnapshot, Search, PlayFromSearch, TogglePause, etc.)
+- **Daemon → Client**: `ServerMessage::Snapshot(DaemonSnapshot)` — full state sent after every command + periodic ticks
+- All snapshot fields use `#[serde(default)]` for forward/backward compatibility between versions
+
+### Async Architecture (inside Daemon)
+Background tasks use `tokio::spawn` with results sent back via `mpsc::unbounded_channel`.
+The daemon event loop uses `tokio::select!` to multiplex:
+- Accepting new client connections
+- Reading commands from client
+- Processing async results (login, search, track ready, etc.)
+- Periodic tick (position update, auto-advance)
+
+PlayerEngine stays on the daemon's main thread (rodio/cpal are `!Send`).
 Audio data is fetched+decrypted in background, then played on main thread.
-```
 
 ## Keyboard Shortcuts
 
+### Global (Main Screen)
 | Key | Action |
 |-----|--------|
 | `Tab` / `Shift+Tab` | Switch tabs |
+| `h` / `l` or `←` / `→` | Switch category within tab |
+| `j` / `k` or `↑` / `↓` | Navigate list |
 | `/` | Enter search mode (on Search tab) |
-| `Enter` | Submit search / Play selected track |
-| `Esc` | Exit search mode / Quit (login) |
-| `j` / `k` or arrows | Navigate list |
+| `Enter` | Submit search / Play selected / Open detail |
+| `Esc` | Close overlay / Exit search mode |
 | `p` / `Space` | Play / Pause |
 | `n` | Next track |
 | `b` | Previous track |
 | `s` | Toggle shuffle |
 | `r` | Cycle repeat (Off → All → One) |
 | `+` / `-` | Volume up / down |
-| `q` | Quit |
+| `m` | Open context menu for selected track |
+| `a` | Open album detail for selected track |
+| `w` | Open waiting list (queue) |
+| `?` | Show shortcuts help |
+| `g` | Shuffle play favorites |
+| `Ctrl+O` | Open settings (themes) |
+| `Ctrl+F` | Toggle fullscreen |
+| `Ctrl+P` | Open command palette |
+| `q` | Quit (sends Shutdown to daemon) |
 | `Ctrl+C` | Force quit |
+
+### Queue / Waiting List (`w`)
+| Key | Action |
+|-----|--------|
+| `d` / `Delete` | Remove track from queue |
+| `f` | Toggle favorite |
+| `m` | Open context menu |
+| `Esc` / `w` | Close queue |
+
+### Album / Playlist Detail
+| Key | Action |
+|-----|--------|
+| `Enter` | Play track |
+| `m` | Open context menu |
+| `Esc` | Close detail |
 
 ## Development Guidelines
 
 - Rust edition: 2021
-- MSRV: 1.75+ (for async trait stabilization)
+- MSRV: 1.88+
 - Error handling: `thiserror` for library errors, `anyhow` for binary
-- Logging: `tracing` crate (set `RUST_LOG=debug` for traces)
+- Logging: `tracing` crate — daemon logs to `/tmp/deezer-daemon.log`, client to `/tmp/deezer-tui.log` (set `RUST_LOG=debug`)
 - Tests: unit tests in `deezer-core`, integration tests for API (behind feature flag)
-- CI: GitHub Actions for Linux/Windows/macOS builds
+- CI: **CircleCI** — Linux x86_64, Linux aarch64, macOS universal (no Windows native build)
 - Linting: `clippy` with pedantic warnings
-- Formatting: `rustfmt` with default settings
+- Formatting: `rustfmt` with default settings — run `cargo fmt --check` before committing
 - Config stored as JSON in XDG config dir (`~/.config/deezer-tui/config.json` on Linux)
+- **Platform support**: Linux, macOS (native); Windows via WSL2 only (Unix sockets + fork required)
 
 ## Legal Notice
 

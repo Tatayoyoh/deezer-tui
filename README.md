@@ -21,8 +21,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ background player, still playeing music<br>
 ✅ login from browser/deezer.com link/backlink<br>
 ✅ search and favorites pages<br>
-✅ playing track context menu [ctrl+p]
-✅ focused track context menu [m]
+✅ playing track context menu [ctrl+p]<br>
+✅ focused track context menu [m]<br>
 ⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
 ✅ Album page (or popup) when entering an album <br>
 ⬜ Artist page (or popup) when entering an artiste <br>
