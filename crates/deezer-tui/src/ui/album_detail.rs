@@ -4,19 +4,21 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, 
 use deezer_core::api::models::AlbumDetail;
 
 use crate::client::ViewState;
+use crate::i18n::t;
 use crate::theme::Theme;
 
 /// Draw the album detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
     if view.album_detail_loading {
-        let loading = Paragraph::new(Span::styled("Loading album...", Theme::dim()))
+        let loading = Paragraph::new(Span::styled(s.loading_album, Theme::dim()))
             .alignment(Alignment::Center);
         frame.render_widget(loading, area);
         return;
     }
 
     let Some(ref detail) = view.album_detail else {
-        let msg = Paragraph::new(Span::styled("No album loaded", Theme::dim()))
+        let msg = Paragraph::new(Span::styled(s.no_album_loaded, Theme::dim()))
             .alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
@@ -117,6 +119,7 @@ fn draw_album_art(frame: &mut Frame, area: Rect) {
 
 /// Draw album metadata (title, artist, date, tracks, label).
 fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
+    let s = t();
     let label_style = Style::default().fg(Theme::text_dim_color());
     let value_style = Theme::text();
     let title_style = Style::default()
@@ -131,26 +134,26 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
 
     if !detail.release_date.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("Date:    ", label_style),
+            Span::styled(s.date_label, label_style),
             Span::styled(&detail.release_date, value_style),
         ]));
     }
 
     lines.push(Line::from(vec![
-        Span::styled("Tracks:  ", label_style),
+        Span::styled(s.tracks_label, label_style),
         Span::styled(format!("{}", detail.nb_tracks), value_style),
     ]));
 
     if !detail.label.is_empty() {
         lines.push(Line::from(vec![
-            Span::styled("Label:   ", label_style),
+            Span::styled(s.label_label, label_style),
             Span::styled(&detail.label, value_style),
         ]));
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("Esc  Back", Theme::dim())));
-    lines.push(Line::from(Span::styled("Enter  Play track", Theme::dim())));
+    lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
+    lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
 
     let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
@@ -158,18 +161,19 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
 
 /// Draw the right column: track list.
 fn draw_track_list(frame: &mut Frame, detail: &AlbumDetail, selected: usize, area: Rect) {
+    let s = t();
     if detail.tracks.is_empty() {
         let msg =
-            Paragraph::new(Span::styled("No tracks", Theme::dim())).alignment(Alignment::Center);
+            Paragraph::new(Span::styled(s.no_tracks, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(msg, area);
         return;
     }
 
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
-        Cell::from(Span::styled("Titre", Theme::dim())),
-        Cell::from(Span::styled("Artiste", Theme::dim())),
-        Cell::from(Span::styled("Durée", Theme::dim())),
+        Cell::from(Span::styled(s.header_title, Theme::dim())),
+        Cell::from(Span::styled(s.header_artist, Theme::dim())),
+        Cell::from(Span::styled(s.header_duration, Theme::dim())),
     ])
     .height(1);
 
@@ -194,7 +198,7 @@ fn draw_track_list(frame: &mut Frame, detail: &AlbumDetail, selected: usize, are
         })
         .collect();
 
-    let title = format!(" {} — {} tracks ", detail.title, detail.tracks.len());
+    let title = s.album_tracks_title(&detail.title, detail.tracks.len());
     let widths = [
         Constraint::Length(4),
         Constraint::Percentage(50),

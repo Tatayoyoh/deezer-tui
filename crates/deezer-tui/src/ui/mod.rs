@@ -12,6 +12,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Tabs};
 
 use crate::client::{Overlay, ViewState};
+use crate::i18n::t;
 use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
 
@@ -67,11 +68,12 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
 }
 
 fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
     let tab_titles = vec![
-        Line::from(" Search "),
-        Line::from(" Favorites "),
-        Line::from(" Radios / Podcasts "),
-        Line::from(" Downloads "),
+        Line::from(s.tab_search),
+        Line::from(s.tab_favorites),
+        Line::from(s.tab_radios),
+        Line::from(s.tab_downloads),
     ];
 
     let selected = match view.active_tab {

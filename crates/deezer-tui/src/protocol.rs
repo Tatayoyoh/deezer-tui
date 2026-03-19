@@ -134,18 +134,6 @@ impl SearchCategory {
         Self::Profile,
     ];
 
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Track => "Titres",
-            Self::Artist => "Artistes",
-            Self::Album => "Albums",
-            Self::Playlist => "Playlists",
-            Self::Podcast => "Podcasts",
-            Self::Episode => "Épisodes",
-            Self::Profile => "Profils",
-        }
-    }
-
     /// API section key used in deezer.pageSearch response.
     pub fn api_key(&self) -> &'static str {
         match self {
@@ -156,19 +144,6 @@ impl SearchCategory {
             Self::Podcast => "SHOW",
             Self::Episode => "EPISODE",
             Self::Profile => "USER",
-        }
-    }
-
-    /// Column headers for this category's table.
-    pub fn headers(&self) -> [&'static str; 4] {
-        match self {
-            Self::Track => ["Titre", "Artiste", "Album", "Durée"],
-            Self::Artist => ["Artiste", "Fans", "", ""],
-            Self::Album => ["Album", "Artiste", "", "Titres"],
-            Self::Playlist => ["Playlist", "Auteur", "Titres", ""],
-            Self::Podcast => ["Podcast", "Description", "", ""],
-            Self::Episode => ["Épisode", "Podcast", "", "Durée"],
-            Self::Profile => ["Profil", "", "", ""],
         }
     }
 
@@ -234,28 +209,6 @@ impl FavoritesCategory {
         Self::Playlists,
         Self::Following,
     ];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::RecentlyPlayed => "Écouté récemment",
-            Self::Tracks => "Titres",
-            Self::Artists => "Artistes",
-            Self::Albums => "Albums",
-            Self::Playlists => "Playlistes",
-            Self::Following => "Following",
-        }
-    }
-
-    /// Column headers for this category's table.
-    pub fn headers(&self) -> [&'static str; 4] {
-        match self {
-            Self::RecentlyPlayed | Self::Tracks => ["Titre", "Artiste", "Album", "Durée"],
-            Self::Artists => ["Artiste", "Fans", "", ""],
-            Self::Albums => ["Album", "Artiste", "", "Titres"],
-            Self::Playlists => ["Playlist", "Auteur", "Titres", ""],
-            Self::Following => ["Profil", "", "", ""],
-        }
-    }
 
     pub fn next(&self) -> Self {
         let all = Self::ALL;

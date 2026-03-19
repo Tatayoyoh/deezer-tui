@@ -2,6 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 use crate::client::{LoginMode, ViewState};
+use crate::i18n::t;
 use crate::theme::Theme;
 use crate::ui::common;
 
@@ -63,10 +64,11 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     frame.render_widget(common::deezer_logo(), chunks[0]);
 
     // Login button
+    let s = t();
     let button_text = if view.login_loading {
-        "  Connecting...  "
+        s.login_connecting
     } else {
-        "  Login with Deezer  "
+        s.login_button
     };
 
     let button_style = if view.login_loading {
@@ -98,14 +100,11 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     // Hint / error
     let hint_text = if view.login_loading {
-        Span::styled("Connecting...", Style::default().fg(Color::Cyan))
+        Span::styled(s.login_connecting, Style::default().fg(Color::Cyan))
     } else if let Some(ref error) = view.login_error {
         Span::styled(error.as_str(), Style::default().fg(Color::Red))
     } else {
-        Span::styled(
-            "Enter: login | w: connect with ARL | Esc: quit",
-            Theme::dim(),
-        )
+        Span::styled(s.login_hint, Theme::dim())
     };
     let hint = Paragraph::new(hint_text).alignment(Alignment::Center);
     frame.render_widget(hint, chunks[4]);
@@ -128,14 +127,15 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     frame.render_widget(common::deezer_logo(), chunks[0]);
 
     // ARL Input field
+    let s = t();
     let input_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
-        .title(" ARL Token ")
+        .title(s.login_arl_title)
         .title_style(Theme::title());
 
     let input_text = if view.login_input.is_empty() {
-        Span::styled("Paste your ARL token from browser cookies...", Theme::dim())
+        Span::styled(s.login_arl_placeholder, Theme::dim())
     } else {
         let masked: String = "*".repeat(view.login_input.len().min(40));
         let suffix = if view.login_input.len() > 40 {
@@ -156,11 +156,11 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     // Hint / error
     let hint_text = if view.login_loading {
-        Span::styled("Connecting...", Style::default().fg(Color::Cyan))
+        Span::styled(s.login_connecting, Style::default().fg(Color::Cyan))
     } else if let Some(ref error) = view.login_error {
         Span::styled(error.as_str(), Style::default().fg(Color::Red))
     } else {
-        Span::styled("Enter: connect | Esc: back", Theme::dim())
+        Span::styled(s.login_arl_hint, Theme::dim())
     };
     let hint = Paragraph::new(hint_text).alignment(Alignment::Center);
     frame.render_widget(hint, chunks[4]);

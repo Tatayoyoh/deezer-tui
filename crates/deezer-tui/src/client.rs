@@ -23,6 +23,7 @@ use deezer_core::api::models::{
 use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
+use crate::i18n::{self, t, Locale};
 use crate::protocol::{
     read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen,
     SearchCategory, ServerMessage,
@@ -94,14 +95,15 @@ pub struct PopupMenu {
 impl PopupMenu {
     /// Build the full menu (for `m` key on a selected track in a list).
     fn full(track: TrackData, is_favorite: bool) -> Self {
+        let s = t();
         let fav_label = if is_favorite {
-            "Remove from favorites"
+            s.remove_from_favorites
         } else {
-            "Add to favorites"
+            s.add_to_favorites
         };
         let items = vec![
             PopupMenuItem {
-                label: "── Manage ──".into(),
+                label: s.menu_manage.into(),
                 action: PopupAction::Header,
                 is_header: true,
             },
@@ -111,52 +113,52 @@ impl PopupMenu {
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Add to playlist".into(),
+                label: s.add_to_playlist.into(),
                 action: PopupAction::AddToPlaylist,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Don't recommend this track".into(),
+                label: s.dont_recommend.into(),
                 action: PopupAction::DislikeTrack,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "── Playback ──".into(),
+                label: s.menu_playback.into(),
                 action: PopupAction::Header,
                 is_header: true,
             },
             PopupMenuItem {
-                label: "Play next".into(),
+                label: s.play_next.into(),
                 action: PopupAction::PlayNext,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Add to queue".into(),
+                label: s.add_to_queue.into(),
                 action: PopupAction::AddToQueue,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Mix inspired by this track".into(),
+                label: s.mix_inspired.into(),
                 action: PopupAction::MixFromTrack,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "── Media ──".into(),
+                label: s.menu_media.into(),
                 action: PopupAction::Header,
                 is_header: true,
             },
             PopupMenuItem {
-                label: "Track album".into(),
+                label: s.track_album.into(),
                 action: PopupAction::ViewAlbum,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Share".into(),
+                label: s.share.into(),
                 action: PopupAction::Share,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Track info".into(),
+                label: s.track_info.into(),
                 action: PopupAction::TrackInfo,
                 is_header: false,
             },
@@ -173,15 +175,16 @@ impl PopupMenu {
 
     /// Build the manage-only menu (for `Ctrl+P` on currently playing track).
     fn manage_only(track: TrackData, is_favorite: bool) -> Self {
+        let s = t();
         let fav_label = if is_favorite {
-            "Remove from favorites"
+            s.remove_from_favorites
         } else {
-            "Add to favorites"
+            s.add_to_favorites
         };
         let title = format!("{} — {}", track.title, track.artist);
         let items = vec![
             PopupMenuItem {
-                label: "── Manage ──".into(),
+                label: s.menu_manage.into(),
                 action: PopupAction::Header,
                 is_header: true,
             },
@@ -191,12 +194,12 @@ impl PopupMenu {
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Add to playlist".into(),
+                label: s.add_to_playlist.into(),
                 action: PopupAction::AddToPlaylist,
                 is_header: false,
             },
             PopupMenuItem {
-                label: "Don't recommend this track".into(),
+                label: s.dont_recommend.into(),
                 action: PopupAction::DislikeTrack,
                 is_header: false,
             },
@@ -254,6 +257,8 @@ pub enum Overlay {
     Settings { selected: usize },
     /// Theme picker.
     ThemePicker { selected: usize },
+    /// Language picker.
+    LanguagePicker { selected: usize },
     /// Album detail view.
     AlbumDetail,
     /// Playlist detail modal.
@@ -559,7 +564,7 @@ impl Client {
                     KeyAction::SendCommand(cmd) => {
                         if let Err(e) = self.send_cmd(&cmd).await {
                             debug!("Send command error: {e}");
-                            self.view.status_msg = Some("Daemon disconnected".into());
+                            self.view.status_msg = Some(t().daemon_disconnected.into());
                             running = false;
                         }
                     }
@@ -567,7 +572,7 @@ impl Client {
                         for cmd in &cmds {
                             if let Err(e) = self.send_cmd(cmd).await {
                                 debug!("Send command error: {e}");
-                                self.view.status_msg = Some("Daemon disconnected".into());
+                                self.view.status_msg = Some(t().daemon_disconnected.into());
                                 running = false;
                                 break;
                             }
@@ -617,7 +622,7 @@ impl Client {
                 }
                 Ok(Ok(None)) => {
                     // Daemon disconnected
-                    self.view.status_msg = Some("Daemon disconnected".into());
+                    self.view.status_msg = Some(t().daemon_disconnected.into());
                     running = false;
                 }
                 Ok(Err(e)) => {
@@ -639,7 +644,7 @@ impl Client {
         if send_shutdown {
             let _ = self.send_cmd(&Command::Shutdown).await;
         } else {
-            eprintln!("deezer-tui: music continues in background. Run \"deezer-tui\" to restore the player.");
+            eprintln!("{}", t().detach_message);
         }
 
         Ok(())
@@ -930,7 +935,7 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 4;
+                const SETTINGS_COUNT: usize = 5;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.overlay = None;
@@ -956,6 +961,14 @@ impl Client {
                                 self.view.overlay = Some(Overlay::ThemePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
+                            4 => {
+                                // Language
+                                let current = i18n::current_locale();
+                                let idx =
+                                    Locale::ALL.iter().position(|&l| l == current).unwrap_or(0);
+                                self.view.overlay = Some(Overlay::LanguagePicker { selected: idx });
+                                return KeyAction::Continue;
+                            }
                             _ => {
                                 // Other entries — placeholder
                             }
@@ -966,6 +979,30 @@ impl Client {
                 // Also close on Ctrl+O
                 if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     self.view.overlay = None;
+                }
+                KeyAction::Continue
+            }
+            Overlay::LanguagePicker { selected } => {
+                let count = Locale::ALL.len();
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.view.overlay = Some(Overlay::Settings { selected: 4 });
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(count - 1);
+                    }
+                    KeyCode::Enter => {
+                        let locale = Locale::ALL[*selected];
+                        i18n::set(locale);
+                        let mut config = Config::load();
+                        config.language = Some(locale.as_str().to_string());
+                        let _ = config.save();
+                        self.view.overlay = Some(Overlay::Settings { selected: 4 });
+                    }
+                    _ => {}
                 }
                 KeyAction::Continue
             }
@@ -1385,10 +1422,8 @@ impl Client {
                 let url = format!("https://www.deezer.com/track/{}", track.track_id);
                 match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
                     Ok(()) => {
-                        self.view.toast = Some(Toast::new(
-                            "Link copied to clipboard!".into(),
-                            Duration::from_secs(2),
-                        ));
+                        self.view.toast =
+                            Some(Toast::new(t().link_copied.into(), Duration::from_secs(2)));
                     }
                     Err(e) => {
                         self.view.toast = Some(Toast::new(
@@ -1415,10 +1450,8 @@ impl Client {
                     KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
                 } else {
                     self.view.popup = None;
-                    self.view.toast = Some(Toast::new(
-                        "No album info available".into(),
-                        Duration::from_secs(2),
-                    ));
+                    self.view.toast =
+                        Some(Toast::new(t().no_album_info.into(), Duration::from_secs(2)));
                     KeyAction::Continue
                 }
             }

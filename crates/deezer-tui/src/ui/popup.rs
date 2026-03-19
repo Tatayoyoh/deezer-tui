@@ -4,6 +4,7 @@ use ratatui::widgets::{
 };
 
 use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
+use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
 
 /// Draw the popup overlay if one is active.
@@ -32,6 +33,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
         }
         Some(Overlay::ThemePicker { selected }) => {
             draw_theme_picker(frame, *selected);
+            return;
+        }
+        Some(Overlay::LanguagePicker { selected }) => {
+            draw_language_picker(frame, *selected);
             return;
         }
         Some(Overlay::AlbumDetail) => {
@@ -155,14 +160,14 @@ fn draw_playlist_picker(
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(format!(" Add \"{}\" to playlist ", track_title))
+        .title(t().add_to_playlist_fmt(track_title))
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
     if loading {
-        let loading_text = Paragraph::new("Loading playlists...")
+        let loading_text = Paragraph::new(t().loading_playlists)
             .style(Theme::dim())
             .alignment(Alignment::Center);
         frame.render_widget(loading_text, inner);
@@ -170,19 +175,20 @@ fn draw_playlist_picker(
     }
 
     if playlists.is_empty() {
-        let empty_text = Paragraph::new("No playlists found")
+        let empty_text = Paragraph::new(t().no_playlists)
             .style(Theme::dim())
             .alignment(Alignment::Center);
         frame.render_widget(empty_text, inner);
         return;
     }
 
+    let s = t();
     let items: Vec<ListItem> = playlists
         .iter()
         .enumerate()
         .map(|(i, pl)| {
             let prefix = if i == selected { " > " } else { "   " };
-            let text = format!("{}{} ({} tracks)", prefix, pl.title, pl.nb_songs);
+            let text = format!("{}{}", prefix, s.playlist_item(&pl.title, pl.nb_songs));
             ListItem::new(Line::from(Span::styled(
                 text,
                 if i == selected {
@@ -208,38 +214,45 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(" Track Info ")
+        .title(format!(" {} ", t().track_info))
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
+    let s = t();
     let track = &popup.track;
     let dur = track.duration_secs();
 
     let info_lines = vec![
         Line::from(vec![
-            Span::styled("Title:    ", Style::default().fg(Theme::text_dim_color())),
+            Span::styled(s.info_title, Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.title, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Artist:   ", Style::default().fg(Theme::text_dim_color())),
+            Span::styled(s.info_artist, Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.artist, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Album:    ", Style::default().fg(Theme::text_dim_color())),
+            Span::styled(s.info_album, Style::default().fg(Theme::text_dim_color())),
             Span::styled(&track.album, Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Duration: ", Style::default().fg(Theme::text_dim_color())),
+            Span::styled(
+                s.info_duration,
+                Style::default().fg(Theme::text_dim_color()),
+            ),
             Span::styled(format!("{}:{:02}", dur / 60, dur % 60), Theme::text()),
         ]),
         Line::from(vec![
-            Span::styled("Track ID: ", Style::default().fg(Theme::text_dim_color())),
+            Span::styled(
+                s.info_track_id,
+                Style::default().fg(Theme::text_dim_color()),
+            ),
             Span::styled(&track.track_id, Theme::text()),
         ]),
         Line::from(""),
-        Line::from(Span::styled("Press Esc to close", Theme::dim())),
+        Line::from(Span::styled(s.press_esc_close, Theme::dim())),
     ];
 
     let paragraph = Paragraph::new(info_lines);
@@ -248,28 +261,29 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
 
 /// Draw the help overlay showing all keyboard shortcuts.
 fn draw_help_overlay(frame: &mut Frame) {
-    let shortcuts: &[(&str, &str)] = &[
-        ("Tab / Shift+Tab", "Switch tabs"),
-        ("/ or Ctrl+F", "Search"),
-        ("Enter", "Play / Submit"),
-        ("Esc", "Settings / Back"),
-        ("j/k or Up/Down", "Navigate list"),
-        ("h/l or Left/Right", "Navigate categories"),
-        ("p / Space", "Play / Pause"),
-        ("n", "Next track"),
-        ("b", "Previous track"),
-        ("s", "Toggle shuffle"),
-        ("r", "Cycle repeat mode"),
-        ("+/-", "Volume up / down"),
-        ("a", "Album detail page"),
-        ("w", "Waiting list (queue)"),
-        ("m", "Track context menu"),
-        ("Ctrl+P", "Playing track menu"),
-        ("g", "Shuffle favorites"),
-        ("?", "This help"),
-        ("Ctrl+O", "Settings"),
-        ("q", "Quit"),
-        ("Ctrl+Z", "Detach (keep playing)"),
+    let s = t();
+    let shortcuts: Vec<(&str, &str)> = vec![
+        ("Tab / Shift+Tab", s.help_switch_tabs),
+        ("/ or Ctrl+F", s.help_search),
+        ("Enter", s.help_play_submit),
+        ("Esc", s.help_settings_back),
+        ("j/k or Up/Down", s.help_navigate_list),
+        ("h/l or Left/Right", s.help_navigate_categories),
+        ("p / Space", s.help_play_pause),
+        ("n", s.help_next_track),
+        ("b", s.help_prev_track),
+        ("s", s.help_toggle_shuffle),
+        ("r", s.help_cycle_repeat),
+        ("+/-", s.help_volume),
+        ("a", s.help_album_detail),
+        ("w", s.help_waiting_list),
+        ("m", s.help_context_menu),
+        ("Ctrl+P", s.help_playing_menu),
+        ("g", s.help_shuffle_favorites),
+        ("?", s.help_this_help),
+        ("Ctrl+O", s.help_settings),
+        ("q", s.help_quit),
+        ("Ctrl+Z", s.help_detach),
     ];
 
     let area = frame.area();
@@ -282,7 +296,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(" Keyboard Shortcuts ")
+        .title(s.keyboard_shortcuts)
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
@@ -309,11 +323,13 @@ fn draw_help_overlay(frame: &mut Frame) {
 
 /// Draw the settings overlay with selectable entries.
 fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
+    let s = t();
     let entries = [
-        "Keyboard shortcuts",
-        "Themes",
-        "Displayed sections",
-        "Parameters",
+        s.settings_shortcuts,
+        s.settings_themes,
+        s.settings_sections,
+        s.settings_parameters,
+        s.settings_language,
     ];
 
     let area = frame.area();
@@ -326,7 +342,7 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(" Settings ")
+        .title(s.settings)
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
@@ -368,7 +384,7 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(" Themes ")
+        .title(t().themes)
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
@@ -378,7 +394,7 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
 
     // Header
     items.push(ListItem::new(Line::from(Span::styled(
-        "  Official Deezer themes",
+        t().official_deezer_themes,
         Style::default()
             .fg(Theme::primary())
             .add_modifier(Modifier::BOLD),
@@ -406,7 +422,53 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     frame.render_widget(list, inner);
 }
 
-/// Draw the waiting list (queue) overlay.
+/// Draw the language picker overlay.
+fn draw_language_picker(frame: &mut Frame, selected: usize) {
+    use crate::i18n::{current_locale, Locale};
+
+    let locales = Locale::ALL;
+    let current = current_locale();
+
+    let area = frame.area();
+    let height = locales.len() as u16 + 4;
+    let popup_area = centered_rect(45, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(format!(" {} ", t().settings_language))
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let items: Vec<ListItem> = locales
+        .iter()
+        .enumerate()
+        .map(|(i, &locale)| {
+            let prefix = if i == selected { " > " } else { "   " };
+            let suffix = if locale == current { "  ●" } else { "" };
+            let label = format!("{}{}{}", prefix, locale.label(), suffix);
+            let style = if i == selected {
+                Theme::highlight()
+            } else if locale == current {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Theme::text()
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
 /// Draw the playlist detail modal.
 fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
     let area = frame.area();
@@ -421,9 +483,9 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
                 .borders(Borders::ALL)
                 .border_style(Theme::border_focused())
                 .style(Style::default().bg(Theme::surface()))
-                .title(" Playlist ")
+                .title(t().playlist)
                 .title_style(Theme::title());
-            let msg = Paragraph::new(Span::styled("Loading...", Theme::dim()))
+            let msg = Paragraph::new(Span::styled(t().loading, Theme::dim()))
                 .alignment(Alignment::Center)
                 .block(block);
             frame.render_widget(msg, popup_area);
@@ -449,9 +511,10 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
+    let s = t();
     if tracks.is_empty() {
         let empty =
-            Paragraph::new(Span::styled("No tracks", Theme::dim())).alignment(Alignment::Center);
+            Paragraph::new(Span::styled(s.no_tracks, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(empty, inner);
         return;
     }
@@ -468,7 +531,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     // Subtitle: creator + track count
     let subtitle = Line::from(vec![Span::styled(
-        format!("{} — {} titres", detail.creator, detail.nb_tracks),
+        s.playlist_subtitle(&detail.creator, detail.nb_tracks),
         Theme::dim(),
     )]);
     frame.render_widget(
@@ -479,10 +542,10 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
     // Table header
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
-        Cell::from(Span::styled("Titre", Theme::dim())),
-        Cell::from(Span::styled("Artiste", Theme::dim())),
-        Cell::from(Span::styled("Album", Theme::dim())),
-        Cell::from(Span::styled("Durée", Theme::dim())),
+        Cell::from(Span::styled(s.header_title, Theme::dim())),
+        Cell::from(Span::styled(s.header_artist, Theme::dim())),
+        Cell::from(Span::styled(s.header_album, Theme::dim())),
+        Cell::from(Span::styled(s.header_duration, Theme::dim())),
     ])
     .height(1);
 
@@ -552,27 +615,28 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" play  ", Theme::dim()),
+        Span::styled(s.hint_play, Theme::dim()),
         Span::styled(
             "m",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" menu  ", Theme::dim()),
+        Span::styled(s.hint_menu, Theme::dim()),
         Span::styled(
             "Esc",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" close", Theme::dim()),
+        Span::styled(s.hint_close, Theme::dim()),
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
 }
 
 fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
+    let s = t();
     let area = frame.area();
     let queue = &view.queue;
 
@@ -582,7 +646,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     frame.render_widget(Clear, popup_area);
 
-    let title = format!(" Waiting List ({} tracks) ", queue.len());
+    let title = s.waiting_list_title(queue.len());
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
@@ -594,8 +658,8 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     frame.render_widget(block, popup_area);
 
     if queue.is_empty() {
-        let empty = Paragraph::new(Span::styled("Queue is empty", Theme::dim()))
-            .alignment(Alignment::Center);
+        let empty =
+            Paragraph::new(Span::styled(s.queue_empty, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(empty, inner);
         return;
     }
@@ -609,10 +673,10 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     // Table header
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
-        Cell::from(Span::styled("Titre", Theme::dim())),
-        Cell::from(Span::styled("Artiste", Theme::dim())),
-        Cell::from(Span::styled("Album", Theme::dim())),
-        Cell::from(Span::styled("Durée", Theme::dim())),
+        Cell::from(Span::styled(s.header_title, Theme::dim())),
+        Cell::from(Span::styled(s.header_artist, Theme::dim())),
+        Cell::from(Span::styled(s.header_album, Theme::dim())),
+        Cell::from(Span::styled(s.header_duration, Theme::dim())),
     ])
     .height(1);
 
@@ -678,28 +742,28 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" remove  ", Theme::dim()),
+        Span::styled(s.hint_remove, Theme::dim()),
         Span::styled(
             "f",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" favorite  ", Theme::dim()),
+        Span::styled(s.hint_favorite, Theme::dim()),
         Span::styled(
             "m",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" menu  ", Theme::dim()),
+        Span::styled(s.hint_menu, Theme::dim()),
         Span::styled(
             "Esc",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(" close", Theme::dim()),
+        Span::styled(s.hint_close, Theme::dim()),
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[1]);

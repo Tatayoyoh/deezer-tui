@@ -1,5 +1,6 @@
 mod client;
 mod daemon;
+mod i18n;
 mod protocol;
 mod theme;
 mod ui;
@@ -29,6 +30,15 @@ fn init_logging(path: &str) {
 }
 
 fn main() -> Result<()> {
+    // Initialize i18n: config override > system locale > English
+    let config = deezer_core::Config::load();
+    let locale = config
+        .language
+        .as_deref()
+        .and_then(i18n::Locale::from_str)
+        .unwrap_or_else(i18n::detect_locale);
+    i18n::set(locale);
+
     // Check for --quit / -q flag
     let args: Vec<String> = std::env::args().collect();
     let quit_mode = args.iter().any(|a| a == "-q" || a == "--quit");

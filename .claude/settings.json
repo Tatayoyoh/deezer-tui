@@ -14,7 +14,10 @@
       "mcp__circleci-mcp-server__list_followed_projects",
       "Bash(cargo fmt --all)",
       "Bash(cargo fmt --all -- --check)",
-      "Bash(cargo check --workspace)"
+      "Bash(cargo check --workspace)",
+      "Bash(grep -E \"\\\\.\\(toml|yml|yaml\\)$|\\\\.circleci\")",
+      "Bash(cargo fmt:*)",
+      "Read(//home/bob/Projects/deezer-core/src/api/**)"
     ]
   }
 }

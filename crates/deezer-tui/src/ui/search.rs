@@ -2,6 +2,7 @@ use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
 use crate::client::{InputMode, ViewState};
+use crate::i18n::t;
 use crate::protocol::SearchCategory;
 use crate::theme::Theme;
 
@@ -26,6 +27,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
 }
 
 fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
     let is_typing = view.input_mode == InputMode::Typing;
     let input_block = Block::default()
         .borders(Borders::ALL)
@@ -35,14 +37,14 @@ fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
             Theme::border()
         })
         .title(if is_typing {
-            " Search (Enter to submit, Esc to cancel) "
+            s.search_title_typing
         } else {
-            " Search (press / to type) "
+            s.search_title_normal
         })
         .title_style(Theme::title());
 
     let input_text = if view.search_input.is_empty() && !is_typing {
-        Span::styled("Press / to search tracks, artists, albums...", Theme::dim())
+        Span::styled(s.search_placeholder, Theme::dim())
     } else {
         Span::styled(&view.search_input, Theme::text())
     };
@@ -58,6 +60,7 @@ fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
 }
 
 fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
+    let s = t();
     let spans: Vec<Span> = SearchCategory::ALL
         .iter()
         .enumerate()
@@ -68,13 +71,13 @@ fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
             }
             if *cat == current {
                 parts.push(Span::styled(
-                    cat.label(),
+                    s.search_category_label(*cat),
                     Style::default()
                         .fg(Theme::primary())
                         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                 ));
             } else {
-                parts.push(Span::styled(cat.label(), Theme::dim()));
+                parts.push(Span::styled(s.search_category_label(*cat), Theme::dim()));
             }
             parts
         })
@@ -86,21 +89,22 @@ fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
 }
 
 fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
     if view.search_loading {
         let loading =
-            Paragraph::new(Span::styled("Searching...", Theme::dim())).alignment(Alignment::Center);
+            Paragraph::new(Span::styled(s.searching, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(loading, area);
         return;
     }
 
     if view.search_display.is_empty() {
-        let empty_msg = Paragraph::new(Span::styled("No results yet", Theme::dim()))
-            .alignment(Alignment::Center);
+        let empty_msg =
+            Paragraph::new(Span::styled(s.no_results, Theme::dim())).alignment(Alignment::Center);
         frame.render_widget(empty_msg, area);
         return;
     }
 
-    let headers = view.search_category.headers();
+    let headers = s.search_category_headers(view.search_category);
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
         Cell::from(Span::styled(headers[0], Theme::dim())),
@@ -128,7 +132,7 @@ fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         })
         .collect();
 
-    let title = format!(" Results ({}) ", view.search_display.len());
+    let title = s.results_title(view.search_display.len());
     let widths = view.search_category.column_widths();
     let table = Table::new(rows, widths)
         .header(header)
