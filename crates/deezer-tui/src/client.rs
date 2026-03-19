@@ -25,8 +25,8 @@ use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::i18n::{self, t, Locale};
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, Screen,
-    SearchCategory, ServerMessage,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, RadioItem,
+    Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -293,6 +293,12 @@ pub struct ViewState {
     pub favorites_loading: bool,
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
+    pub radios: Vec<RadioItem>,
+    pub radios_filtered: Vec<RadioItem>,
+    pub radios_selected: usize,
+    pub radios_loading: bool,
+    pub radio_filter_input: String,
+    pub radio_filter_typing: bool,
     pub playlists: Vec<PlaylistData>,
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
@@ -365,6 +371,12 @@ impl ViewState {
             favorites_loading: snap.favorites_loading,
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
+            radios: snap.radios.clone(),
+            radios_filtered: snap.radios.clone(),
+            radios_selected: snap.radios_selected,
+            radios_loading: snap.radios_loading,
+            radio_filter_input: String::new(),
+            radio_filter_typing: false,
             playlists: snap.playlists.clone(),
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
@@ -414,6 +426,13 @@ impl ViewState {
         self.favorites_loading = snap.favorites_loading;
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
+        // Update radios and re-apply filter
+        if self.radios.len() != snap.radios.len() || self.radios_loading != snap.radios_loading {
+            self.radios = snap.radios;
+            self.radios_loading = snap.radios_loading;
+            self.apply_radio_filter();
+        }
+
         self.album_detail = snap.album_detail;
         // Don't overwrite album_detail_selected — it's managed client-side
         self.album_detail_loading = snap.album_detail_loading;
@@ -447,11 +466,39 @@ impl ViewState {
         if prev_screen == Screen::Login && self.screen == Screen::Main {
             self.input_mode = InputMode::Normal;
         }
+
+        // After logout transition (Main → Login), reset local state
+        if prev_screen == Screen::Main && self.screen == Screen::Login {
+            self.input_mode = InputMode::Normal;
+            self.login_mode = LoginMode::Button;
+            self.login_input.clear();
+            self.login_cursor = 0;
+            self.overlay = None;
+            self.popup = None;
+            self.radio_filter_input.clear();
+            self.radio_filter_typing = false;
+        }
     }
 
     /// Check if a track is in the user's favorites.
     fn is_track_favorite(&self, track_id: &str) -> bool {
         self.favorites.iter().any(|t| t.track_id == track_id)
+    }
+
+    /// Apply the current filter text to the full radios list.
+    fn apply_radio_filter(&mut self) {
+        if self.radio_filter_input.is_empty() {
+            self.radios_filtered = self.radios.clone();
+        } else {
+            let query = self.radio_filter_input.to_lowercase();
+            self.radios_filtered = self
+                .radios
+                .iter()
+                .filter(|r| r.title.to_lowercase().contains(&query))
+                .cloned()
+                .collect();
+        }
+        self.radios_selected = 0;
     }
 
     /// Progress ratio for the progress bar.
@@ -676,11 +723,21 @@ impl Client {
             return KeyAction::Continue;
         }
 
-        // Ctrl+F: enter search mode (same as /)
+        // Ctrl+F: enter search/filter mode (same as /)
         if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if self.view.screen == Screen::Main && self.view.active_tab == ActiveTab::Search {
-                self.view.input_mode = InputMode::Typing;
-                self.view.search_input.clear();
+            if self.view.screen == Screen::Main {
+                match self.view.active_tab {
+                    ActiveTab::Search => {
+                        self.view.input_mode = InputMode::Typing;
+                        self.view.search_input.clear();
+                    }
+                    ActiveTab::Radio => {
+                        self.view.radio_filter_typing = true;
+                        self.view.radio_filter_input.clear();
+                        self.view.apply_radio_filter();
+                    }
+                    _ => {}
+                }
             }
             return KeyAction::Continue;
         }
@@ -798,6 +855,31 @@ impl Client {
             }
         }
 
+        // Radio filter typing mode
+        if self.view.radio_filter_typing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.view.radio_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Enter => {
+                    self.view.radio_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Char(c) => {
+                    self.view.radio_filter_input.push(c);
+                    self.view.apply_radio_filter();
+                    return KeyAction::Continue;
+                }
+                KeyCode::Backspace => {
+                    self.view.radio_filter_input.pop();
+                    self.view.apply_radio_filter();
+                    return KeyAction::Continue;
+                }
+                _ => return KeyAction::Continue,
+            }
+        }
+
         // Ctrl+P: open manage popup for currently playing track
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
             if let Some(ref track) = self.view.current_track {
@@ -815,11 +897,19 @@ impl Client {
             KeyCode::Tab => KeyAction::SendCommand(Command::NextTab),
             KeyCode::BackTab => KeyAction::SendCommand(Command::PrevTab),
 
-            // Enter search typing mode
+            // Enter search/filter typing mode
             KeyCode::Char('/') => {
-                if self.view.active_tab == ActiveTab::Search {
-                    self.view.input_mode = InputMode::Typing;
-                    self.view.search_input.clear();
+                match self.view.active_tab {
+                    ActiveTab::Search => {
+                        self.view.input_mode = InputMode::Typing;
+                        self.view.search_input.clear();
+                    }
+                    ActiveTab::Radio => {
+                        self.view.radio_filter_typing = true;
+                        self.view.radio_filter_input.clear();
+                        self.view.apply_radio_filter();
+                    }
+                    _ => {}
                 }
                 KeyAction::Continue
             }
@@ -846,8 +936,23 @@ impl Client {
             KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
 
             // List navigation
-            KeyCode::Up | KeyCode::Char('k') => KeyAction::SendCommand(Command::SelectUp),
-            KeyCode::Down | KeyCode::Char('j') => KeyAction::SendCommand(Command::SelectDown),
+            KeyCode::Up | KeyCode::Char('k') => {
+                if self.view.active_tab == ActiveTab::Radio {
+                    self.view.radios_selected = self.view.radios_selected.saturating_sub(1);
+                    return KeyAction::Continue;
+                }
+                KeyAction::SendCommand(Command::SelectUp)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                if self.view.active_tab == ActiveTab::Radio {
+                    if !self.view.radios_filtered.is_empty() {
+                        self.view.radios_selected = (self.view.radios_selected + 1)
+                            .min(self.view.radios_filtered.len() - 1);
+                    }
+                    return KeyAction::Continue;
+                }
+                KeyAction::SendCommand(Command::SelectDown)
+            }
 
             // Play selected track or open album detail
             KeyCode::Enter => {
@@ -882,6 +987,24 @@ impl Client {
                     ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
                         index: self.view.favorites_selected,
                     }),
+                    ActiveTab::Radio => {
+                        // Find the original index of the filtered radio in the full list
+                        if let Some(filtered_radio) =
+                            self.view.radios_filtered.get(self.view.radios_selected)
+                        {
+                            let original_idx = self
+                                .view
+                                .radios
+                                .iter()
+                                .position(|r| r.id == filtered_radio.id)
+                                .unwrap_or(0);
+                            KeyAction::SendCommand(Command::PlayFromRadio {
+                                index: original_idx,
+                            })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
                     _ => KeyAction::Continue,
                 }
             }
@@ -935,7 +1058,7 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 5;
+                const SETTINGS_COUNT: usize = 4;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.overlay = None;
@@ -961,7 +1084,7 @@ impl Client {
                                 self.view.overlay = Some(Overlay::ThemePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
-                            4 => {
+                            2 => {
                                 // Language
                                 let current = i18n::current_locale();
                                 let idx =
@@ -969,9 +1092,12 @@ impl Client {
                                 self.view.overlay = Some(Overlay::LanguagePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
-                            _ => {
-                                // Other entries — placeholder
+                            3 => {
+                                // Logout
+                                self.view.overlay = None;
+                                return KeyAction::SendCommand(Command::Logout);
                             }
+                            _ => {}
                         }
                     }
                     _ => {}
@@ -986,7 +1112,7 @@ impl Client {
                 let count = Locale::ALL.len();
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
-                        self.view.overlay = Some(Overlay::Settings { selected: 4 });
+                        self.view.overlay = Some(Overlay::Settings { selected: 2 });
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = selected.saturating_sub(1);
@@ -1000,7 +1126,7 @@ impl Client {
                         let mut config = Config::load();
                         config.language = Some(locale.as_str().to_string());
                         let _ = config.save();
-                        self.view.overlay = Some(Overlay::Settings { selected: 4 });
+                        self.view.overlay = Some(Overlay::Settings { selected: 2 });
                     }
                     _ => {}
                 }

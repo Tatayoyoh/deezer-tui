@@ -327,9 +327,8 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let entries = [
         s.settings_shortcuts,
         s.settings_themes,
-        s.settings_sections,
-        s.settings_parameters,
         s.settings_language,
+        s.settings_logout,
     ];
 
     let area = frame.area();

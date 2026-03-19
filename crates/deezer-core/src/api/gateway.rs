@@ -711,6 +711,64 @@ impl DeezerClient {
         })
     }
 
+    /// Get the list of radio stations from the Deezer public API.
+    pub async fn get_radios(&self) -> Result<Vec<super::models::RadioData>, DeezerError> {
+        let resp: serde_json::Value = self
+            .http
+            .get("https://api.deezer.com/radio")
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let data = resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in radios response".into()))?;
+
+        let radios: Vec<super::models::RadioData> = data
+            .iter()
+            .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+            .collect();
+
+        Ok(radios)
+    }
+
+    /// Get tracks for a specific radio station from the Deezer public API.
+    pub async fn get_radio_tracks(&self, radio_id: u64) -> Result<Vec<TrackData>, DeezerError> {
+        let url = format!("https://api.deezer.com/radio/{}/tracks", radio_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let data = resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in radio tracks response".into()))?;
+
+        // The public API returns tracks in a different format than gw-light.
+        // Extract track IDs and fetch full data via gw-light.
+        let track_ids: Vec<String> = data
+            .iter()
+            .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+            .collect();
+
+        let track_id_refs: Vec<&str> = track_ids.iter().map(|s| s.as_str()).collect();
+        if track_id_refs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.get_tracks(&track_id_refs).await
+    }
+
     /// Get a smart radio mix inspired by a track.
     pub async fn get_smart_radio(&self, song_id: &str) -> Result<Vec<TrackData>, DeezerError> {
         let params = json!({ "SNG_ID": song_id });
