@@ -61,7 +61,17 @@ impl DeezerClient {
             user_name: user_data.user.user_name,
         };
 
-        info!(user_id = session.user_id, name = %session.user_name, "Authenticated successfully");
+        let offer_name = user_data.offer.as_ref().map_or("unknown", |o| &o.offer_name);
+        info!(
+            user_id = session.user_id,
+            name = %session.user_name,
+            offer = %offer_name,
+            web_streaming = user_data.user.options.web_streaming,
+            web_hq = user_data.user.options.web_hq,
+            web_lossless = user_data.user.options.web_lossless,
+            license_country = %user_data.user.options.license_country,
+            "Authenticated successfully"
+        );
 
         self.session = Some(session.clone());
         Ok(session)

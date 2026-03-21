@@ -59,8 +59,14 @@ impl DeezerClient {
         let params = json!({ "sng_id": song_id });
         let results = self.gw_call("song.getData", params).await?;
 
-        serde_json::from_value(results)
-            .map_err(|e| DeezerError::Api(format!("Failed to parse track data: {e}")))
+        let track: TrackData = serde_json::from_value(results)
+            .map_err(|e| DeezerError::Api(format!("Failed to parse track data: {e}")))?;
+
+        if let Some(ref fb) = track.fallback {
+            debug!(track_id = %track.track_id, fallback_id = %fb.track_id, "Track has FALLBACK");
+        }
+
+        Ok(track)
     }
 
     /// Get multiple tracks at once (includes TRACK_TOKEN and MD5_ORIGIN).

@@ -24,6 +24,8 @@ impl DeezerClient {
         let http = Client::builder()
             .cookie_provider(Arc::clone(&cookie_jar))
             .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(10))
             .build()
             .map_err(|e| DeezerError::Http(e.to_string()))?;
 
