@@ -146,6 +146,7 @@ pub struct Strings {
     pub help_settings: &'static str,
     pub help_quit: &'static str,
     pub help_detach: &'static str,
+    pub help_info: &'static str,
 
     // --- Settings ---
     pub settings: &'static str,
@@ -153,6 +154,14 @@ pub struct Strings {
     pub settings_themes: &'static str,
     pub settings_language: &'static str,
     pub settings_logout: &'static str,
+
+    // --- About modal ---
+    pub about_title: &'static str,
+    pub about_version: &'static str,
+    pub about_architecture: &'static str,
+    pub about_author: &'static str,
+    pub about_github: &'static str,
+    pub about_license: &'static str,
 
     // --- Themes ---
     pub themes: &'static str,
@@ -538,12 +547,20 @@ static EN: Strings = Strings {
     help_settings: "Settings",
     help_quit: "Quit",
     help_detach: "Detach (keep playing)",
+    help_info: "Application info",
 
     settings: " Settings ",
     settings_shortcuts: "Keyboard shortcuts",
     settings_themes: "Themes",
     settings_language: "Language",
     settings_logout: "Logout",
+
+    about_title: " About Deezer TUI ",
+    about_version: "Version",
+    about_architecture: "Architecture",
+    about_author: "Author",
+    about_github: "GitHub",
+    about_license: "License",
 
     themes: " Themes ",
     official_deezer_themes: "  Official Deezer themes",
@@ -731,12 +748,20 @@ static FR: Strings = Strings {
     help_settings: "Paramètres",
     help_quit: "Quitter",
     help_detach: "Détacher (continuer la lecture)",
+    help_info: "Infos application",
 
     settings: " Paramètres ",
     settings_shortcuts: "Raccourcis clavier",
     settings_themes: "Thèmes",
     settings_language: "Langue",
     settings_logout: "Déconnexion",
+
+    about_title: " À propos de Deezer TUI ",
+    about_version: "Version",
+    about_architecture: "Architecture",
+    about_author: "Auteur",
+    about_github: "GitHub",
+    about_license: "Licence",
 
     themes: " Thèmes ",
     official_deezer_themes: "  Thèmes officiels Deezer",
@@ -923,12 +948,20 @@ static ES: Strings = Strings {
     help_settings: "Ajustes",
     help_quit: "Salir",
     help_detach: "Desacoplar (seguir reproduciendo)",
+    help_info: "Info de la aplicación",
 
     settings: " Ajustes ",
     settings_shortcuts: "Atajos de teclado",
     settings_themes: "Temas",
     settings_language: "Idioma",
     settings_logout: "Cerrar sesión",
+
+    about_title: " Acerca de Deezer TUI ",
+    about_version: "Versión",
+    about_architecture: "Arquitectura",
+    about_author: "Autor",
+    about_github: "GitHub",
+    about_license: "Licencia",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiales de Deezer",
@@ -1115,12 +1148,20 @@ static PT: Strings = Strings {
     help_settings: "Configurações",
     help_quit: "Sair",
     help_detach: "Desanexar (continuar tocando)",
+    help_info: "Info do aplicativo",
 
     settings: " Configurações ",
     settings_shortcuts: "Atalhos do teclado",
     settings_themes: "Temas",
     settings_language: "Idioma",
     settings_logout: "Sair",
+
+    about_title: " Sobre Deezer TUI ",
+    about_version: "Versão",
+    about_architecture: "Arquitetura",
+    about_author: "Autor",
+    about_github: "GitHub",
+    about_license: "Licença",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiais do Deezer",
@@ -1307,12 +1348,20 @@ static DE: Strings = Strings {
     help_settings: "Einstellungen",
     help_quit: "Beenden",
     help_detach: "Trennen (weiterspielen)",
+    help_info: "App-Informationen",
 
     settings: " Einstellungen ",
     settings_shortcuts: "Tastenkürzel",
     settings_themes: "Themen",
     settings_language: "Sprache",
     settings_logout: "Abmelden",
+
+    about_title: " Über Deezer TUI ",
+    about_version: "Version",
+    about_architecture: "Architektur",
+    about_author: "Autor",
+    about_github: "GitHub",
+    about_license: "Lizenz",
 
     themes: " Themen ",
     official_deezer_themes: "  Offizielle Deezer-Themen",

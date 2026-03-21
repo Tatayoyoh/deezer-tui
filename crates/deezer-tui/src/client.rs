@@ -265,6 +265,8 @@ pub enum Overlay {
     PlaylistDetail { selected: usize },
     /// Waiting list (upcoming tracks in queue).
     WaitingList { selected: usize },
+    /// Application info modal.
+    Info,
 }
 
 /// View state used by UI rendering functions.
@@ -714,6 +716,15 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // i : toggle info modal
+        if key.code == KeyCode::Char('i') && self.view.screen == Screen::Main {
+            self.view.overlay = match self.view.overlay {
+                Some(Overlay::Info) => None,
+                _ => Some(Overlay::Info),
+            };
+            return KeyAction::Continue;
+        }
+
         // Ctrl+O : toggle settings overlay
         if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.view.overlay = match self.view.overlay {
@@ -1051,6 +1062,15 @@ impl Client {
             Overlay::Help => {
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('?') => {
+                        self.view.overlay = None;
+                    }
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
+            Overlay::Info => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('i') => {
                         self.view.overlay = None;
                     }
                     _ => {}

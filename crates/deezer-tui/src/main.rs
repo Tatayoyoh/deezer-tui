@@ -39,11 +39,23 @@ fn main() -> Result<()> {
         .unwrap_or_else(i18n::detect_locale);
     i18n::set(locale);
 
-    // Check for --quit / -q flag
+    // Check for flags
     let args: Vec<String> = std::env::args().collect();
-    let quit_mode = args.iter().any(|a| a == "-q" || a == "--quit");
 
-    if quit_mode {
+    if args.iter().any(|a| a == "-v" || a == "--version") {
+        println!(
+            "deezer-tui {} ({}/{})",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        );
+        println!("License: WTFPL");
+        println!("Author:  Tatayoyoh");
+        println!("GitHub:  https://github.com/Tatayoyoh/deezer-tui");
+        return Ok(());
+    }
+
+    if args.iter().any(|a| a == "-q" || a == "--quit") {
         return handle_quit();
     }
 
