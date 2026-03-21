@@ -1,5 +1,5 @@
 use serde_json::json;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::models::{AudioQuality, DeezerError, TrackData};
 use super::DeezerClient;
@@ -24,10 +24,17 @@ impl DeezerClient {
             .as_deref()
             .ok_or_else(|| DeezerError::TrackUnavailable("Missing TRACK_TOKEN".into()))?;
 
-        // Try requested quality, then fall back
-        let mut current_quality = Some(quality);
+        debug!(
+            track_id = %track.track_id,
+            token_len = track_token.len(),
+            token_prefix = &track_token[..track_token.len().min(20)],
+            "get_stream_url: track_token info"
+        );
 
-        while let Some(q) = current_quality {
+        // Try requested quality, then fall back to lower, then try higher
+        let qualities_to_try = quality.all_fallbacks();
+
+        for q in qualities_to_try {
             debug!(quality = q.as_api_format(), track_id = %track.track_id, "Requesting stream URL");
 
             let payload = json!({
@@ -70,16 +77,13 @@ impl DeezerClient {
                 return Ok((url.to_string(), q));
             }
 
-            // Check for errors
-            if let Some(errors) = body
-                .get("data")
-                .and_then(|d| d.get(0))
-                .and_then(|d| d.get("errors"))
-            {
-                debug!(quality = q.as_api_format(), errors = %errors, "Quality unavailable, trying fallback");
-            }
-
-            current_quality = q.fallback();
+            // Log the full response for debugging
+            warn!(
+                quality = q.as_api_format(),
+                track_id = %track.track_id,
+                response = %body,
+                "get_stream_url: no streaming URL in response"
+            );
         }
 
         Err(DeezerError::QualityUnavailable)

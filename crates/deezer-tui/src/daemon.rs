@@ -38,8 +38,9 @@ enum AsyncResult {
         audio_data: Vec<u8>,
         track: TrackData,
         quality: AudioQuality,
+        generation: u64,
     },
-    TrackFetchError(String),
+    TrackFetchError { err: String, generation: u64 },
     FavoriteAdded(String),
     FavoriteRemoved(String),
     FavoriteError(String),
@@ -111,6 +112,9 @@ pub struct Daemon {
     engine: Option<PlayerEngine>,
     master_key: Option<[u8; 16]>,
 
+    // Shared HTTP client for CDN downloads (connection reuse)
+    cdn_http: deezer_core::CdnClient,
+
     // Async channel
     async_tx: tokio::sync::mpsc::UnboundedSender<AsyncResult>,
     async_rx: tokio::sync::mpsc::UnboundedReceiver<AsyncResult>,
@@ -118,6 +122,11 @@ pub struct Daemon {
     // Playback position tracking
     playback_started_at: Option<Instant>,
     playback_offset_secs: u64,
+
+    // Generation counter to discard stale track fetch results
+    track_generation: u64,
+    // Count consecutive failed track fetches to avoid infinite skip loop
+    consecutive_skip_count: u32,
 }
 
 impl Daemon {
@@ -130,6 +139,8 @@ impl Daemon {
         };
 
         let client = DeezerClient::new().map_err(|e| anyhow::anyhow!("{e}"))?;
+        let cdn_http = deezer_core::player::stream::new_cdn_client()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         let (async_tx, async_rx) = tokio::sync::mpsc::unbounded_channel();
 
         Ok(Self {
@@ -172,6 +183,7 @@ impl Daemon {
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
             client: Arc::new(tokio::sync::Mutex::new(client)),
+            cdn_http,
             engine: None,
             master_key: None,
 
@@ -180,6 +192,8 @@ impl Daemon {
 
             playback_started_at: None,
             playback_offset_secs: 0,
+            track_generation: 0,
+            consecutive_skip_count: 0,
         })
     }
 
@@ -344,6 +358,7 @@ impl Daemon {
                 }
             }
             Command::PlayFromFavorites { index } => {
+                info!(index, favorites_display_len = self.favorites_display.len(), "PlayFromFavorites");
                 if let Some(item) = self.favorites_display.get(index) {
                     if let Some(track) = &item.track {
                         let playable: Vec<TrackData> = self
@@ -355,6 +370,7 @@ impl Daemon {
                             .iter()
                             .position(|t| t.track_id == track.track_id)
                             .unwrap_or(0);
+                        info!(track_id = %track.track_id, title = %track.title, queue_len = playable.len(), queue_idx, "PlayFromFavorites: setting queue and playing");
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = playable;
                             state.queue_index = queue_idx;
@@ -1036,6 +1052,18 @@ impl Daemon {
             return;
         };
 
+        // Increment generation so any in-flight fetch for a previous track is ignored
+        self.track_generation += 1;
+        let generation = self.track_generation;
+
+        info!(
+            gen = generation,
+            track_id = %track.track_id,
+            title = %track.title,
+            has_token = track.has_track_token(),
+            "start_play_track: begin"
+        );
+
         if let Ok(mut state) = self.player_state.lock() {
             state.status = PlaybackStatus::Loading;
             state.current_track = Some(track.clone());
@@ -1046,43 +1074,168 @@ impl Daemon {
         self.status_msg = Some(t().fmt_loading_track(&track.title, &track.artist));
 
         let client = Arc::clone(&self.client);
+        let cdn_http = self.cdn_http.clone();
         let tx = self.async_tx.clone();
         let quality = self.config.quality;
 
         tokio::spawn(async move {
-            let client = client.lock().await;
+            let start = Instant::now();
 
-            let track = match client.ensure_track_token(&track).await {
-                Ok(t) => t,
-                Err(e) => {
-                    let _ = tx.send(AsyncResult::TrackFetchError(e.to_string()));
-                    return;
+            // Lock the client only for the short API calls (token + stream URL),
+            // then release it before the potentially long CDN download.
+            info!(gen = generation, track_id = %track.track_id, "fetch_task: waiting for client lock");
+            let (track, url, actual_quality) = {
+                let lock_wait = Instant::now();
+                let client = client.lock().await;
+                info!(gen = generation, track_id = %track.track_id, lock_ms = lock_wait.elapsed().as_millis(), "fetch_task: got client lock");
+
+                info!(gen = generation, track_id = %track.track_id, "fetch_task: ensure_track_token");
+                let token_start = Instant::now();
+                let track = match client.ensure_track_token(&track).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        warn!(gen = generation, track_id = %track.track_id, err = %e, elapsed_ms = token_start.elapsed().as_millis(), "fetch_task: ensure_track_token FAILED");
+                        let _ = tx.send(AsyncResult::TrackFetchError {
+                            err: e.to_string(),
+                            generation,
+                        });
+                        return;
+                    }
+                };
+                info!(gen = generation, track_id = %track.track_id, elapsed_ms = token_start.elapsed().as_millis(), "fetch_task: ensure_track_token OK");
+
+                info!(gen = generation, track_id = %track.track_id, quality = quality.as_api_format(), "fetch_task: get_stream_url");
+                let url_start = Instant::now();
+                match client.get_stream_url(&track, quality).await {
+                    Ok((url, actual_quality)) => {
+                        info!(gen = generation, track_id = %track.track_id, actual_quality = actual_quality.as_api_format(), elapsed_ms = url_start.elapsed().as_millis(), "fetch_task: get_stream_url OK");
+                        (track, url, actual_quality)
+                    }
+                    Err(first_err) => {
+                        // Token may be expired — re-fetch track data with a fresh token and retry
+                        warn!(gen = generation, track_id = %track.track_id, err = %first_err, elapsed_ms = url_start.elapsed().as_millis(), "fetch_task: get_stream_url failed, refreshing token");
+                        let refresh_start = Instant::now();
+                        let refreshed = match client.get_track(&track.track_id).await {
+                            Ok(t) => t,
+                            Err(e) => {
+                                warn!(gen = generation, track_id = %track.track_id, err = %e, "fetch_task: token refresh (get_track) FAILED");
+                                let _ = tx.send(AsyncResult::TrackFetchError {
+                                    err: e.to_string(),
+                                    generation,
+                                });
+                                return;
+                            }
+                        };
+                        info!(gen = generation, track_id = %track.track_id, elapsed_ms = refresh_start.elapsed().as_millis(), "fetch_task: token refreshed, retrying get_stream_url");
+                        match client.get_stream_url(&refreshed, quality).await {
+                            Ok((url, actual_quality)) => {
+                                info!(gen = generation, track_id = %track.track_id, actual_quality = actual_quality.as_api_format(), "fetch_task: get_stream_url OK after refresh");
+                                (refreshed, url, actual_quality)
+                            }
+                            Err(_) => {
+                                // Try FALLBACK track if available
+                                if let Some(ref fb) = refreshed.fallback {
+                                    info!(gen = generation, track_id = %track.track_id, fallback_id = %fb.track_id, "fetch_task: trying FALLBACK track");
+                                    match client.get_track(&fb.track_id).await {
+                                        Ok(fb_track) => {
+                                            match client.get_stream_url(&fb_track, quality).await {
+                                                Ok((url, actual_quality)) => {
+                                                    info!(gen = generation, fallback_id = %fb_track.track_id, actual_quality = actual_quality.as_api_format(), "fetch_task: FALLBACK get_stream_url OK");
+                                                    (fb_track, url, actual_quality)
+                                                }
+                                                Err(e) => {
+                                                    warn!(gen = generation, track_id = %track.track_id, fallback_id = %fb_track.track_id, err = %e, "fetch_task: FALLBACK also failed");
+                                                    let _ = tx.send(AsyncResult::TrackFetchError { err: e.to_string(), generation });
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            warn!(gen = generation, fallback_id = %fb.track_id, err = %e, "fetch_task: FALLBACK get_track failed");
+                                            let _ = tx.send(AsyncResult::TrackFetchError { err: e.to_string(), generation });
+                                            return;
+                                        }
+                                    }
+                                } else {
+                                    warn!(gen = generation, track_id = %track.track_id, "fetch_task: get_stream_url FAILED, no FALLBACK available");
+                                    let _ = tx.send(AsyncResult::TrackFetchError {
+                                        err: first_err.to_string(),
+                                        generation,
+                                    });
+                                    return;
+                                }
+                            }
+                        }
+                    }
                 }
+                // client lock is dropped here
             };
+            info!(gen = generation, track_id = %track.track_id, api_ms = start.elapsed().as_millis(), "fetch_task: client lock released, starting download");
 
-            match deezer_core::player::stream::fetch_track(&client, &track, quality, &master_key)
-                .await
+            // Download + decrypt without holding the client lock
+            let dl_start = Instant::now();
+            match deezer_core::player::stream::download_and_decrypt(
+                &url,
+                &track.track_id,
+                &master_key,
+                &cdn_http,
+            )
+            .await
             {
-                Ok((audio_data, actual_quality)) => {
+                Ok(audio_data) => {
+                    info!(
+                        gen = generation,
+                        track_id = %track.track_id,
+                        bytes = audio_data.len(),
+                        dl_ms = dl_start.elapsed().as_millis(),
+                        total_ms = start.elapsed().as_millis(),
+                        "fetch_task: download+decrypt OK"
+                    );
                     let _ = tx.send(AsyncResult::TrackReady {
                         audio_data,
                         track,
                         quality: actual_quality,
+                        generation,
                     });
                 }
                 Err(e) => {
-                    let _ = tx.send(AsyncResult::TrackFetchError(e.to_string()));
+                    warn!(
+                        gen = generation,
+                        track_id = %track.track_id,
+                        err = %e,
+                        dl_ms = dl_start.elapsed().as_millis(),
+                        total_ms = start.elapsed().as_millis(),
+                        "fetch_task: download+decrypt FAILED"
+                    );
+                    let _ = tx.send(AsyncResult::TrackFetchError {
+                        err: e.to_string(),
+                        generation,
+                    });
                 }
             }
         });
     }
 
     fn play_next(&mut self) {
-        let was_paused = self.player_state.lock().unwrap().status == PlaybackStatus::Paused;
+        let status = self.player_state.lock().unwrap().status;
+        let was_paused = status == PlaybackStatus::Paused;
+        let queue_info = {
+            let state = self.player_state.lock().unwrap();
+            (state.queue.len(), state.queue_index, state.shuffle, state.repeat)
+        };
+        info!(
+            status = ?status,
+            queue_len = queue_info.0,
+            queue_index = queue_info.1,
+            shuffle = queue_info.2,
+            repeat = ?queue_info.3,
+            "play_next called"
+        );
 
         let next_track = {
             let mut state = self.player_state.lock().unwrap();
             if state.queue.is_empty() {
+                info!("play_next: queue is empty, returning");
                 return;
             }
 
@@ -1115,8 +1268,11 @@ impl Daemon {
             state.queue.get(next_idx).cloned()
         };
 
-        if let Some(track) = next_track {
-            self.start_play_track(track);
+        if let Some(ref track) = next_track {
+            info!(track_id = %track.track_id, title = %track.title, "play_next: advancing to track");
+            self.start_play_track(track.clone());
+        } else {
+            warn!("play_next: next_track is None (queue_index out of bounds?)");
         }
     }
 
@@ -1334,10 +1490,31 @@ impl Daemon {
                     audio_data,
                     track,
                     quality,
+                    generation,
                 } => {
+                    // Ignore stale results from a previous track request
+                    if generation != self.track_generation {
+                        info!(
+                            gen = generation,
+                            current_gen = self.track_generation,
+                            track_id = %track.track_id,
+                            title = %track.title,
+                            "process_async: TrackReady IGNORED (stale generation)"
+                        );
+                        continue;
+                    }
+                    info!(
+                        gen = generation,
+                        track_id = %track.track_id,
+                        title = %track.title,
+                        bytes = audio_data.len(),
+                        "process_async: TrackReady, calling play_decoded"
+                    );
                     if let Some(ref mut engine) = self.engine {
                         match engine.play_decoded(audio_data, &track, quality) {
                             Ok(()) => {
+                                info!(gen = generation, track_id = %track.track_id, "process_async: play_decoded OK");
+                                self.consecutive_skip_count = 0;
                                 self.playback_started_at = Some(Instant::now());
                                 self.playback_offset_secs = 0;
                                 self.status_msg = Some(format!(
@@ -1348,15 +1525,38 @@ impl Daemon {
                                 ));
                             }
                             Err(e) => {
+                                warn!(gen = generation, track_id = %track.track_id, err = %e, "process_async: play_decoded FAILED");
                                 self.status_msg = Some(t().fmt_error(t().status_playback_error, &e.to_string()));
                             }
                         }
+                    } else {
+                        warn!(gen = generation, track_id = %track.track_id, "process_async: TrackReady but engine is None!");
                     }
                 }
-                AsyncResult::TrackFetchError(err) => {
+                AsyncResult::TrackFetchError { err, generation } => {
+                    // Ignore stale errors from a previous track request
+                    if generation != self.track_generation {
+                        info!(
+                            gen = generation,
+                            current_gen = self.track_generation,
+                            err = %err,
+                            "process_async: TrackFetchError IGNORED (stale generation)"
+                        );
+                        continue;
+                    }
+                    warn!(gen = generation, err = %err, consecutive_skips = self.consecutive_skip_count, "process_async: TrackFetchError, auto-skipping");
                     self.status_msg = Some(t().fmt_error(t().status_track_error, &err));
-                    if let Ok(mut state) = self.player_state.lock() {
-                        state.status = PlaybackStatus::Stopped;
+                    // Auto-skip to next track instead of stopping,
+                    // but limit consecutive skips to avoid infinite loop
+                    self.consecutive_skip_count += 1;
+                    if self.consecutive_skip_count <= 5 {
+                        self.play_next();
+                    } else {
+                        warn!("Too many consecutive track failures, stopping");
+                        self.consecutive_skip_count = 0;
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.status = PlaybackStatus::Stopped;
+                        }
                     }
                 }
             }

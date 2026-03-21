@@ -51,6 +51,29 @@ impl AudioQuality {
             Self::Mp3_64 => None,
         }
     }
+
+    /// Returns all qualities to try, starting from `self`, going down, then up.
+    /// Example for Mp3_128: [Mp3_128, Mp3_64, Mp3_320, Flac]
+    pub fn all_fallbacks(&self) -> Vec<Self> {
+        let all_desc = [Self::Flac, Self::Mp3_320, Self::Mp3_128, Self::Mp3_64];
+        let mut result = Vec::with_capacity(4);
+        // First: self and below (preferred direction)
+        let mut q = Some(*self);
+        while let Some(quality) = q {
+            result.push(quality);
+            q = quality.fallback();
+        }
+        // Then: above self (try higher if lower fails)
+        for &quality in &all_desc {
+            if quality == *self {
+                break;
+            }
+            if !result.contains(&quality) {
+                result.push(quality);
+            }
+        }
+        result
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +82,9 @@ pub struct UserData {
     pub user: UserInfo,
     #[serde(rename = "checkForm")]
     pub api_token: String,
+    #[serde(rename = "OFFER")]
+    #[serde(default)]
+    pub offer: Option<UserOffer>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -85,6 +111,22 @@ pub struct UserOptions {
     #[serde(rename = "web_lossless")]
     #[serde(default)]
     pub web_lossless: bool,
+    #[serde(rename = "mobile_offlinestreaming")]
+    #[serde(default)]
+    pub mobile_offline: bool,
+    #[serde(rename = "license_country")]
+    #[serde(default)]
+    pub license_country: String,
+    #[serde(rename = "expiration_timestamp")]
+    #[serde(default)]
+    pub expiration_timestamp: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UserOffer {
+    #[serde(rename = "OFFER_NAME")]
+    #[serde(default)]
+    pub offer_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +156,15 @@ pub struct TrackData {
     #[serde(rename = "MD5_ORIGIN")]
     #[serde(default)]
     pub md5_origin: String,
+    #[serde(rename = "FALLBACK")]
+    #[serde(default)]
+    pub fallback: Option<TrackFallback>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackFallback {
+    #[serde(rename = "SNG_ID")]
+    pub track_id: String,
 }
 
 impl TrackData {
