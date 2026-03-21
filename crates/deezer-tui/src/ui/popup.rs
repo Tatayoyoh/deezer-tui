@@ -39,6 +39,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             draw_language_picker(frame, *selected);
             return;
         }
+        Some(Overlay::Info) => {
+            draw_info_overlay(frame);
+            return;
+        }
         Some(Overlay::AlbumDetail) => {
             // Album detail is rendered in the main content area, not as a popup
             return;
@@ -282,6 +286,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         ("g", s.help_shuffle_favorites),
         ("?", s.help_this_help),
         ("Ctrl+O", s.help_settings),
+        ("i", s.help_info),
         ("q", s.help_quit),
         ("Ctrl+Z", s.help_detach),
     ];
@@ -316,6 +321,69 @@ fn draw_help_overlay(frame: &mut Frame) {
             ]))
         })
         .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
+/// Draw the application info modal.
+fn draw_info_overlay(frame: &mut Frame) {
+    let s = t();
+
+    let version = env!("CARGO_PKG_VERSION");
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
+
+    let github_url = "https://github.com/Tatayoyoh/deezer-tui";
+    let license_url = "https://en.wikipedia.org/wiki/WTFPL";
+
+    let link_style = Style::default()
+        .fg(Theme::primary())
+        .add_modifier(Modifier::UNDERLINED);
+    let label_style = Style::default()
+        .fg(Theme::primary())
+        .add_modifier(Modifier::BOLD);
+
+    let items: Vec<ListItem> = vec![
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_version), label_style),
+            Span::styled(version, Theme::text()),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_architecture), label_style),
+            Span::styled(format!("{os}/{arch}"), Theme::text()),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_author), label_style),
+            Span::styled("Tatayoyoh", Theme::text()),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_github), label_style),
+            Span::styled(github_url, link_style),
+        ])),
+        ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_license), label_style),
+            Span::styled("WTFPL", Theme::text()),
+            Span::styled("  ", Theme::text()),
+            Span::styled(license_url, link_style),
+        ])),
+    ];
+
+    let area = frame.area();
+    let height = items.len() as u16 + 4;
+    let popup_area = centered_rect(60, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(s.about_title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
 
     let list = List::new(items);
     frame.render_widget(list, inner);
