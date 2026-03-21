@@ -15,7 +15,12 @@ Bored to use 300M of RAM to play music ?
 
 ## Install
 
-Linux / Mac
+Linux / macOS (one-liner)
+```bash
+curl -LsSf https://raw.githubusercontent.com/Tatayoyoh/deezer-tui/main/install.sh | sh
+```
+
+Or copy binary yourself
 ```bash
 wget -qO deezer-tui "https://github.com/Tatayoyoh/deezer-tui/releases/latest/download/deezer-tui-linux-x86_64"
 chmod +x deezer-tui
