@@ -1,5 +1,9 @@
 # Deezer TUI
 
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/Tatayoyoh/deezer-tui/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/Tatayoyoh/deezer-tui/tree/main)
+[![Rust](https://img.shields.io/badge/Rust-1.75%2B-orange.svg?logo=rust)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS%20%7C%20WSL2-lightgrey.svg)]()
+
 ![text](assets/logo.png)
 
 Bored to use 300M of RAM to play music ?
@@ -22,11 +26,11 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 
 ✅ background player, still playeing music<br>
 ✅ login from browser/deezer.com link/backlink<br>
-✅ search and favorites pages<br>
+✅ search / favorites / radios pages<br>
 ✅ playing track context menu [ctrl+p]<br>
 ✅ focused track context menu [m]<br>
 ⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
-✅ Album page (or popup) when entering an album <br>
+✅ Album page when entering an album or with [a] shortcut<br>
 ⬜ Artist page (or popup) when entering an artiste <br>
 ⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
 ✅ Display waiting list as modal <br>
@@ -34,12 +38,12 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 🔄 better UI <br>
 🔄 better shortcuts <br>
 ✅ Contiuous Integration <br>
-✅ global app menu [ctrl+o]
+✅ global app menu [ctrl+o] <br>
 ✅ Themes, from official Deezer themes<br>
 ✅ Translations <br>
 ⬜ Offline mode <br>
 
-<video controls src="assets/themes.mp4" title="Title"></video>
+![themes](assets/themes.gif)
 
 ## Build on your system
 
