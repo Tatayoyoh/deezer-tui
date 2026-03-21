@@ -300,9 +300,20 @@ Audio data is fetched+decrypted in background, then played on main thread.
 - Tests: unit tests in `deezer-core`, integration tests for API (behind feature flag)
 - CI: **CircleCI** — Linux x86_64, Linux aarch64, macOS universal (no Windows native build)
 - Linting: `clippy` with pedantic warnings
-- Formatting: `rustfmt` with default settings — run `cargo fmt --check` before committing
+- Formatting: `rustfmt` with default settings — a pre-commit hook in `.githooks/` auto-formats staged `.rs` files
 - Config stored as JSON in XDG config dir (`~/.config/deezer-tui/config.json` on Linux)
 - **Platform support**: Linux, macOS (native); Windows via WSL2 only (Unix sockets + fork required)
+
+## Build & Verify Routine
+
+After making code changes, **always** run:
+
+```bash
+cargo fmt && cargo build --release
+```
+
+This ensures formatting is correct (CI will reject unformatted code) and the project compiles.
+Run `cargo clippy -- -D warnings` for additional lint checks when relevant.
 
 ## Legal Notice
 
