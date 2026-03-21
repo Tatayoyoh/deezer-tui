@@ -61,7 +61,10 @@ impl DeezerClient {
             user_name: user_data.user.user_name,
         };
 
-        let offer_name = user_data.offer.as_ref().map_or("unknown", |o| &o.offer_name);
+        let offer_name = user_data
+            .offer
+            .as_ref()
+            .map_or("unknown", |o| &o.offer_name);
         info!(
             user_id = session.user_id,
             name = %session.user_name,

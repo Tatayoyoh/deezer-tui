@@ -40,7 +40,10 @@ enum AsyncResult {
         quality: AudioQuality,
         generation: u64,
     },
-    TrackFetchError { err: String, generation: u64 },
+    TrackFetchError {
+        err: String,
+        generation: u64,
+    },
     FavoriteAdded(String),
     FavoriteRemoved(String),
     FavoriteError(String),
@@ -139,8 +142,8 @@ impl Daemon {
         };
 
         let client = DeezerClient::new().map_err(|e| anyhow::anyhow!("{e}"))?;
-        let cdn_http = deezer_core::player::stream::new_cdn_client()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let cdn_http =
+            deezer_core::player::stream::new_cdn_client().map_err(|e| anyhow::anyhow!("{e}"))?;
         let (async_tx, async_rx) = tokio::sync::mpsc::unbounded_channel();
 
         Ok(Self {
@@ -358,7 +361,11 @@ impl Daemon {
                 }
             }
             Command::PlayFromFavorites { index } => {
-                info!(index, favorites_display_len = self.favorites_display.len(), "PlayFromFavorites");
+                info!(
+                    index,
+                    favorites_display_len = self.favorites_display.len(),
+                    "PlayFromFavorites"
+                );
                 if let Some(item) = self.favorites_display.get(index) {
                     if let Some(track) = &item.track {
                         let playable: Vec<TrackData> = self
@@ -1145,14 +1152,20 @@ impl Daemon {
                                                 }
                                                 Err(e) => {
                                                     warn!(gen = generation, track_id = %track.track_id, fallback_id = %fb_track.track_id, err = %e, "fetch_task: FALLBACK also failed");
-                                                    let _ = tx.send(AsyncResult::TrackFetchError { err: e.to_string(), generation });
+                                                    let _ = tx.send(AsyncResult::TrackFetchError {
+                                                        err: e.to_string(),
+                                                        generation,
+                                                    });
                                                     return;
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             warn!(gen = generation, fallback_id = %fb.track_id, err = %e, "fetch_task: FALLBACK get_track failed");
-                                            let _ = tx.send(AsyncResult::TrackFetchError { err: e.to_string(), generation });
+                                            let _ = tx.send(AsyncResult::TrackFetchError {
+                                                err: e.to_string(),
+                                                generation,
+                                            });
                                             return;
                                         }
                                     }
@@ -1221,7 +1234,12 @@ impl Daemon {
         let was_paused = status == PlaybackStatus::Paused;
         let queue_info = {
             let state = self.player_state.lock().unwrap();
-            (state.queue.len(), state.queue_index, state.shuffle, state.repeat)
+            (
+                state.queue.len(),
+                state.queue_index,
+                state.shuffle,
+                state.repeat,
+            )
         };
         info!(
             status = ?status,
@@ -1343,7 +1361,8 @@ impl Daemon {
                             self.engine = Some(engine);
                         }
                         Err(e) => {
-                            self.status_msg = Some(t().fmt_error(t().status_audio_init_error, &e.to_string()));
+                            self.status_msg =
+                                Some(t().fmt_error(t().status_audio_init_error, &e.to_string()));
                         }
                     }
                     self.start_load_favorites_category();
@@ -1526,7 +1545,8 @@ impl Daemon {
                             }
                             Err(e) => {
                                 warn!(gen = generation, track_id = %track.track_id, err = %e, "process_async: play_decoded FAILED");
-                                self.status_msg = Some(t().fmt_error(t().status_playback_error, &e.to_string()));
+                                self.status_msg =
+                                    Some(t().fmt_error(t().status_playback_error, &e.to_string()));
                             }
                         }
                     } else {

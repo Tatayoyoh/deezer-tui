@@ -1,0 +1,12 @@
+#!/bin/sh
+# Pre-commit hook: auto-format Rust code before committing
+# Runs cargo fmt on staged .rs files and re-stages them
+
+# Get list of staged .rs files
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$')
+
+if [ -n "$STAGED_RS" ]; then
+    cargo fmt 2>/dev/null
+    # Re-stage the formatted files
+    echo "$STAGED_RS" | xargs git add
+fi
