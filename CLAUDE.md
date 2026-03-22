@@ -295,7 +295,7 @@ Audio data is fetched+decrypted in background, then played on main thread.
 ## Development Guidelines
 
 - Rust edition: 2021
-- MSRV: 1.88+
+- MSRV: 1.90+
 - Error handling: `thiserror` for library errors, `anyhow` for binary
 - Logging: `tracing` crate — daemon logs to `/tmp/deezer-daemon.log`, client to `/tmp/deezer-tui.log` (set `RUST_LOG=debug`)
 - Tests: unit tests in `deezer-core`, integration tests for API (behind feature flag)
