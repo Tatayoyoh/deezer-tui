@@ -280,6 +280,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         ("r", s.help_cycle_repeat),
         ("+/-", s.help_volume),
         ("a", s.help_album_detail),
+        ("t", s.help_artist_detail),
         ("w", s.help_waiting_list),
         ("m", s.help_context_menu),
         ("Ctrl+P", s.help_playing_menu),
