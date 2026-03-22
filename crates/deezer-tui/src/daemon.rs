@@ -131,6 +131,9 @@ pub struct Daemon {
     engine: Option<PlayerEngine>,
     master_key: Option<[u8; 16]>,
 
+    // Network connectivity
+    is_offline: bool,
+
     // Shared HTTP client for CDN downloads (connection reuse)
     cdn_http: deezer_core::CdnClient,
 
@@ -151,7 +154,17 @@ pub struct Daemon {
 impl Daemon {
     pub fn new() -> Result<Self> {
         let config = Config::load();
-        let screen = if config.arl.is_some() {
+
+        // Check network connectivity
+        let is_offline = std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([1, 1, 1, 1], 53)),
+            Duration::from_secs(2),
+        )
+        .is_err();
+
+        let screen = if is_offline {
+            Screen::Main
+        } else if config.arl.is_some() {
             Screen::Main
         } else {
             Screen::Login
@@ -165,7 +178,11 @@ impl Daemon {
         Ok(Self {
             config,
             screen,
-            active_tab: ActiveTab::Search,
+            active_tab: if is_offline {
+                ActiveTab::Downloads
+            } else {
+                ActiveTab::Search
+            },
             status_msg: None,
 
             login_error: None,
@@ -211,6 +228,8 @@ impl Daemon {
             engine: None,
             master_key: None,
 
+            is_offline,
+
             async_tx,
             async_rx,
 
@@ -236,8 +255,19 @@ impl Daemon {
         let listener = UnixListener::bind(&sock_path)?;
         info!(?sock_path, "Daemon listening");
 
-        // If we have an ARL, auto-login
-        if let Some(arl) = self.config.arl.clone() {
+        if self.is_offline {
+            // In offline mode, create the audio engine immediately (no master key needed for local playback)
+            match PlayerEngine::new([0u8; 16]) {
+                Ok(engine) => {
+                    engine.set_volume(self.config.volume);
+                    self.player_state = engine.state();
+                    self.engine = Some(engine);
+                }
+                Err(e) => {
+                    warn!("Failed to init audio engine in offline mode: {e}");
+                }
+            }
+        } else if let Some(arl) = self.config.arl.clone() {
             self.status_msg = Some(t().login_connecting.into());
             self.start_login(arl);
         }
@@ -791,6 +821,7 @@ impl Daemon {
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
             user_name: self.user_name.clone(),
+            is_offline: self.is_offline,
         }
     }
 
@@ -834,6 +865,10 @@ impl Daemon {
     }
 
     fn start_search(&mut self, query: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.search_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -870,6 +905,10 @@ impl Daemon {
     }
 
     fn start_load_favorites(&mut self) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.favorites_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -888,6 +927,10 @@ impl Daemon {
     }
 
     fn start_load_favorites_category(&mut self) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.favorites_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -1012,6 +1055,9 @@ impl Daemon {
     }
 
     fn start_load_playlists(&mut self) {
+        if self.is_offline {
+            return;
+        }
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
@@ -1080,6 +1126,10 @@ impl Daemon {
     }
 
     fn start_load_album_detail(&mut self, album_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.album_detail_loading = true;
         self.album_detail = None;
         self.album_detail_selected = 0;
@@ -1100,6 +1150,10 @@ impl Daemon {
     }
 
     fn start_load_playlist_detail(&mut self, playlist_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.playlist_detail_loading = true;
         self.playlist_detail = None;
         self.playlist_detail_selected = 0;
@@ -1120,6 +1174,9 @@ impl Daemon {
     }
 
     fn start_load_radios(&mut self) {
+        if self.is_offline {
+            return;
+        }
         self.radios_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -1145,6 +1202,10 @@ impl Daemon {
     }
 
     fn start_play_radio(&mut self, radio_id: u64) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         self.status_msg = Some(t().status_loading_radio_tracks.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
@@ -1163,6 +1224,10 @@ impl Daemon {
     }
 
     fn start_play_track(&mut self, track: TrackData) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         let Some(master_key) = self.master_key else {
             self.status_msg = Some(t().status_player_not_ready.into());
             return;
@@ -1715,6 +1780,10 @@ impl Daemon {
     }
 
     fn start_download_offline(&mut self, track: TrackData) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         if self.offline_index.has_track(&track.track_id) {
             self.status_msg = Some(t().status_track_saved_offline.into());
             return;
@@ -1786,6 +1855,10 @@ impl Daemon {
     }
 
     fn start_download_album_offline(&mut self, album_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
         if self.offline_index.has_album(&album_id) {
             self.status_msg = Some(t().status_album_saved_offline.into());
             return;

@@ -344,6 +344,7 @@ pub struct ViewState {
     pub login_error: Option<String>,
     pub login_loading: bool,
     pub user_name: Option<String>,
+    pub is_offline: bool,
 
     // Local client state — offline albums tree
     pub offline_tree_selected: usize,
@@ -431,6 +432,7 @@ impl ViewState {
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
             user_name: snap.user_name.clone(),
+            is_offline: snap.is_offline,
 
             offline_tree_selected: 0,
             offline_expanded: Vec::new(),
@@ -496,6 +498,7 @@ impl ViewState {
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
         self.user_name = snap.user_name;
+        self.is_offline = snap.is_offline;
 
         // Update playlists and sync into popup if playlist picker is loading
         if !snap.playlists.is_empty() {
@@ -977,7 +980,8 @@ impl Client {
         match key.code {
             KeyCode::Char('q') => KeyAction::Quit,
 
-            // Tab navigation
+            // Tab navigation (disabled in offline mode — only Offline tab available)
+            KeyCode::Tab | KeyCode::BackTab if self.view.is_offline => KeyAction::Continue,
             KeyCode::Tab => KeyAction::SendCommand(Command::NextTab),
             KeyCode::BackTab => KeyAction::SendCommand(Command::PrevTab),
 

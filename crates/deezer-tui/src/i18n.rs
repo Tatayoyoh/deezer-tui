@@ -211,6 +211,8 @@ pub struct Strings {
     pub status_removed_offline: &'static str,
     pub hint_download_album: &'static str,
     pub hint_expand_collapse: &'static str,
+    pub offline_mode: &'static str,
+    pub no_internet: &'static str,
 
     // --- Toasts / status ---
     pub link_copied: &'static str,
@@ -604,6 +606,8 @@ static EN: Strings = Strings {
     status_removed_offline: "Removed from offline",
     hint_download_album: " offline  ",
     hint_expand_collapse: "→ expand/collapse",
+    offline_mode: "offline mode",
+    no_internet: "No internet connection",
 
     link_copied: "Link copied to clipboard!",
     no_album_info: "No album info available",
@@ -814,6 +818,8 @@ static FR: Strings = Strings {
     status_removed_offline: "Supprimé du mode hors-ligne",
     hint_download_album: " hors-ligne  ",
     hint_expand_collapse: "→ déplier/replier",
+    offline_mode: "mode hors-ligne",
+    no_internet: "Pas de connexion internet",
 
     link_copied: "Lien copié dans le presse-papiers !",
     no_album_info: "Aucune info d'album disponible",
@@ -1023,6 +1029,8 @@ static ES: Strings = Strings {
     status_removed_offline: "Eliminado del modo sin conexión",
     hint_download_album: " sin conexión  ",
     hint_expand_collapse: "→ expandir/contraer",
+    offline_mode: "modo sin conexión",
+    no_internet: "Sin conexión a internet",
 
     link_copied: "¡Enlace copiado al portapapeles!",
     no_album_info: "No hay info del álbum disponible",
@@ -1232,6 +1240,8 @@ static PT: Strings = Strings {
     status_removed_offline: "Removido do modo offline",
     hint_download_album: " offline  ",
     hint_expand_collapse: "→ expandir/recolher",
+    offline_mode: "modo offline",
+    no_internet: "Sem conexão com a internet",
 
     link_copied: "Link copiado para a área de transferência!",
     no_album_info: "Nenhuma info do álbum disponível",
@@ -1441,6 +1451,8 @@ static DE: Strings = Strings {
     status_removed_offline: "Aus Offline entfernt",
     hint_download_album: " offline  ",
     hint_expand_collapse: "→ auf-/zuklappen",
+    offline_mode: "Offline-Modus",
+    no_internet: "Keine Internetverbindung",
 
     link_copied: "Link in die Zwischenablage kopiert!",
     no_album_info: "Keine Album-Info verfügbar",

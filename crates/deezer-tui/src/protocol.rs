@@ -385,6 +385,8 @@ pub struct DaemonSnapshot {
     pub login_loading: bool,
     #[serde(default)]
     pub user_name: Option<String>,
+    #[serde(default)]
+    pub is_offline: bool,
 }
 
 fn default_volume() -> f32 {
@@ -436,6 +438,7 @@ impl Default for DaemonSnapshot {
             login_error: None,
             login_loading: false,
             user_name: None,
+            is_offline: false,
         }
     }
 }

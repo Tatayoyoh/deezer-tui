@@ -69,24 +69,35 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
 
 fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
-    let tab_titles = vec![
-        Line::from(s.tab_search),
-        Line::from(s.tab_favorites),
-        Line::from(s.tab_radios),
-        Line::from(s.tab_offline),
-    ];
+    let (tab_titles, selected) = if view.is_offline {
+        (vec![Line::from(s.tab_offline)], 0)
+    } else {
+        (
+            vec![
+                Line::from(s.tab_search),
+                Line::from(s.tab_favorites),
+                Line::from(s.tab_radios),
+                Line::from(s.tab_offline),
+            ],
+            match view.active_tab {
+                ActiveTab::Search => 0,
+                ActiveTab::Favorites => 1,
+                ActiveTab::Radio => 2,
+                ActiveTab::Downloads => 3,
+            },
+        )
+    };
 
-    let selected = match view.active_tab {
-        ActiveTab::Search => 0,
-        ActiveTab::Favorites => 1,
-        ActiveTab::Radio => 2,
-        ActiveTab::Downloads => 3,
+    let header_title = if view.is_offline {
+        format!(" deezer-tui [{}] ", s.offline_mode)
+    } else {
+        " deezer-tui ".to_string()
     };
 
     let mut block = Block::default()
         .borders(Borders::BOTTOM)
         .border_style(Theme::border())
-        .title(" deezer-tui ")
+        .title(header_title)
         .title_style(Theme::title());
 
     if let Some(ref msg) = view.status_msg {
