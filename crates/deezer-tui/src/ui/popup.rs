@@ -273,7 +273,7 @@ fn draw_help_overlay(frame: &mut Frame) {
         ("Esc", s.help_settings_back),
         ("j/k or Up/Down", s.help_navigate_list),
         ("h/l or Left/Right", s.help_navigate_categories),
-        ("p / Space", s.help_play_pause),
+        ("Space", s.help_play_pause),
         ("n", s.help_next_track),
         ("b", s.help_prev_track),
         ("s", s.help_toggle_shuffle),

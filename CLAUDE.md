@@ -259,7 +259,7 @@ Audio data is fetched+decrypted in background, then played on main thread.
 | `/` | Enter search mode (on Search tab) |
 | `Enter` | Submit search / Play selected / Open detail |
 | `Esc` | Close overlay / Exit search mode |
-| `p` / `Space` | Play / Pause |
+| `Space` | Play / Pause |
 | `n` | Next track |
 | `b` | Previous track |
 | `s` | Toggle shuffle |

@@ -10,14 +10,15 @@ use deezer_core::api::models::{
     AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::api::DeezerClient;
+use deezer_core::offline::OfflineIndex;
 use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
 use crate::i18n::t;
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, RadioItem,
-    Screen, SearchCategory, ServerMessage,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, OfflineCategory,
+    RadioItem, Screen, SearchCategory, ServerMessage,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -63,6 +64,15 @@ enum AsyncResult {
     RadiosError(String),
     RadioTracksReady(Vec<TrackData>),
     RadioTracksError(String),
+    OfflineTrackSaved {
+        track: TrackData,
+        quality: AudioQuality,
+    },
+    OfflineTrackSaveError(String),
+    OfflineAlbumSaved {
+        album: AlbumDetail,
+    },
+    OfflineAlbumSaveError(String),
 }
 
 pub struct Daemon {
@@ -95,6 +105,12 @@ pub struct Daemon {
     radios: Vec<RadioItem>,
     radios_selected: usize,
     radios_loading: bool,
+
+    // Offline
+    offline_index: OfflineIndex,
+    offline_category: OfflineCategory,
+    offline_selected: usize,
+    offline_loading: bool,
 
     // Playlists (for popup menu playlist picker)
     playlists: Vec<PlaylistData>,
@@ -168,6 +184,11 @@ impl Daemon {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+
+            offline_index: OfflineIndex::load(),
+            offline_category: OfflineCategory::default(),
+            offline_selected: 0,
+            offline_loading: false,
 
             radios: Vec::new(),
             radios_selected: 0,
@@ -436,7 +457,9 @@ impl Daemon {
                 ActiveTab::Radio => {
                     self.radios_selected = self.radios_selected.saturating_sub(1);
                 }
-                _ => {}
+                ActiveTab::Downloads => {
+                    self.offline_selected = self.offline_selected.saturating_sub(1);
+                }
             },
             Command::SelectDown => match self.active_tab {
                 ActiveTab::Search => {
@@ -457,7 +480,15 @@ impl Daemon {
                             (self.radios_selected + 1).min(self.radios.len() - 1);
                     }
                 }
-                _ => {}
+                ActiveTab::Downloads => {
+                    let len = match self.offline_category {
+                        OfflineCategory::Tracks => self.offline_index.tracks.len(),
+                        OfflineCategory::Albums => self.offline_index.albums.len(),
+                    };
+                    if len > 0 {
+                        self.offline_selected = (self.offline_selected + 1).min(len - 1);
+                    }
+                }
             },
             Command::NextTab => {
                 self.active_tab = match self.active_tab {
@@ -488,6 +519,10 @@ impl Daemon {
                     self.favorites_selected = 0;
                     self.start_load_favorites_category();
                 }
+                ActiveTab::Downloads => {
+                    self.offline_category = self.offline_category.next();
+                    self.offline_selected = 0;
+                }
                 _ => {}
             },
             Command::PrevCategory => match self.active_tab {
@@ -502,6 +537,10 @@ impl Daemon {
                     self.favorites_category = self.favorites_category.prev();
                     self.favorites_selected = 0;
                     self.start_load_favorites_category();
+                }
+                ActiveTab::Downloads => {
+                    self.offline_category = self.offline_category.prev();
+                    self.offline_selected = 0;
                 }
                 _ => {}
             },
@@ -553,13 +592,13 @@ impl Daemon {
                         state.queue.push(track.clone());
                     }
                 }
-                self.status_msg = Some(t().fmt_play_next(&track.title));
+                self.status_msg = Some(t().status_play_next.into());
             }
             Command::AddToQueue { track } => {
                 if let Ok(mut state) = self.player_state.lock() {
                     state.queue.push(track.clone());
                 }
-                self.status_msg = Some(t().fmt_added_to_queue(&track.title));
+                self.status_msg = Some(t().status_added_to_queue.into());
             }
             Command::RemoveFromQueue { index } => {
                 if let Ok(mut state) = self.player_state.lock() {
@@ -637,6 +676,57 @@ impl Daemon {
                     self.start_play_radio(radio_id);
                 }
             }
+            Command::DownloadOffline { track } => {
+                self.start_download_offline(track);
+            }
+            Command::DownloadAlbumOffline { album_id } => {
+                self.start_download_album_offline(album_id);
+            }
+            Command::RemoveOfflineTrack { track_id } => {
+                self.offline_index.remove_track(&track_id);
+                let _ = self.offline_index.save();
+                self.status_msg = Some(t().status_removed_offline.into());
+            }
+            Command::RemoveOfflineAlbum { album_id } => {
+                self.offline_index.remove_album(&album_id);
+                let _ = self.offline_index.save();
+                self.status_msg = Some(t().status_removed_offline.into());
+            }
+            Command::PlayFromOffline { index } => {
+                let tracks: Vec<TrackData> = self
+                    .offline_index
+                    .tracks
+                    .iter()
+                    .map(|ot| ot.track.clone())
+                    .collect();
+                if let Some(track) = tracks.get(index).cloned() {
+                    if let Ok(mut state) = self.player_state.lock() {
+                        state.queue = tracks;
+                        state.queue_index = index;
+                    }
+                    self.start_play_offline_track(track);
+                }
+            }
+            Command::PlayOfflineAlbum {
+                album_id,
+                track_index,
+            } => {
+                if let Some(album) = self
+                    .offline_index
+                    .albums
+                    .iter()
+                    .find(|a| a.album_id == album_id)
+                {
+                    let tracks = album.tracks.clone();
+                    if let Some(track) = tracks.get(track_index).cloned() {
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = track_index;
+                        }
+                        self.start_play_offline_track(track);
+                    }
+                }
+            }
             Command::Shutdown => {
                 // Handled in the main loop
             }
@@ -668,6 +758,25 @@ impl Daemon {
             favorites_loading: self.favorites_loading,
             favorites_category: self.favorites_category,
             favorites_display: self.favorites_display.clone(),
+            offline_category: self.offline_category,
+            offline_tracks: {
+                let album_track_ids: std::collections::HashSet<&str> = self
+                    .offline_index
+                    .albums
+                    .iter()
+                    .flat_map(|a| a.tracks.iter().map(|t| t.track_id.as_str()))
+                    .collect();
+                self.offline_index
+                    .tracks
+                    .iter()
+                    .filter(|t| !album_track_ids.contains(t.track.track_id.as_str()))
+                    .cloned()
+                    .collect()
+            },
+            offline_albums: self.offline_index.albums.clone(),
+            offline_selected: self.offline_selected,
+            offline_loading: self.offline_loading,
+            offline_track_ids: self.offline_index.track_ids(),
             radios: self.radios.clone(),
             radios_selected: self.radios_selected,
             radios_loading: self.radios_loading,
@@ -1078,7 +1187,7 @@ impl Daemon {
             state.position_secs = 0;
         }
 
-        self.status_msg = Some(t().fmt_loading_track(&track.title, &track.artist));
+        self.status_msg = Some(t().loading.into());
 
         let client = Arc::clone(&self.client);
         let cdn_http = self.cdn_http.clone();
@@ -1505,6 +1614,33 @@ impl Daemon {
                 AsyncResult::RadioTracksError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_radio_tracks_error, &err));
                 }
+                AsyncResult::OfflineTrackSaved { track, quality } => {
+                    self.offline_loading = false;
+                    self.offline_index.add_track(track, quality);
+                    let _ = self.offline_index.save();
+                    self.status_msg = Some(t().status_track_saved_offline.into());
+                }
+                AsyncResult::OfflineTrackSaveError(err) => {
+                    self.offline_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_offline_download_error, &err));
+                }
+                AsyncResult::OfflineAlbumSaved { album } => {
+                    self.offline_loading = false;
+                    // Add individual tracks to the index
+                    for track in &album.tracks {
+                        if !self.offline_index.has_track(&track.track_id) {
+                            self.offline_index
+                                .add_track(track.clone(), self.config.quality);
+                        }
+                    }
+                    self.offline_index.add_album(album);
+                    let _ = self.offline_index.save();
+                    self.status_msg = Some(t().status_album_saved_offline.into());
+                }
+                AsyncResult::OfflineAlbumSaveError(err) => {
+                    self.offline_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_offline_download_error, &err));
+                }
                 AsyncResult::TrackReady {
                     audio_data,
                     track,
@@ -1536,12 +1672,7 @@ impl Daemon {
                                 self.consecutive_skip_count = 0;
                                 self.playback_started_at = Some(Instant::now());
                                 self.playback_offset_secs = 0;
-                                self.status_msg = Some(format!(
-                                    "{} - {} [{}]",
-                                    track.title,
-                                    track.artist,
-                                    quality.as_api_format()
-                                ));
+                                self.status_msg = None;
                             }
                             Err(e) => {
                                 warn!(gen = generation, track_id = %track.track_id, err = %e, "process_async: play_decoded FAILED");
@@ -1581,6 +1712,183 @@ impl Daemon {
                 }
             }
         }
+    }
+
+    fn start_download_offline(&mut self, track: TrackData) {
+        if self.offline_index.has_track(&track.track_id) {
+            self.status_msg = Some(t().status_track_saved_offline.into());
+            return;
+        }
+
+        let Some(master_key) = self.master_key else {
+            self.status_msg = Some(t().status_player_not_ready.into());
+            return;
+        };
+
+        self.offline_loading = true;
+        self.status_msg = Some(t().status_downloading_track.into());
+
+        let client = Arc::clone(&self.client);
+        let cdn_http = self.cdn_http.clone();
+        let tx = self.async_tx.clone();
+        let quality = self.config.quality;
+
+        tokio::spawn(async move {
+            // Ensure we have a track token
+            let track = {
+                let client = client.lock().await;
+                match client.ensure_track_token(&track).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::OfflineTrackSaveError(e.to_string()));
+                        return;
+                    }
+                }
+            };
+
+            // Get stream URL
+            let (url, actual_quality) = {
+                let client = client.lock().await;
+                match client.get_stream_url(&track, quality).await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::OfflineTrackSaveError(e.to_string()));
+                        return;
+                    }
+                }
+            };
+
+            // Download and decrypt
+            match deezer_core::player::stream::download_and_decrypt(
+                &url,
+                &track.track_id,
+                &master_key,
+                &cdn_http,
+            )
+            .await
+            {
+                Ok(audio_data) => {
+                    // Save to disk
+                    if let Err(e) = OfflineIndex::save_track_audio(&track.track_id, &audio_data) {
+                        let _ = tx.send(AsyncResult::OfflineTrackSaveError(e.to_string()));
+                        return;
+                    }
+                    let _ = tx.send(AsyncResult::OfflineTrackSaved {
+                        track,
+                        quality: actual_quality,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::OfflineTrackSaveError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_download_album_offline(&mut self, album_id: String) {
+        if self.offline_index.has_album(&album_id) {
+            self.status_msg = Some(t().status_album_saved_offline.into());
+            return;
+        }
+
+        let Some(master_key) = self.master_key else {
+            self.status_msg = Some(t().status_player_not_ready.into());
+            return;
+        };
+
+        self.offline_loading = true;
+        self.status_msg = Some(t().status_downloading_track.into());
+
+        let client = Arc::clone(&self.client);
+        let cdn_http = self.cdn_http.clone();
+        let tx = self.async_tx.clone();
+        let quality = self.config.quality;
+
+        tokio::spawn(async move {
+            // First fetch album detail
+            let detail = {
+                let client = client.lock().await;
+                match client.get_album_detail(&album_id).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::OfflineAlbumSaveError(e.to_string()));
+                        return;
+                    }
+                }
+            };
+
+            // Download each track
+            for track in &detail.tracks {
+                let track = {
+                    let client = client.lock().await;
+                    match client.ensure_track_token(track).await {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    }
+                };
+
+                let (url, _actual_quality) = {
+                    let client = client.lock().await;
+                    match client.get_stream_url(&track, quality).await {
+                        Ok(r) => r,
+                        Err(_) => continue,
+                    }
+                };
+
+                match deezer_core::player::stream::download_and_decrypt(
+                    &url,
+                    &track.track_id,
+                    &master_key,
+                    &cdn_http,
+                )
+                .await
+                {
+                    Ok(audio_data) => {
+                        let _ = OfflineIndex::save_track_audio(&track.track_id, &audio_data);
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            let _ = tx.send(AsyncResult::OfflineAlbumSaved { album: detail });
+        });
+    }
+
+    fn start_play_offline_track(&mut self, track: TrackData) {
+        self.track_generation += 1;
+        let generation = self.track_generation;
+
+        if let Ok(mut state) = self.player_state.lock() {
+            state.status = PlaybackStatus::Loading;
+            state.current_track = Some(track.clone());
+            state.duration_secs = track.duration_secs();
+            state.position_secs = 0;
+        }
+
+        self.status_msg = Some(t().loading.into());
+
+        let tx = self.async_tx.clone();
+        let track_id = track.track_id.clone();
+
+        // Load audio from disk in a blocking task
+        tokio::spawn(async move {
+            match OfflineIndex::load_track_audio(&track_id) {
+                Ok(audio_data) => {
+                    let _ = tx.send(AsyncResult::TrackReady {
+                        audio_data,
+                        track,
+                        quality: AudioQuality::Mp3_128, // actual quality stored in index
+                        generation,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::TrackFetchError {
+                        err: e.to_string(),
+                        generation,
+                    });
+                }
+            }
+        });
     }
 
     fn on_tick(&mut self) {

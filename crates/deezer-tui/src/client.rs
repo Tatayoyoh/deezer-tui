@@ -24,9 +24,11 @@ use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::i18n::{self, t, Locale};
+use deezer_core::offline::OfflineTrack;
+
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, RadioItem,
-    Screen, SearchCategory, ServerMessage,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, OfflineCategory,
+    RadioItem, Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -56,6 +58,7 @@ pub enum PopupAction {
     Header,
     ToggleFavorite,
     AddToPlaylist,
+    DownloadOffline,
     DislikeTrack,
     PlayNext,
     AddToQueue,
@@ -115,6 +118,11 @@ impl PopupMenu {
             PopupMenuItem {
                 label: s.add_to_playlist.into(),
                 action: PopupAction::AddToPlaylist,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.download_for_offline.into(),
+                action: PopupAction::DownloadOffline,
                 is_header: false,
             },
             PopupMenuItem {
@@ -199,8 +207,18 @@ impl PopupMenu {
                 is_header: false,
             },
             PopupMenuItem {
+                label: s.download_for_offline.into(),
+                action: PopupAction::DownloadOffline,
+                is_header: false,
+            },
+            PopupMenuItem {
                 label: s.dont_recommend.into(),
                 action: PopupAction::DislikeTrack,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.track_info.into(),
+                action: PopupAction::TrackInfo,
                 is_header: false,
             },
         ];
@@ -269,6 +287,15 @@ pub enum Overlay {
     Info,
 }
 
+/// An item in the offline albums tree view.
+#[derive(Debug, Clone)]
+pub enum OfflineTreeItem {
+    /// Album header node (index into offline_albums).
+    Album(usize),
+    /// Track node (album index, track index within album).
+    Track(usize, usize),
+}
+
 /// View state used by UI rendering functions.
 /// Combines daemon snapshot with local client-only state.
 pub struct ViewState {
@@ -295,6 +322,12 @@ pub struct ViewState {
     pub favorites_loading: bool,
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
+    pub offline_category: OfflineCategory,
+    pub offline_tracks: Vec<OfflineTrack>,
+    pub offline_albums: Vec<AlbumDetail>,
+    pub offline_selected: usize,
+    pub offline_loading: bool,
+    pub offline_track_ids: Vec<String>,
     pub radios: Vec<RadioItem>,
     pub radios_filtered: Vec<RadioItem>,
     pub radios_selected: usize,
@@ -312,7 +345,10 @@ pub struct ViewState {
     pub login_loading: bool,
     pub user_name: Option<String>,
 
-    // Local client state
+    // Local client state — offline albums tree
+    pub offline_tree_selected: usize,
+    pub offline_expanded: Vec<String>,
+
     pub input_mode: InputMode,
     pub search_input: String,
     pub login_mode: LoginMode,
@@ -373,6 +409,12 @@ impl ViewState {
             favorites_loading: snap.favorites_loading,
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
+            offline_category: snap.offline_category,
+            offline_tracks: snap.offline_tracks.clone(),
+            offline_albums: snap.offline_albums.clone(),
+            offline_selected: snap.offline_selected,
+            offline_loading: snap.offline_loading,
+            offline_track_ids: snap.offline_track_ids.clone(),
             radios: snap.radios.clone(),
             radios_filtered: snap.radios.clone(),
             radios_selected: snap.radios_selected,
@@ -389,6 +431,9 @@ impl ViewState {
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
             user_name: snap.user_name.clone(),
+
+            offline_tree_selected: 0,
+            offline_expanded: Vec::new(),
 
             input_mode: InputMode::Normal,
             search_input: String::new(),
@@ -428,6 +473,12 @@ impl ViewState {
         self.favorites_loading = snap.favorites_loading;
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
+        self.offline_category = snap.offline_category;
+        self.offline_tracks = snap.offline_tracks;
+        self.offline_albums = snap.offline_albums;
+        self.offline_selected = snap.offline_selected;
+        self.offline_loading = snap.offline_loading;
+        self.offline_track_ids = snap.offline_track_ids;
         // Update radios and re-apply filter
         if self.radios.len() != snap.radios.len() || self.radios_loading != snap.radios_loading {
             self.radios = snap.radios;
@@ -501,6 +552,20 @@ impl ViewState {
                 .collect();
         }
         self.radios_selected = 0;
+    }
+
+    /// Build the flattened tree items for the offline albums view.
+    pub fn offline_tree_items(&self) -> Vec<OfflineTreeItem> {
+        let mut items = Vec::new();
+        for (i, album) in self.offline_albums.iter().enumerate() {
+            items.push(OfflineTreeItem::Album(i));
+            if self.offline_expanded.contains(&album.album_id) {
+                for j in 0..album.tracks.len() {
+                    items.push(OfflineTreeItem::Track(i, j));
+                }
+            }
+        }
+        items
     }
 
     /// Progress ratio for the progress bar.
@@ -707,8 +772,12 @@ impl Client {
             return KeyAction::Detach;
         }
 
-        // ? : toggle help overlay
-        if key.code == KeyCode::Char('?') && self.view.screen == Screen::Main {
+        // ? : toggle help overlay (not during text input)
+        if key.code == KeyCode::Char('?')
+            && self.view.screen == Screen::Main
+            && self.view.input_mode != InputMode::Typing
+            && !self.view.radio_filter_typing
+        {
             self.view.overlay = match self.view.overlay {
                 Some(Overlay::Help) => None,
                 _ => Some(Overlay::Help),
@@ -716,8 +785,12 @@ impl Client {
             return KeyAction::Continue;
         }
 
-        // i : toggle info modal
-        if key.code == KeyCode::Char('i') && self.view.screen == Screen::Main {
+        // i : toggle info modal (not during text input)
+        if key.code == KeyCode::Char('i')
+            && self.view.screen == Screen::Main
+            && self.view.input_mode != InputMode::Typing
+            && !self.view.radio_filter_typing
+        {
             self.view.overlay = match self.view.overlay {
                 Some(Overlay::Info) => None,
                 _ => Some(Overlay::Info),
@@ -944,12 +1017,26 @@ impl Client {
 
             // Category navigation (h/l or left/right)
             KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
-            KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
+            KeyCode::Char('l') | KeyCode::Right => {
+                if self.view.active_tab == ActiveTab::Downloads
+                    && self.view.offline_category == OfflineCategory::Albums
+                {
+                    return self.handle_offline_tree_toggle();
+                }
+                KeyAction::SendCommand(Command::NextCategory)
+            }
 
             // List navigation
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.view.active_tab == ActiveTab::Radio {
                     self.view.radios_selected = self.view.radios_selected.saturating_sub(1);
+                    return KeyAction::Continue;
+                }
+                if self.view.active_tab == ActiveTab::Downloads
+                    && self.view.offline_category == OfflineCategory::Albums
+                {
+                    self.view.offline_tree_selected =
+                        self.view.offline_tree_selected.saturating_sub(1);
                     return KeyAction::Continue;
                 }
                 KeyAction::SendCommand(Command::SelectUp)
@@ -959,6 +1046,16 @@ impl Client {
                     if !self.view.radios_filtered.is_empty() {
                         self.view.radios_selected = (self.view.radios_selected + 1)
                             .min(self.view.radios_filtered.len() - 1);
+                    }
+                    return KeyAction::Continue;
+                }
+                if self.view.active_tab == ActiveTab::Downloads
+                    && self.view.offline_category == OfflineCategory::Albums
+                {
+                    let tree_len = self.view.offline_tree_items().len();
+                    if tree_len > 0 {
+                        self.view.offline_tree_selected =
+                            (self.view.offline_tree_selected + 1).min(tree_len - 1);
                     }
                     return KeyAction::Continue;
                 }
@@ -1016,7 +1113,14 @@ impl Client {
                             KeyAction::Continue
                         }
                     }
-                    _ => KeyAction::Continue,
+                    ActiveTab::Downloads => match self.view.offline_category {
+                        OfflineCategory::Tracks => {
+                            KeyAction::SendCommand(Command::PlayFromOffline {
+                                index: self.view.offline_selected,
+                            })
+                        }
+                        OfflineCategory::Albums => self.handle_offline_tree_enter(),
+                    },
                 }
             }
 
@@ -1029,7 +1133,7 @@ impl Client {
             }
 
             // Player controls
-            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('s') => KeyAction::SendCommand(Command::ToggleShuffle),
@@ -1186,6 +1290,56 @@ impl Client {
     }
 
     /// Open the full track context menu for the selected track in the current list.
+    /// Handle Enter key in the offline albums tree view.
+    fn handle_offline_tree_enter(&mut self) -> KeyAction {
+        let items = self.view.offline_tree_items();
+        let Some(item) = items.get(self.view.offline_tree_selected) else {
+            return KeyAction::Continue;
+        };
+        match item {
+            OfflineTreeItem::Album(album_idx) => {
+                let Some(album) = self.view.offline_albums.get(*album_idx) else {
+                    return KeyAction::Continue;
+                };
+                KeyAction::SendCommand(Command::PlayOfflineAlbum {
+                    album_id: album.album_id.clone(),
+                    track_index: 0,
+                })
+            }
+            OfflineTreeItem::Track(album_idx, track_idx) => {
+                let Some(album) = self.view.offline_albums.get(*album_idx) else {
+                    return KeyAction::Continue;
+                };
+                KeyAction::SendCommand(Command::PlayOfflineAlbum {
+                    album_id: album.album_id.clone(),
+                    track_index: *track_idx,
+                })
+            }
+        }
+    }
+
+    fn handle_offline_tree_toggle(&mut self) -> KeyAction {
+        let items = self.view.offline_tree_items();
+        let Some(item) = items.get(self.view.offline_tree_selected) else {
+            return KeyAction::Continue;
+        };
+        match item {
+            OfflineTreeItem::Album(album_idx) => {
+                let Some(album) = self.view.offline_albums.get(*album_idx) else {
+                    return KeyAction::Continue;
+                };
+                let album_id = album.album_id.clone();
+                if self.view.offline_expanded.contains(&album_id) {
+                    self.view.offline_expanded.retain(|id| id != &album_id);
+                } else {
+                    self.view.offline_expanded.push(album_id);
+                }
+            }
+            OfflineTreeItem::Track(..) => {}
+        }
+        KeyAction::Continue
+    }
+
     fn open_track_popup(&mut self) {
         let track = match self.view.active_tab {
             ActiveTab::Search => self
@@ -1198,6 +1352,24 @@ impl Client {
                 .favorites_display
                 .get(self.view.favorites_selected)
                 .and_then(|d| d.track.clone()),
+            ActiveTab::Downloads => match self.view.offline_category {
+                OfflineCategory::Tracks => self
+                    .view
+                    .offline_tracks
+                    .get(self.view.offline_selected)
+                    .map(|ot| ot.track.clone()),
+                OfflineCategory::Albums => {
+                    let items = self.view.offline_tree_items();
+                    match items.get(self.view.offline_tree_selected) {
+                        Some(OfflineTreeItem::Track(ai, ti)) => self
+                            .view
+                            .offline_albums
+                            .get(*ai)
+                            .and_then(|a| a.tracks.get(*ti).cloned()),
+                        _ => None,
+                    }
+                }
+            },
             _ => None,
         };
 
@@ -1231,8 +1403,26 @@ impl Client {
                 let index = self.view.album_detail_selected;
                 KeyAction::SendCommand(Command::PlayFromAlbum { index })
             }
+            KeyCode::Char('m') => {
+                if let Some(ref detail) = self.view.album_detail {
+                    if let Some(track) = detail.tracks.get(self.view.album_detail_selected).cloned()
+                    {
+                        let is_fav = self.view.is_track_favorite(&track.track_id);
+                        self.view.popup = Some(PopupMenu::full(track, is_fav));
+                    }
+                }
+                KeyAction::Continue
+            }
+            KeyCode::Char('o') => {
+                if let Some(ref detail) = self.view.album_detail {
+                    let album_id = detail.album_id.clone();
+                    KeyAction::SendCommand(Command::DownloadAlbumOffline { album_id })
+                } else {
+                    KeyAction::Continue
+                }
+            }
             // Player controls still work in album detail
-            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -1324,7 +1514,7 @@ impl Client {
                 KeyAction::Continue
             }
             // Player controls
-            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -1405,7 +1595,7 @@ impl Client {
                 KeyAction::Continue
             }
             // Player controls still work
-            KeyCode::Char('p') | KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
             KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
             KeyCode::Char('+') | KeyCode::Char('=') => {
@@ -1543,6 +1733,10 @@ impl Client {
                     }
                     KeyAction::Continue
                 }
+            }
+            PopupAction::DownloadOffline => {
+                self.view.popup = None;
+                KeyAction::SendCommand(Command::DownloadOffline { track })
             }
             PopupAction::DislikeTrack => {
                 self.view.popup = None;

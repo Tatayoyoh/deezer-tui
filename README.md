@@ -11,6 +11,7 @@ Bored to use 300M of RAM to play music ?
 * for developers <3
 * easy account login
 * low memory footprint
+* music playing in the background
 * compliant with deezer features
 
 ## Install
@@ -29,7 +30,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 
 ## Features
 
-✅ background player, still playeing music<br>
+✅ background player, still playeing music [ctrl+z]<br>
 ✅ login from browser/deezer.com link/backlink<br>
 ✅ search / favorites / radios pages<br>
 ✅ playing track context menu [ctrl+p]<br>
@@ -46,7 +47,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ global app menu [ctrl+o] <br>
 ✅ Themes, from official Deezer themes<br>
 ✅ Translations <br>
-⬜ Offline mode <br>
+✅ Offline mode <br>
+⬜ Auto update <br>
 
 ![themes](assets/themes.gif)
 
