@@ -42,6 +42,21 @@ fn main() -> Result<()> {
     // Check for flags
     let args: Vec<String> = std::env::args().collect();
 
+    if args.iter().any(|a| a == "-h" || a == "--help") {
+        println!("deezer-tui — Terminal-based Deezer player");
+        println!();
+        println!("Usage: deezer-tui [OPTIONS]");
+        println!();
+        println!("Options:");
+        println!("  -p, --toggle     Toggle play/pause");
+        println!("  -n, --next       Skip to next track");
+        println!("  -b, --prev       Go to previous track");
+        println!("  -q, --quit       Stop the daemon");
+        println!("  -v, --version    Show version info");
+        println!("  -h, --help       Show this help message");
+        return Ok(());
+    }
+
     if args.iter().any(|a| a == "-v" || a == "--version") {
         println!(
             "deezer-tui {} ({}/{})",
@@ -57,6 +72,16 @@ fn main() -> Result<()> {
 
     if args.iter().any(|a| a == "-q" || a == "--quit") {
         return handle_quit();
+    }
+
+    if args.iter().any(|a| a == "-n" || a == "--next") {
+        return send_command_to_daemon(Command::NextTrack);
+    }
+    if args.iter().any(|a| a == "-b" || a == "--prev") {
+        return send_command_to_daemon(Command::PrevTrack);
+    }
+    if args.iter().any(|a| a == "-p" || a == "--toggle") {
+        return send_command_to_daemon(Command::TogglePause);
     }
 
     // Try to connect to an existing daemon
@@ -85,6 +110,30 @@ fn main() -> Result<()> {
             })
         }
     }
+}
+
+/// Send a single command to the daemon and exit.
+fn send_command_to_daemon(cmd: Command) -> Result<()> {
+    let sock_path = socket_path();
+    if !sock_path.exists() {
+        eprintln!("deezer-tui: no daemon running");
+        return Ok(());
+    }
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        match tokio::net::UnixStream::connect(&sock_path).await {
+            Ok(mut stream) => {
+                if let Err(e) = send_line(&mut stream, &cmd).await {
+                    eprintln!("deezer-tui: failed to send command: {e}");
+                }
+            }
+            Err(_) => {
+                eprintln!("deezer-tui: no daemon running");
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Handle `deezer-tui -q` / `--quit`: connect to daemon and send shutdown.

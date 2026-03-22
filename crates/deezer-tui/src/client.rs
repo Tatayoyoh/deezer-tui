@@ -996,10 +996,13 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // Ctrl+Q: quit (send Shutdown to daemon)
+        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::Quit;
+        }
+
         // Normal mode
         match key.code {
-            KeyCode::Char('q') => KeyAction::Quit,
-
             // Tab navigation (disabled in offline mode — only Offline tab available)
             KeyCode::Tab | KeyCode::BackTab if self.view.is_offline => KeyAction::Continue,
             KeyCode::Tab => KeyAction::SendCommand(Command::NextTab),
@@ -1030,6 +1033,9 @@ impl Client {
 
             // Open album detail page
             KeyCode::Char('a') => self.open_album_detail(),
+
+            // Open artist detail page
+            KeyCode::Char('t') => self.open_artist_detail(),
 
             // Open waiting list
             KeyCode::Char('w') => {
@@ -1451,6 +1457,19 @@ impl Client {
                 }
                 KeyAction::Continue
             }
+            KeyCode::Char('t') => {
+                if let Some(ref detail) = self.view.album_detail {
+                    if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
+                        if let Some(ref artist_id) = track.artist_id {
+                            let artist_id = artist_id.clone();
+                            self.view.overlay = Some(Overlay::ArtistDetail);
+                            self.view.artist_detail_selected = 0;
+                            return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
+                        }
+                    }
+                }
+                KeyAction::Continue
+            }
             KeyCode::Char('o') => {
                 if let Some(ref detail) = self.view.album_detail {
                     let album_id = detail.album_id.clone();
@@ -1594,6 +1613,37 @@ impl Client {
             self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
             self.view.album_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
+        }
+
+        KeyAction::Continue
+    }
+
+    /// Open artist detail page for the currently selected item.
+    fn open_artist_detail(&mut self) -> KeyAction {
+        let item = match self.view.active_tab {
+            ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
+            ActiveTab::Favorites => self
+                .view
+                .favorites_display
+                .get(self.view.favorites_selected),
+            _ => None,
+        };
+
+        // Try artist_id directly from the DisplayItem (artist search/favorites)
+        if let Some(artist_id) = item.and_then(|i| i.artist_id.clone()) {
+            self.view.overlay = Some(Overlay::ArtistDetail);
+            self.view.artist_detail_selected = 0;
+            return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
+        }
+
+        // For tracks, get artist_id from the embedded TrackData
+        if let Some(artist_id) = item
+            .and_then(|i| i.track.as_ref())
+            .and_then(|t| t.artist_id.clone())
+        {
+            self.view.overlay = Some(Overlay::ArtistDetail);
+            self.view.artist_detail_selected = 0;
+            return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
         }
 
         KeyAction::Continue
