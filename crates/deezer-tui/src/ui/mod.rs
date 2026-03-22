@@ -56,7 +56,7 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
             ActiveTab::Search => search::draw(frame, view, chunks[1]),
             ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
             ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
-            ActiveTab::Downloads => downloads::draw(frame, chunks[1]),
+            ActiveTab::Downloads => downloads::draw(frame, view, chunks[1]),
         }
     }
 
@@ -73,7 +73,7 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         Line::from(s.tab_search),
         Line::from(s.tab_favorites),
         Line::from(s.tab_radios),
-        Line::from(s.tab_downloads),
+        Line::from(s.tab_offline),
     ];
 
     let selected = match view.active_tab {
@@ -83,14 +83,23 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         ActiveTab::Downloads => 3,
     };
 
+    let mut block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Theme::border())
+        .title(" deezer-tui ")
+        .title_style(Theme::title());
+
+    if let Some(ref msg) = view.status_msg {
+        let status_line = Line::from(vec![Span::styled(
+            format!(" {msg} "),
+            Style::default().fg(Color::Cyan),
+        )]);
+        block = block
+            .title(ratatui::widgets::block::Title::from(status_line).alignment(Alignment::Right));
+    }
+
     let tabs = Tabs::new(tab_titles)
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM)
-                .border_style(Theme::border())
-                .title(" deezer-tui ")
-                .title_style(Theme::title()),
-        )
+        .block(block)
         .select(selected)
         .style(Theme::tab_inactive())
         .highlight_style(Theme::tab_active())

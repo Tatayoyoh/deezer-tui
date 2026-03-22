@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use crate::protocol::{FavoritesCategory, SearchCategory};
+use crate::protocol::{FavoritesCategory, OfflineCategory, SearchCategory};
 
 /// Supported locales.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +59,7 @@ pub struct Strings {
     pub tab_search: &'static str,
     pub tab_favorites: &'static str,
     pub tab_radios: &'static str,
-    pub tab_downloads: &'static str,
+    pub tab_offline: &'static str,
 
     // --- Login ---
     pub login_connecting: &'static str,
@@ -200,8 +200,17 @@ pub struct Strings {
     pub radios_title: &'static str,
     pub header_radio: &'static str,
 
-    // --- Downloads ---
-    pub downloads_placeholder: &'static str,
+    // --- Offline ---
+    pub offline_empty: &'static str,
+    pub download_for_offline: &'static str,
+    pub remove_offline: &'static str,
+    pub status_downloading_track: &'static str,
+    pub status_track_saved_offline: &'static str,
+    pub status_album_saved_offline: &'static str,
+    pub status_offline_download_error: &'static str,
+    pub status_removed_offline: &'static str,
+    pub hint_download_album: &'static str,
+    pub hint_expand_collapse: &'static str,
 
     // --- Toasts / status ---
     pub link_copied: &'static str,
@@ -357,6 +366,13 @@ impl Strings {
         }
     }
 
+    pub fn offline_category_label(&self, cat: OfflineCategory) -> &'static str {
+        match cat {
+            OfflineCategory::Tracks => self.cat_tracks,
+            OfflineCategory::Albums => self.cat_albums,
+        }
+    }
+
     /// Format "Waiting List (N tracks)"
     pub fn waiting_list_title(&self, count: usize) -> String {
         format!(" {} ({} {}) ", self.waiting_list, count, self.header_tracks)
@@ -432,21 +448,6 @@ impl Strings {
         format!("{} {}", self.status_radio_tracks, count)
     }
 
-    /// Format "\"title\" will play next"
-    pub fn fmt_play_next(&self, title: &str) -> String {
-        format!("\"{}\" {}", title, self.status_play_next)
-    }
-
-    /// Format "\"title\" added to queue"
-    pub fn fmt_added_to_queue(&self, title: &str) -> String {
-        format!("\"{}\" {}", title, self.status_added_to_queue)
-    }
-
-    /// Format "Loading title - artist..."
-    pub fn fmt_loading_track(&self, title: &str, artist: &str) -> String {
-        format!("{} {} - {}...", self.loading, title, artist)
-    }
-
     /// Format "Album — N tracks"
     pub fn fmt_album_tracks_status(&self, title: &str, count: usize) -> String {
         format!("{} — {} {}", title, count, self.header_tracks)
@@ -468,7 +469,7 @@ static EN: Strings = Strings {
     tab_search: " Search ",
     tab_favorites: " Favorites ",
     tab_radios: " Radios ",
-    tab_downloads: " Downloads ",
+    tab_offline: " Offline ",
 
     login_connecting: "Connecting...",
     login_button: "Login with Deezer",
@@ -593,7 +594,16 @@ static EN: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
-    downloads_placeholder: "Downloads \u{2014} coming soon",
+    offline_empty: "No offline content yet",
+    download_for_offline: "Download for offline mode",
+    remove_offline: "Remove from offline",
+    status_downloading_track: "Downloading for offline...",
+    status_track_saved_offline: "Track saved for offline",
+    status_album_saved_offline: "Album saved for offline",
+    status_offline_download_error: "Offline download error",
+    status_removed_offline: "Removed from offline",
+    hint_download_album: " offline  ",
+    hint_expand_collapse: "→ expand/collapse",
 
     link_copied: "Link copied to clipboard!",
     no_album_info: "No album info available",
@@ -636,8 +646,8 @@ static EN: Strings = Strings {
     status_radio_tracks_error: "Radio tracks error",
     status_playback_error: "Playback error",
     status_track_error: "Track error",
-    status_play_next: "will play next",
-    status_added_to_queue: "added to queue",
+    status_play_next: "Will play next",
+    status_added_to_queue: "Added to queue",
 
     header_title: "Title",
     header_artist: "Artist",
@@ -669,7 +679,7 @@ static FR: Strings = Strings {
     tab_search: " Recherche ",
     tab_favorites: " Favoris ",
     tab_radios: " Radios ",
-    tab_downloads: " Téléchargements ",
+    tab_offline: " Hors-ligne ",
 
     login_connecting: "Connexion...",
     login_button: "Se connecter avec Deezer",
@@ -794,7 +804,16 @@ static FR: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
-    downloads_placeholder: "Téléchargements \u{2014} bientôt disponible",
+    offline_empty: "Aucun contenu hors-ligne",
+    download_for_offline: "Télécharger hors-ligne",
+    remove_offline: "Supprimer du mode hors-ligne",
+    status_downloading_track: "Téléchargement hors-ligne...",
+    status_track_saved_offline: "Titre sauvegardé hors-ligne",
+    status_album_saved_offline: "Album sauvegardé hors-ligne",
+    status_offline_download_error: "Erreur de téléchargement hors-ligne",
+    status_removed_offline: "Supprimé du mode hors-ligne",
+    hint_download_album: " hors-ligne  ",
+    hint_expand_collapse: "→ déplier/replier",
 
     link_copied: "Lien copié dans le presse-papiers !",
     no_album_info: "Aucune info d'album disponible",
@@ -836,8 +855,8 @@ static FR: Strings = Strings {
     status_radio_tracks_error: "Erreur des titres radio",
     status_playback_error: "Erreur de lecture",
     status_track_error: "Erreur du titre",
-    status_play_next: "sera lu ensuite",
-    status_added_to_queue: "ajouté à la file d'attente",
+    status_play_next: "Sera lu ensuite",
+    status_added_to_queue: "Ajouté à la file d'attente",
 
     header_title: "Titre",
     header_artist: "Artiste",
@@ -869,7 +888,7 @@ static ES: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
     tab_radios: " Radios ",
-    tab_downloads: " Descargas ",
+    tab_offline: " Sin conexión ",
 
     login_connecting: "Conectando...",
     login_button: "Iniciar sesión con Deezer",
@@ -994,7 +1013,16 @@ static ES: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
-    downloads_placeholder: "Descargas \u{2014} próximamente",
+    offline_empty: "Sin contenido sin conexión",
+    download_for_offline: "Descargar para modo sin conexión",
+    remove_offline: "Eliminar del modo sin conexión",
+    status_downloading_track: "Descargando sin conexión...",
+    status_track_saved_offline: "Pista guardada sin conexión",
+    status_album_saved_offline: "Álbum guardado sin conexión",
+    status_offline_download_error: "Error de descarga sin conexión",
+    status_removed_offline: "Eliminado del modo sin conexión",
+    hint_download_album: " sin conexión  ",
+    hint_expand_collapse: "→ expandir/contraer",
 
     link_copied: "¡Enlace copiado al portapapeles!",
     no_album_info: "No hay info del álbum disponible",
@@ -1036,8 +1064,8 @@ static ES: Strings = Strings {
     status_radio_tracks_error: "Error de canciones de radio",
     status_playback_error: "Error de reproducción",
     status_track_error: "Error de canción",
-    status_play_next: "se reproducirá después",
-    status_added_to_queue: "agregado a la cola",
+    status_play_next: "Se reproducirá después",
+    status_added_to_queue: "Agregado a la cola",
 
     header_title: "Título",
     header_artist: "Artista",
@@ -1069,7 +1097,7 @@ static PT: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
     tab_radios: " Rádios ",
-    tab_downloads: " Downloads ",
+    tab_offline: " Offline ",
 
     login_connecting: "Conectando...",
     login_button: "Entrar com Deezer",
@@ -1194,7 +1222,16 @@ static PT: Strings = Strings {
     radios_title: "Rádios",
     header_radio: "Rádio",
 
-    downloads_placeholder: "Downloads \u{2014} em breve",
+    offline_empty: "Sem conteúdo offline",
+    download_for_offline: "Baixar para modo offline",
+    remove_offline: "Remover do modo offline",
+    status_downloading_track: "Baixando para offline...",
+    status_track_saved_offline: "Faixa salva para offline",
+    status_album_saved_offline: "Álbum salvo para offline",
+    status_offline_download_error: "Erro ao baixar para offline",
+    status_removed_offline: "Removido do modo offline",
+    hint_download_album: " offline  ",
+    hint_expand_collapse: "→ expandir/recolher",
 
     link_copied: "Link copiado para a área de transferência!",
     no_album_info: "Nenhuma info do álbum disponível",
@@ -1236,8 +1273,8 @@ static PT: Strings = Strings {
     status_radio_tracks_error: "Erro das músicas da rádio",
     status_playback_error: "Erro de reprodução",
     status_track_error: "Erro da música",
-    status_play_next: "será reproduzida em seguida",
-    status_added_to_queue: "adicionado à fila",
+    status_play_next: "Será reproduzida em seguida",
+    status_added_to_queue: "Adicionado à fila",
 
     header_title: "Título",
     header_artist: "Artista",
@@ -1269,7 +1306,7 @@ static DE: Strings = Strings {
     tab_search: " Suche ",
     tab_favorites: " Favoriten ",
     tab_radios: " Radios ",
-    tab_downloads: " Downloads ",
+    tab_offline: " Offline ",
 
     login_connecting: "Verbindung...",
     login_button: "Mit Deezer anmelden",
@@ -1394,7 +1431,16 @@ static DE: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
-    downloads_placeholder: "Downloads \u{2014} demnächst verfügbar",
+    offline_empty: "Keine Offline-Inhalte",
+    download_for_offline: "Für Offline-Modus herunterladen",
+    remove_offline: "Aus Offline entfernen",
+    status_downloading_track: "Offline wird heruntergeladen...",
+    status_track_saved_offline: "Titel offline gespeichert",
+    status_album_saved_offline: "Album offline gespeichert",
+    status_offline_download_error: "Offline-Download-Fehler",
+    status_removed_offline: "Aus Offline entfernt",
+    hint_download_album: " offline  ",
+    hint_expand_collapse: "→ auf-/zuklappen",
 
     link_copied: "Link in die Zwischenablage kopiert!",
     no_album_info: "Keine Album-Info verfügbar",
@@ -1436,8 +1482,8 @@ static DE: Strings = Strings {
     status_radio_tracks_error: "Radio-Titel-Fehler",
     status_playback_error: "Wiedergabefehler",
     status_track_error: "Titelfehler",
-    status_play_next: "wird als Nächstes abgespielt",
-    status_added_to_queue: "zur Warteschlange hinzugefügt",
+    status_play_next: "Wird als Nächstes abgespielt",
+    status_added_to_queue: "Zur Warteschlange hinzugefügt",
 
     header_title: "Titel",
     header_artist: "Künstler",

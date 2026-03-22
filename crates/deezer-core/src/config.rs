@@ -51,6 +51,13 @@ impl Config {
             .map(|p| p.config_dir().to_path_buf())
     }
 
+    /// Get the local data directory (XDG data on Linux, AppData on Windows, etc.)
+    /// Used for offline track storage.
+    pub fn data_dir() -> Option<PathBuf> {
+        ProjectDirs::from(APP_QUALIFIER, APP_ORGANIZATION, APP_NAME)
+            .map(|p| p.data_local_dir().to_path_buf())
+    }
+
     /// Full path to the config file.
     pub fn path() -> Option<PathBuf> {
         Self::dir().map(|d| d.join("config.json"))

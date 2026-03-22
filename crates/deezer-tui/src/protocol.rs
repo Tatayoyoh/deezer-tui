@@ -7,6 +7,7 @@ use tokio::net::UnixStream;
 use deezer_core::api::models::{
     AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
 };
+use deezer_core::offline::OfflineTrack;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -85,6 +86,21 @@ pub enum Command {
     LoadRadios,
     /// Play the selected radio station's tracks.
     PlayFromRadio { index: usize },
+    /// Download a track for offline mode.
+    DownloadOffline { track: TrackData },
+    /// Download an entire album for offline mode.
+    DownloadAlbumOffline { album_id: String },
+    /// Remove a track from offline storage.
+    RemoveOfflineTrack { track_id: String },
+    /// Remove an album from offline storage.
+    RemoveOfflineAlbum { album_id: String },
+    /// Play a track from offline storage.
+    PlayFromOffline { index: usize },
+    /// Play a track from an offline album (queue = album tracks).
+    PlayOfflineAlbum {
+        album_id: String,
+        track_index: usize,
+    },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -229,6 +245,29 @@ impl FavoritesCategory {
     }
 }
 
+/// Offline content category filter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum OfflineCategory {
+    #[default]
+    Tracks,
+    Albums,
+}
+
+impl OfflineCategory {
+    pub const ALL: [Self; 2] = [Self::Tracks, Self::Albums];
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Tracks => Self::Albums,
+            Self::Albums => Self::Tracks,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        self.next() // Only 2 variants, prev == next
+    }
+}
+
 /// A radio station item for display.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RadioItem {
@@ -293,6 +332,21 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
+
+    // Offline
+    #[serde(default)]
+    pub offline_category: OfflineCategory,
+    #[serde(default)]
+    pub offline_tracks: Vec<OfflineTrack>,
+    #[serde(default)]
+    pub offline_albums: Vec<AlbumDetail>,
+    #[serde(default)]
+    pub offline_selected: usize,
+    #[serde(default)]
+    pub offline_loading: bool,
+    /// IDs of tracks available offline (for UI indicators in other tabs).
+    #[serde(default)]
+    pub offline_track_ids: Vec<String>,
 
     // Radios
     #[serde(default)]
@@ -362,6 +416,12 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            offline_category: OfflineCategory::default(),
+            offline_tracks: Vec::new(),
+            offline_albums: Vec::new(),
+            offline_selected: 0,
+            offline_loading: false,
+            offline_track_ids: Vec::new(),
             radios: Vec::new(),
             radios_selected: 0,
             radios_loading: false,
