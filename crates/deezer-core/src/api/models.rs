@@ -137,6 +137,10 @@ pub struct TrackData {
     pub title: String,
     #[serde(rename = "ART_NAME")]
     pub artist: String,
+    #[serde(rename = "ART_ID")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_optional_id")]
+    pub artist_id: Option<String>,
     #[serde(rename = "ALB_TITLE")]
     #[serde(default)]
     pub album: String,
@@ -307,6 +311,76 @@ pub struct AlbumDetail {
     pub tracks: Vec<TrackData>,
 }
 
+/// An album entry within an artist detail page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistAlbumEntry {
+    pub album_id: String,
+    pub title: String,
+    pub release_date: String,
+    pub fans: u64,
+    pub record_type: String,
+}
+
+/// Sub-tab category for the artist detail right panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ArtistSubTab {
+    #[default]
+    TopTracks,
+    Albums,
+    Lives,
+    Other,
+}
+
+impl ArtistSubTab {
+    pub const ALL: [Self; 4] = [Self::TopTracks, Self::Albums, Self::Lives, Self::Other];
+
+    pub fn next(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + all.len() - 1) % all.len()]
+    }
+}
+
+/// Full artist detail returned from the public API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistDetail {
+    pub artist_id: String,
+    pub name: String,
+    pub nb_fan: u64,
+    pub top_tracks: Vec<TrackData>,
+    pub albums: Vec<ArtistAlbumEntry>,
+}
+
+impl ArtistDetail {
+    /// Filter albums by sub-tab category.
+    /// Lives are detected by title keywords since the API doesn't have a "live" record_type.
+    pub fn albums_for_tab(&self, tab: ArtistSubTab) -> Vec<&ArtistAlbumEntry> {
+        self.albums
+            .iter()
+            .filter(|a| match tab {
+                ArtistSubTab::Albums => a.record_type == "album" && !a.is_live(),
+                ArtistSubTab::Lives => a.is_live(),
+                ArtistSubTab::Other => a.record_type != "album" && !a.is_live(),
+                ArtistSubTab::TopTracks => false,
+            })
+            .collect()
+    }
+}
+
+impl ArtistAlbumEntry {
+    /// Detect live albums by title keywords.
+    pub fn is_live(&self) -> bool {
+        let lower = self.title.to_lowercase();
+        lower.contains("live") || lower.contains("concert") || lower.contains("en direct")
+    }
+}
+
 /// Full playlist detail returned from the public API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlaylistDetail {
@@ -333,6 +407,9 @@ pub struct DisplayItem {
     /// Playlist ID, if this item represents a playlist.
     #[serde(default)]
     pub playlist_id: Option<String>,
+    /// Artist ID, if this item represents an artist.
+    #[serde(default)]
+    pub artist_id: Option<String>,
 }
 
 impl DisplayItem {
@@ -346,6 +423,7 @@ impl DisplayItem {
             track: Some(track.clone()),
             album_id: None,
             playlist_id: None,
+            artist_id: None,
         }
     }
 
@@ -358,6 +436,7 @@ impl DisplayItem {
             track: None,
             album_id: None,
             playlist_id: None,
+            artist_id: Some(artist.artist_id.clone()),
         }
     }
 
@@ -370,6 +449,7 @@ impl DisplayItem {
             track: None,
             album_id: Some(album.album_id.clone()),
             playlist_id: None,
+            artist_id: None,
         }
     }
 
@@ -382,6 +462,7 @@ impl DisplayItem {
             track: None,
             album_id: None,
             playlist_id: Some(playlist.playlist_id.clone()),
+            artist_id: None,
         }
     }
 
@@ -394,6 +475,7 @@ impl DisplayItem {
             track: None,
             album_id: None,
             playlist_id: None,
+            artist_id: None,
         }
     }
 
@@ -407,6 +489,7 @@ impl DisplayItem {
             track: None,
             album_id: None,
             playlist_id: None,
+            artist_id: None,
         }
     }
 
@@ -419,6 +502,7 @@ impl DisplayItem {
             track: None,
             album_id: None,
             playlist_id: None,
+            artist_id: None,
         }
     }
 }

@@ -43,9 +43,9 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             draw_info_overlay(frame);
             return;
         }
-        Some(Overlay::AlbumDetail) => {
-            // Album detail is rendered in the main content area, not as a popup
-            return;
+        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail) => {
+            // Detail views are rendered in the main content area
+            // Don't return — let the popup (context menu) render on top if open
         }
         Some(Overlay::PlaylistDetail { selected }) => {
             draw_playlist_detail(frame, view, *selected);

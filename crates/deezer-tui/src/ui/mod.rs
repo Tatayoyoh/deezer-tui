@@ -1,4 +1,5 @@
 pub mod album_detail;
+pub mod artist_detail;
 pub mod common;
 pub mod downloads;
 pub mod favorites;
@@ -48,9 +49,11 @@ fn draw_main(frame: &mut Frame, view: &ViewState) {
     // Tab bar
     draw_tabs(frame, view, chunks[0]);
 
-    // Content area: album detail overlay replaces tab content
-    if view.overlay == Some(Overlay::AlbumDetail) {
+    // Content area: detail overlays replace tab content
+    if matches!(view.overlay, Some(Overlay::AlbumDetail { .. })) {
         album_detail::draw(frame, view, chunks[1]);
+    } else if view.overlay == Some(Overlay::ArtistDetail) {
+        artist_detail::draw(frame, view, chunks[1]);
     } else {
         match view.active_tab {
             ActiveTab::Search => search::draw(frame, view, chunks[1]),

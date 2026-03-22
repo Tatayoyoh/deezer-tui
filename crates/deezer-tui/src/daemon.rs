@@ -7,7 +7,8 @@ use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 use deezer_core::api::models::{
-    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    PlaylistDetail, TrackData,
 };
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
@@ -58,6 +59,8 @@ enum AsyncResult {
     MixError(String),
     AlbumDetailReady(AlbumDetail),
     AlbumDetailError(String),
+    ArtistDetailReady(ArtistDetail),
+    ArtistDetailError(String),
     PlaylistDetailReady(PlaylistDetail),
     PlaylistDetailError(String),
     RadiosReady(Vec<RadioItem>),
@@ -119,6 +122,12 @@ pub struct Daemon {
     album_detail: Option<AlbumDetail>,
     album_detail_selected: usize,
     album_detail_loading: bool,
+
+    // Artist detail
+    artist_detail: Option<ArtistDetail>,
+    artist_detail_selected: usize,
+    artist_detail_loading: bool,
+    artist_detail_sub_tab: ArtistSubTab,
 
     // Playlist detail
     playlist_detail: Option<PlaylistDetail>,
@@ -216,6 +225,11 @@ impl Daemon {
             album_detail: None,
             album_detail_selected: 0,
             album_detail_loading: false,
+
+            artist_detail: None,
+            artist_detail_selected: 0,
+            artist_detail_loading: false,
+            artist_detail_sub_tab: ArtistSubTab::default(),
 
             playlist_detail: None,
             playlist_detail_selected: 0,
@@ -647,6 +661,29 @@ impl Daemon {
             Command::GetAlbumDetail { album_id } => {
                 self.start_load_album_detail(album_id);
             }
+            Command::GetArtistDetail { artist_id } => {
+                self.start_load_artist_detail(artist_id);
+            }
+            Command::PlayFromArtist { index } => {
+                if let Some(ref detail) = self.artist_detail {
+                    if let Some(track) = detail.top_tracks.get(index).cloned() {
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = detail.top_tracks.clone();
+                            state.queue_index = index;
+                        }
+                        self.start_play_track(track);
+                    }
+                }
+            }
+            Command::OpenArtistAlbum { index } => {
+                if let Some(ref detail) = self.artist_detail {
+                    let albums = detail.albums_for_tab(self.artist_detail_sub_tab);
+                    if let Some(album) = albums.get(index) {
+                        let album_id = album.album_id.clone();
+                        self.start_load_album_detail(album_id);
+                    }
+                }
+            }
             Command::PlayFromAlbum { index } => {
                 if let Some(ref detail) = self.album_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
@@ -814,6 +851,10 @@ impl Daemon {
             album_detail: self.album_detail.clone(),
             album_detail_selected: self.album_detail_selected,
             album_detail_loading: self.album_detail_loading,
+            artist_detail: self.artist_detail.clone(),
+            artist_detail_selected: self.artist_detail_selected,
+            artist_detail_loading: self.artist_detail_loading,
+            artist_detail_sub_tab: self.artist_detail_sub_tab,
             playlist_detail: self.playlist_detail.clone(),
             playlist_detail_selected: self.playlist_detail_selected,
             playlist_detail_loading: self.playlist_detail_loading,
@@ -1144,6 +1185,31 @@ impl Daemon {
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::AlbumDetailError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_load_artist_detail(&mut self, artist_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+        self.artist_detail_loading = true;
+        self.artist_detail = None;
+        self.artist_detail_selected = 0;
+        self.artist_detail_sub_tab = ArtistSubTab::default();
+        self.status_msg = Some(t().status_loading_artist.into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_artist_detail(&artist_id).await {
+                Ok(detail) => {
+                    let _ = tx.send(AsyncResult::ArtistDetailReady(detail));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::ArtistDetailError(e.to_string()));
                 }
             }
         });
@@ -1641,6 +1707,21 @@ impl Daemon {
                 AsyncResult::AlbumDetailError(err) => {
                     self.album_detail_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_album_error, &err));
+                }
+                AsyncResult::ArtistDetailReady(detail) => {
+                    self.artist_detail_loading = false;
+                    self.status_msg = Some(format!(
+                        "{} — {} top {}",
+                        detail.name,
+                        detail.top_tracks.len(),
+                        t().header_tracks
+                    ));
+                    self.artist_detail = Some(detail);
+                    self.artist_detail_selected = 0;
+                }
+                AsyncResult::ArtistDetailError(err) => {
+                    self.artist_detail_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_artist_error, &err));
                 }
                 AsyncResult::PlaylistDetailReady(detail) => {
                     self.playlist_detail_loading = false;

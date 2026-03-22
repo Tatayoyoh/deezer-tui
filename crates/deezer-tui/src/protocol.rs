@@ -5,7 +5,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 use deezer_core::api::models::{
-    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    PlaylistDetail, TrackData,
 };
 use deezer_core::offline::OfflineTrack;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
@@ -76,6 +77,12 @@ pub enum Command {
     GetAlbumDetail { album_id: String },
     /// Play a track from the album detail view.
     PlayFromAlbum { index: usize },
+    /// Load artist detail (top tracks, albums).
+    GetArtistDetail { artist_id: String },
+    /// Play a track from the artist detail top tracks.
+    PlayFromArtist { index: usize },
+    /// Open an album from the artist detail albums list.
+    OpenArtistAlbum { index: usize },
     /// Load playlist detail (tracks, metadata).
     GetPlaylistDetail { playlist_id: String },
     /// Play a track from the playlist detail view.
@@ -368,6 +375,16 @@ pub struct DaemonSnapshot {
     #[serde(default)]
     pub album_detail_loading: bool,
 
+    // Artist detail
+    #[serde(default)]
+    pub artist_detail: Option<ArtistDetail>,
+    #[serde(default)]
+    pub artist_detail_selected: usize,
+    #[serde(default)]
+    pub artist_detail_loading: bool,
+    #[serde(default)]
+    pub artist_detail_sub_tab: ArtistSubTab,
+
     // Playlist detail
     #[serde(default)]
     pub playlist_detail: Option<PlaylistDetail>,
@@ -431,6 +448,10 @@ impl Default for DaemonSnapshot {
             album_detail: None,
             album_detail_selected: 0,
             album_detail_loading: false,
+            artist_detail: None,
+            artist_detail_selected: 0,
+            artist_detail_loading: false,
+            artist_detail_sub_tab: ArtistSubTab::default(),
             playlist_detail: None,
             playlist_detail_selected: 0,
             playlist_detail_loading: false,
