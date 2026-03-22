@@ -107,6 +107,7 @@ pub struct Strings {
     pub add_to_queue: &'static str,
     pub mix_inspired: &'static str,
     pub track_album: &'static str,
+    pub track_artist: &'static str,
     pub share: &'static str,
     pub track_info: &'static str,
 
@@ -176,6 +177,16 @@ pub struct Strings {
     pub esc_back: &'static str,
     pub enter_play_track: &'static str,
     pub no_tracks: &'static str,
+
+    // --- Artist detail ---
+    pub loading_artist: &'static str,
+    pub no_artist_loaded: &'static str,
+    pub fans_label: &'static str,
+    pub artist_top_tracks: &'static str,
+    pub artist_albums: &'static str,
+    pub artist_lives: &'static str,
+    pub artist_other: &'static str,
+    pub no_albums: &'static str,
 
     // --- Playlist detail ---
     pub playlist: &'static str,
@@ -247,6 +258,8 @@ pub struct Strings {
     pub status_no_mix_tracks: &'static str,
     pub status_mix_tracks: &'static str,
     pub status_mix_error: &'static str,
+    pub status_loading_artist: &'static str,
+    pub status_artist_error: &'static str,
     pub status_album_error: &'static str,
     pub status_playlist_error: &'static str,
     pub status_radios_loaded: &'static str,
@@ -514,6 +527,7 @@ static EN: Strings = Strings {
     add_to_queue: "Add to queue",
     mix_inspired: "Mix inspired by this track",
     track_album: "Track album",
+    track_artist: "Artist page",
     share: "Share",
     track_info: "Track info",
 
@@ -576,6 +590,15 @@ static EN: Strings = Strings {
     esc_back: "Esc  Back",
     enter_play_track: "Enter  Play track",
     no_tracks: "No tracks",
+
+    loading_artist: "Loading artist...",
+    no_artist_loaded: "No artist loaded",
+    fans_label: "Fans:    ",
+    artist_top_tracks: "Top Tracks",
+    artist_albums: "Albums",
+    artist_lives: "Lives",
+    artist_other: "Other",
+    no_albums: "No albums",
 
     playlist: " Playlist ",
 
@@ -641,6 +664,8 @@ static EN: Strings = Strings {
     status_no_mix_tracks: "No mix tracks found",
     status_mix_tracks: "Mix:",
     status_mix_error: "Mix error",
+    status_loading_artist: "Loading artist...",
+    status_artist_error: "Artist error",
     status_album_error: "Album error",
     status_playlist_error: "Playlist error",
     status_radios_loaded: "radios loaded",
@@ -726,6 +751,7 @@ static FR: Strings = Strings {
     add_to_queue: "Ajouter à la file d'attente",
     mix_inspired: "Mix inspiré par ce titre",
     track_album: "Album du titre",
+    track_artist: "Page artiste",
     share: "Partager",
     track_info: "Infos du titre",
 
@@ -788,6 +814,15 @@ static FR: Strings = Strings {
     esc_back: "Esc  Retour",
     enter_play_track: "Entrée  Lire le titre",
     no_tracks: "Aucun titre",
+
+    loading_artist: "Chargement de l'artiste...",
+    no_artist_loaded: "Aucun artiste chargé",
+    fans_label: "Fans :   ",
+    artist_top_tracks: "Top titres",
+    artist_albums: "Albums",
+    artist_lives: "Lives",
+    artist_other: "Autres",
+    no_albums: "Aucun album",
 
     playlist: " Playlist ",
 
@@ -852,6 +887,8 @@ static FR: Strings = Strings {
     status_no_mix_tracks: "Aucun titre de mix trouvé",
     status_mix_tracks: "Mix :",
     status_mix_error: "Erreur du mix",
+    status_loading_artist: "Chargement de l'artiste...",
+    status_artist_error: "Erreur de l'artiste",
     status_album_error: "Erreur de l'album",
     status_playlist_error: "Erreur de la playlist",
     status_radios_loaded: "radios chargées",
@@ -937,6 +974,7 @@ static ES: Strings = Strings {
     add_to_queue: "Agregar a la cola",
     mix_inspired: "Mix inspirado en esta canción",
     track_album: "Álbum de la canción",
+    track_artist: "Página del artista",
     share: "Compartir",
     track_info: "Info de la canción",
 
@@ -999,6 +1037,15 @@ static ES: Strings = Strings {
     esc_back: "Esc  Volver",
     enter_play_track: "Enter  Reproducir canción",
     no_tracks: "Sin canciones",
+
+    loading_artist: "Cargando artista...",
+    no_artist_loaded: "Ningún artista cargado",
+    fans_label: "Fans:    ",
+    artist_top_tracks: "Top canciones",
+    artist_albums: "Álbumes",
+    artist_lives: "En vivo",
+    artist_other: "Otros",
+    no_albums: "Sin álbumes",
 
     playlist: " Playlist ",
 
@@ -1063,6 +1110,8 @@ static ES: Strings = Strings {
     status_no_mix_tracks: "No se encontraron canciones del mix",
     status_mix_tracks: "Mix:",
     status_mix_error: "Error del mix",
+    status_loading_artist: "Cargando artista...",
+    status_artist_error: "Error del artista",
     status_album_error: "Error del álbum",
     status_playlist_error: "Error de la playlist",
     status_radios_loaded: "radios cargadas",
@@ -1148,6 +1197,7 @@ static PT: Strings = Strings {
     add_to_queue: "Adicionar à fila",
     mix_inspired: "Mix inspirado nesta música",
     track_album: "Álbum da música",
+    track_artist: "Página do artista",
     share: "Compartilhar",
     track_info: "Info da música",
 
@@ -1210,6 +1260,15 @@ static PT: Strings = Strings {
     esc_back: "Esc  Voltar",
     enter_play_track: "Enter  Reproduzir música",
     no_tracks: "Sem músicas",
+
+    loading_artist: "Carregando artista...",
+    no_artist_loaded: "Nenhum artista carregado",
+    fans_label: "Fãs:     ",
+    artist_top_tracks: "Top músicas",
+    artist_albums: "Álbuns",
+    artist_lives: "Ao vivo",
+    artist_other: "Outros",
+    no_albums: "Sem álbuns",
 
     playlist: " Playlist ",
 
@@ -1274,6 +1333,8 @@ static PT: Strings = Strings {
     status_no_mix_tracks: "Nenhuma música do mix encontrada",
     status_mix_tracks: "Mix:",
     status_mix_error: "Erro do mix",
+    status_loading_artist: "Carregando artista...",
+    status_artist_error: "Erro do artista",
     status_album_error: "Erro do álbum",
     status_playlist_error: "Erro da playlist",
     status_radios_loaded: "rádios carregadas",
@@ -1359,6 +1420,7 @@ static DE: Strings = Strings {
     add_to_queue: "Zur Warteschlange hinzufügen",
     mix_inspired: "Mix inspiriert von diesem Titel",
     track_album: "Album des Titels",
+    track_artist: "Künstlerseite",
     share: "Teilen",
     track_info: "Titelinfo",
 
@@ -1421,6 +1483,15 @@ static DE: Strings = Strings {
     esc_back: "Esc  Zurück",
     enter_play_track: "Enter  Titel abspielen",
     no_tracks: "Keine Titel",
+
+    loading_artist: "Künstler wird geladen...",
+    no_artist_loaded: "Kein Künstler geladen",
+    fans_label: "Fans:    ",
+    artist_top_tracks: "Top Titel",
+    artist_albums: "Alben",
+    artist_lives: "Live",
+    artist_other: "Andere",
+    no_albums: "Keine Alben",
 
     playlist: " Playlist ",
 
@@ -1485,6 +1556,8 @@ static DE: Strings = Strings {
     status_no_mix_tracks: "Keine Mix-Titel gefunden",
     status_mix_tracks: "Mix:",
     status_mix_error: "Mix-Fehler",
+    status_loading_artist: "Künstler wird geladen...",
+    status_artist_error: "Künstler-Fehler",
     status_album_error: "Album-Fehler",
     status_playlist_error: "Playlist-Fehler",
     status_radios_loaded: "Radios geladen",

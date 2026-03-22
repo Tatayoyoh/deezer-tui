@@ -2,8 +2,8 @@ use serde_json::json;
 use tracing::debug;
 
 use super::models::{
-    AlbumDetail, ArtistData, DeezerError, DisplayItem, EpisodeData, PlaylistData, PlaylistDetail,
-    PodcastData, ProfileData, SearchResults, TrackData,
+    AlbumDetail, ArtistAlbumEntry, ArtistData, ArtistDetail, DeezerError, DisplayItem, EpisodeData,
+    PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults, TrackData,
 };
 use super::DeezerClient;
 
@@ -237,6 +237,7 @@ impl DeezerClient {
                     track: None,
                     album_id,
                     playlist_id: None,
+                    artist_id: None,
                 }
             })
             .collect();
@@ -275,6 +276,10 @@ impl DeezerClient {
         let items = data
             .iter()
             .map(|entry| {
+                let artist_id = entry
+                    .get("id")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v.to_string());
                 let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let nb_fan = entry.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
                 DisplayItem {
@@ -285,6 +290,7 @@ impl DeezerClient {
                     track: None,
                     album_id: None,
                     playlist_id: None,
+                    artist_id,
                 }
             })
             .collect();
@@ -346,6 +352,7 @@ impl DeezerClient {
                     track: None,
                     album_id,
                     playlist_id: None,
+                    artist_id: None,
                 }
             })
             .collect();
@@ -404,6 +411,7 @@ impl DeezerClient {
                     track: None,
                     album_id: None,
                     playlist_id,
+                    artist_id: None,
                 }
             })
             .collect();
@@ -502,6 +510,7 @@ impl DeezerClient {
                     track: None,
                     album_id: None,
                     playlist_id: None,
+                    artist_id: None,
                 }
             })
             .collect();
@@ -647,6 +656,131 @@ impl DeezerClient {
             cover_url,
             label,
             tracks,
+        })
+    }
+
+    /// Get artist details (name, fans, top tracks, albums) via the public API.
+    pub async fn get_artist_detail(&self, artist_id: &str) -> Result<ArtistDetail, DeezerError> {
+        // 1. Fetch artist info
+        let url = format!("https://api.deezer.com/artist/{}", artist_id);
+        let resp: serde_json::Value = self
+            .http
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        if let Some(err) = resp.get("error") {
+            return Err(DeezerError::Api(
+                err.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Unknown artist error")
+                    .to_string(),
+            ));
+        }
+
+        let name = resp
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let nb_fan = resp.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        // 2. Fetch top tracks
+        let top_url = format!("https://api.deezer.com/artist/{}/top?limit=50", artist_id);
+        let top_resp: serde_json::Value = self
+            .http
+            .get(&top_url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let track_ids: Vec<String> = top_resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let track_id_refs: Vec<&str> = track_ids.iter().map(|s| s.as_str()).collect();
+        let top_tracks = if !track_id_refs.is_empty() {
+            self.get_tracks(&track_id_refs).await.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+
+        // 3. Fetch albums (all types)
+        let albums_url = format!(
+            "https://api.deezer.com/artist/{}/albums?limit=500",
+            artist_id
+        );
+        let albums_resp: serde_json::Value = self
+            .http
+            .get(&albums_url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let mut albums: Vec<ArtistAlbumEntry> = albums_resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|entry| {
+                        let album_id = entry
+                            .get("id")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        let title = entry
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let release_date = entry
+                            .get("release_date")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let fans = entry.get("fans").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let record_type = entry
+                            .get("record_type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("album")
+                            .to_string();
+                        ArtistAlbumEntry {
+                            album_id,
+                            title,
+                            release_date,
+                            fans,
+                            record_type,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Sort by release date descending (newest first)
+        albums.sort_by(|a, b| b.release_date.cmp(&a.release_date));
+
+        Ok(ArtistDetail {
+            artist_id: artist_id.to_string(),
+            name,
+            nb_fan,
+            top_tracks,
+            albums,
         })
     }
 

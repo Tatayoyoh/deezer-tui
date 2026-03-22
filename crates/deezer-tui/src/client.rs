@@ -18,7 +18,8 @@ use tokio::net::UnixStream;
 use tracing::debug;
 
 use deezer_core::api::models::{
-    AlbumDetail, AudioQuality, DisplayItem, PlaylistData, PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    PlaylistDetail, TrackData,
 };
 use deezer_core::config::Config;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
@@ -66,6 +67,7 @@ pub enum PopupAction {
     Share,
     TrackInfo,
     ViewAlbum,
+    ViewArtist,
 }
 
 #[derive(Debug, Clone)]
@@ -158,6 +160,11 @@ impl PopupMenu {
             PopupMenuItem {
                 label: s.track_album.into(),
                 action: PopupAction::ViewAlbum,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.track_artist.into(),
+                action: PopupAction::ViewArtist,
                 is_header: false,
             },
             PopupMenuItem {
@@ -277,8 +284,10 @@ pub enum Overlay {
     ThemePicker { selected: usize },
     /// Language picker.
     LanguagePicker { selected: usize },
-    /// Album detail view.
-    AlbumDetail,
+    /// Album detail view. `from_artist` is true when opened from the artist detail page.
+    AlbumDetail { from_artist: bool },
+    /// Artist detail view.
+    ArtistDetail,
     /// Playlist detail modal.
     PlaylistDetail { selected: usize },
     /// Waiting list (upcoming tracks in queue).
@@ -338,6 +347,10 @@ pub struct ViewState {
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
     pub album_detail_loading: bool,
+    pub artist_detail: Option<ArtistDetail>,
+    pub artist_detail_selected: usize,
+    pub artist_detail_loading: bool,
+    pub artist_detail_sub_tab: ArtistSubTab,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -426,6 +439,10 @@ impl ViewState {
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
             album_detail_loading: snap.album_detail_loading,
+            artist_detail: snap.artist_detail.clone(),
+            artist_detail_selected: snap.artist_detail_selected,
+            artist_detail_loading: snap.artist_detail_loading,
+            artist_detail_sub_tab: snap.artist_detail_sub_tab,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -491,6 +508,9 @@ impl ViewState {
         self.album_detail = snap.album_detail;
         // Don't overwrite album_detail_selected — it's managed client-side
         self.album_detail_loading = snap.album_detail_loading;
+        self.artist_detail = snap.artist_detail;
+        // Don't overwrite artist_detail_selected or sub_tab — managed client-side
+        self.artist_detail_loading = snap.artist_detail_loading;
         self.playlist_detail = snap.playlist_detail;
         // Don't overwrite playlist_detail selected — it's managed client-side via Overlay
         self.playlist_detail_loading = snap.playlist_detail_loading;
@@ -1079,8 +1099,13 @@ impl Client {
                 };
                 if let Some(item) = item {
                     if item.track.is_none() {
+                        if let Some(artist_id) = item.artist_id.clone() {
+                            self.view.overlay = Some(Overlay::ArtistDetail);
+                            self.view.artist_detail_selected = 0;
+                            return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
+                        }
                         if let Some(album_id) = item.album_id.clone() {
-                            self.view.overlay = Some(Overlay::AlbumDetail);
+                            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
                             self.view.album_detail_selected = 0;
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
@@ -1260,7 +1285,8 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            Overlay::AlbumDetail => self.handle_album_detail_key(key),
+            Overlay::AlbumDetail { .. } => self.handle_album_detail_key(key),
+            Overlay::ArtistDetail => self.handle_artist_detail_key(key),
             Overlay::PlaylistDetail { .. } => self.handle_playlist_detail_key(key),
             Overlay::WaitingList { .. } => self.handle_waiting_list_key(key),
             Overlay::ThemePicker { selected } => {
@@ -1385,9 +1411,17 @@ impl Client {
 
     /// Handle key events in the album detail overlay.
     fn handle_album_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        let from_artist = matches!(
+            self.view.overlay,
+            Some(Overlay::AlbumDetail { from_artist: true })
+        );
         match key.code {
             KeyCode::Esc => {
-                self.view.overlay = None;
+                if from_artist {
+                    self.view.overlay = Some(Overlay::ArtistDetail);
+                } else {
+                    self.view.overlay = None;
+                }
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1441,6 +1475,99 @@ impl Client {
         }
     }
 
+    /// Handle key events in the artist detail overlay.
+    fn handle_artist_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.view.overlay = None;
+                KeyAction::Continue
+            }
+            // Switch sub-tab with h/l
+            KeyCode::Char('h') | KeyCode::Left => {
+                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
+                self.view.artist_detail_selected = 0;
+                KeyAction::Continue
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.next();
+                self.view.artist_detail_selected = 0;
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.view.artist_detail_selected =
+                    self.view.artist_detail_selected.saturating_sub(1);
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let count = self.artist_detail_list_len();
+                if count > 0 {
+                    self.view.artist_detail_selected =
+                        (self.view.artist_detail_selected + 1).min(count - 1);
+                }
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                let sub_tab = self.view.artist_detail_sub_tab;
+                let index = self.view.artist_detail_selected;
+                if sub_tab == ArtistSubTab::TopTracks {
+                    KeyAction::SendCommand(Command::PlayFromArtist { index })
+                } else {
+                    // Open the album detail for the selected album entry
+                    if let Some(ref detail) = self.view.artist_detail {
+                        let albums = detail.albums_for_tab(sub_tab);
+                        if let Some(album) = albums.get(index) {
+                            let album_id = album.album_id.clone();
+                            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: true });
+                            self.view.album_detail_selected = 0;
+                            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
+                        }
+                    }
+                    KeyAction::Continue
+                }
+            }
+            KeyCode::Char('m') => {
+                if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                    if let Some(ref detail) = self.view.artist_detail {
+                        if let Some(track) = detail
+                            .top_tracks
+                            .get(self.view.artist_detail_selected)
+                            .cloned()
+                        {
+                            let is_fav = self.view.is_track_favorite(&track.track_id);
+                            self.view.popup = Some(PopupMenu::full(track, is_fav));
+                        }
+                    }
+                }
+                KeyAction::Continue
+            }
+            // Player controls still work
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Get the number of items in the current artist detail sub-tab list.
+    fn artist_detail_list_len(&self) -> usize {
+        if let Some(ref detail) = self.view.artist_detail {
+            match self.view.artist_detail_sub_tab {
+                ArtistSubTab::TopTracks => detail.top_tracks.len(),
+                other => detail.albums_for_tab(other).len(),
+            }
+        } else {
+            0
+        }
+    }
+
     /// Open the album detail overlay for the selected item.
     fn open_album_detail(&mut self) -> KeyAction {
         let item = match self.view.active_tab {
@@ -1454,7 +1581,7 @@ impl Client {
 
         // Try to get album_id from the DisplayItem directly (album search/favorites)
         if let Some(album_id) = item.and_then(|i| i.album_id.clone()) {
-            self.view.overlay = Some(Overlay::AlbumDetail);
+            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
             self.view.album_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
         }
@@ -1464,7 +1591,7 @@ impl Client {
             .and_then(|i| i.track.as_ref())
             .and_then(|t| t.album_id.clone())
         {
-            self.view.overlay = Some(Overlay::AlbumDetail);
+            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
             self.view.album_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
         }
@@ -1789,13 +1916,25 @@ impl Client {
                 if let Some(ref album_id) = track.album_id {
                     let album_id = album_id.clone();
                     self.view.popup = None;
-                    self.view.overlay = Some(Overlay::AlbumDetail);
+                    self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
                     self.view.album_detail_selected = 0;
                     KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
                 } else {
                     self.view.popup = None;
                     self.view.toast =
                         Some(Toast::new(t().no_album_info.into(), Duration::from_secs(2)));
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::ViewArtist => {
+                if let Some(ref artist_id) = track.artist_id {
+                    let artist_id = artist_id.clone();
+                    self.view.popup = None;
+                    self.view.overlay = Some(Overlay::ArtistDetail);
+                    self.view.artist_detail_selected = 0;
+                    KeyAction::SendCommand(Command::GetArtistDetail { artist_id })
+                } else {
+                    self.view.popup = None;
                     KeyAction::Continue
                 }
             }
