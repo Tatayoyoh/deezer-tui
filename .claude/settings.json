@@ -17,7 +17,12 @@
       "Bash(grep -E \"\\\\.\\(toml|yml|yaml\\)$|\\\\.circleci\")",
       "Bash(cargo fmt:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "WebFetch(domain:api.deezer.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(cargo search:*)"
     ]
   }
 }
