@@ -148,6 +148,7 @@ out of the box via WSLg/PulseAudio. Install `libasound2` in WSL.
 | Playback     | `rodio` (wraps `cpal`)    | Cross-platform audio output            |
 | Serialization| `serde`, `serde_json`     | API response parsing                   |
 | TUI          | `ratatui`, `crossterm`    | Terminal UI rendering                  |
+| Images       | `ratatui-image`, `image`  | Album/artist art (Sixel, Kitty, iTerm2, halfblocks) |
 | Config       | `directories`             | XDG/platform config paths              |
 | IPC          | `tokio::net::UnixStream`  | Daemon/client socket communication     |
 | Process      | `libc`                    | fork(), setsid(), dup2() (Unix only)   |
