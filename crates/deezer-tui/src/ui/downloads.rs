@@ -248,7 +248,7 @@ fn draw_albums_table(frame: &mut Frame, view: &ViewState, area: Rect) {
             .borders(Borders::NONE)
             .title(title)
             .title_style(Theme::title())
-            .title(ratatui::widgets::block::Title::from(hint).alignment(Alignment::Right)),
+            .title_top(Line::from(hint).alignment(Alignment::Right)),
     )
     .row_highlight_style(Theme::highlight())
     .highlight_symbol("> ");

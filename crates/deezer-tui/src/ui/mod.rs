@@ -18,7 +18,7 @@ use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
 
 /// Root draw function — dispatches to the correct screen.
-pub fn draw(frame: &mut Frame, view: &ViewState) {
+pub fn draw(frame: &mut Frame, view: &mut ViewState) {
     match view.screen {
         Screen::Login => login::draw(frame, view),
         Screen::Main => draw_main(frame, view),
@@ -26,7 +26,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
 }
 
 /// Draw the main screen with tabs + content + player bar.
-fn draw_main(frame: &mut Frame, view: &ViewState) {
+fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     let area = frame.area();
 
     // Full-screen themed background
@@ -108,8 +108,7 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
             format!(" {msg} "),
             Style::default().fg(Color::Cyan),
         )]);
-        block = block
-            .title(ratatui::widgets::block::Title::from(status_line).alignment(Alignment::Right));
+        block = block.title_top(status_line.alignment(Alignment::Right));
     }
 
     let tabs = Tabs::new(tab_titles)

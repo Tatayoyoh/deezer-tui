@@ -22,6 +22,9 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 arboard = "3"
+ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+reqwest = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

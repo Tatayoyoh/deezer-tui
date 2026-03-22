@@ -1,5 +1,6 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs, Wrap};
+use ratatui_image::StatefulImage;
 
 use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab};
 
@@ -8,7 +9,7 @@ use crate::i18n::t;
 use crate::theme::Theme;
 
 /// Draw the artist detail overlay (replaces the content area).
-pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
+pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     let s = t();
     if view.artist_detail_loading {
         let loading = Paragraph::new(Span::styled(s.loading_artist, Theme::dim()))
@@ -30,12 +31,13 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
-    draw_artist_info(frame, detail, columns[0]);
-    draw_right_panel(frame, detail, view, columns[1]);
+    let detail = detail.clone();
+    draw_artist_info(frame, &detail, view, columns[0]);
+    draw_right_panel(frame, &detail, view, columns[1]);
 }
 
-/// Draw the left column: artist art placeholder + metadata.
-fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, area: Rect) {
+/// Draw the left column: artist art + metadata.
+fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewState, area: Rect) {
     let s = t();
     let block = Block::default()
         .borders(Borders::RIGHT)
@@ -48,14 +50,19 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Art placeholder
+            Constraint::Length(12), // Art
             Constraint::Length(1),  // Spacer
             Constraint::Min(4),     // Metadata
         ])
         .split(inner);
 
-    // Artist art placeholder
-    draw_artist_art(frame, chunks[0]);
+    // Artist art: real image or placeholder
+    if let Some(ref mut proto) = view.cover_image {
+        let image_widget = StatefulImage::<ratatui_image::protocol::StatefulProtocol>::default();
+        frame.render_stateful_widget(image_widget, chunks[0], proto);
+    } else {
+        draw_artist_art(frame, chunks[0]);
+    }
 
     // Artist metadata
     let label_style = Style::default().fg(Theme::text_dim_color());
@@ -88,8 +95,8 @@ fn draw_artist_art(frame: &mut Frame, area: Rect) {
     let width = area.width.min(24);
     let height = area.height.min(12);
 
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let art_area = Rect::new(x, area.y, width, height);
+    // Align art to the left
+    let art_area = Rect::new(area.x, area.y, width, height);
 
     let primary = Theme::primary();
     let dim_color = Theme::text_dim_color();

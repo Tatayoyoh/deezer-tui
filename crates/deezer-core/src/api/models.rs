@@ -353,6 +353,7 @@ pub struct ArtistDetail {
     pub artist_id: String,
     pub name: String,
     pub nb_fan: u64,
+    pub picture_url: String,
     pub top_tracks: Vec<TrackData>,
     pub albums: Vec<ArtistAlbumEntry>,
 }

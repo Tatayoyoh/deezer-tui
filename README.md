@@ -30,25 +30,20 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 
 ## Features
 
-✅ background player, still playeing music [ctrl+z]<br>
-✅ login from browser/deezer.com link/backlink<br>
+✅ login through deezer.com<br>
+✅ background player with [ctrl+z]<br>
 ✅ search / favorites / radios pages<br>
 ✅ playing track context menu [ctrl+p]<br>
 ✅ focused track context menu [m]<br>
-⬜ Linux Gnome desktop integration (next, pause back, open deezer-tui, quit deezer-tui) <br>
-✅ Album page when entering an album or with [a] shortcut<br>
-⬜ Artist page (or popup) when entering an artiste <br>
-⬜ Track/album Miniature https://ratatui.rs/showcase/apps/#eilmeldung <br>
-✅ Display waiting list as modal <br>
-✅ shortcut modal <br>
-🔄 better UI <br>
-🔄 better shortcuts <br>
-✅ Contiuous Integration <br>
+✅ Album page ([a] shortcut)<br>
+✅ Artist page ([t] shortcut)<br>
+✅ Waiting list [w]<br>
+✅ shortcut modal [?]<br>
 ✅ global app menu [ctrl+o] <br>
 ✅ Themes, from official Deezer themes<br>
 ✅ Translations <br>
-✅ Offline mode <br>
-⬜ Auto update <br>
+✅ Offline mode with downloaded tracks<br>
+✅ Album/Artist miniature (require Kitty or Ghostty for real image display)<br>
 
 ![themes](assets/themes.gif)
 
