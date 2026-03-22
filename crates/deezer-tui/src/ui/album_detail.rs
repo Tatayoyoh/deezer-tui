@@ -1,5 +1,6 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
+use ratatui_image::StatefulImage;
 
 use deezer_core::api::models::AlbumDetail;
 
@@ -8,7 +9,7 @@ use crate::i18n::t;
 use crate::theme::Theme;
 
 /// Draw the album detail overlay (replaces the content area).
-pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
+pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     let s = t();
     if view.album_detail_loading {
         let loading = Paragraph::new(Span::styled(s.loading_album, Theme::dim()))
@@ -30,12 +31,13 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
-    draw_album_info(frame, detail, columns[0]);
-    draw_track_list(frame, detail, view.album_detail_selected, columns[1]);
+    let detail = detail.clone();
+    draw_album_info(frame, &detail, view, columns[0]);
+    draw_track_list(frame, &detail, view.album_detail_selected, columns[1]);
 }
 
-/// Draw the left column: album cover placeholder + metadata.
-fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
+/// Draw the left column: album cover + metadata.
+fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState, area: Rect) {
     let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(Theme::border())
@@ -47,14 +49,19 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Album art placeholder
+            Constraint::Length(12), // Album art
             Constraint::Length(1),  // Spacer
             Constraint::Min(6),     // Metadata
         ])
         .split(inner);
 
-    // Album art placeholder (pixel art)
-    draw_album_art(frame, chunks[0]);
+    // Album art: real image or placeholder
+    if let Some(ref mut proto) = view.cover_image {
+        let image_widget = StatefulImage::<ratatui_image::protocol::StatefulProtocol>::default();
+        frame.render_stateful_widget(image_widget, chunks[0], proto);
+    } else {
+        draw_album_art(frame, chunks[0]);
+    }
 
     // Album metadata
     draw_album_metadata(frame, detail, chunks[2]);
@@ -65,9 +72,8 @@ fn draw_album_art(frame: &mut Frame, area: Rect) {
     let width = area.width.min(24);
     let height = area.height.min(12);
 
-    // Center the art in the available area
-    let x = area.x + (area.width.saturating_sub(width)) / 2;
-    let art_area = Rect::new(x, area.y, width, height);
+    // Align art to the left
+    let art_area = Rect::new(area.x, area.y, width, height);
 
     let primary = Theme::primary();
     let dim_color = Theme::text_dim_color();

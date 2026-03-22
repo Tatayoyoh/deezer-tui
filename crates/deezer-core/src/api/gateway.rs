@@ -688,6 +688,12 @@ impl DeezerClient {
             .unwrap_or("")
             .to_string();
         let nb_fan = resp.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
+        let picture_url = resp
+            .get("picture_medium")
+            .or_else(|| resp.get("picture_small"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         // 2. Fetch top tracks
         let top_url = format!("https://api.deezer.com/artist/{}/top?limit=50", artist_id);
@@ -779,6 +785,7 @@ impl DeezerClient {
             artist_id: artist_id.to_string(),
             name,
             nb_fan,
+            picture_url,
             top_tracks,
             albums,
         })

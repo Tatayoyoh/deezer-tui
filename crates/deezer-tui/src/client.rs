@@ -13,8 +13,11 @@ use crossterm::terminal::{
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use ratatui::Terminal;
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
+use tokio::sync::mpsc;
 use tracing::debug;
 
 use deezer_core::api::models::{
@@ -372,6 +375,11 @@ pub struct ViewState {
     pub overlay: Option<Overlay>,
     pub toast: Option<Toast>,
 
+    // Cover art image (client-side only)
+    pub cover_image: Option<StatefulProtocol>,
+    /// URL of the currently loaded cover image (to avoid re-fetching).
+    pub cover_image_url: String,
+
     /// Button area set by the UI draw pass, used for mouse hit-testing.
     pub login_button_area: Cell<Option<Rect>>,
 }
@@ -462,6 +470,8 @@ impl ViewState {
             popup: None,
             overlay: None,
             toast: None,
+            cover_image: None,
+            cover_image_url: String::new(),
             login_button_area: Cell::new(None),
         }
     }
@@ -616,6 +626,9 @@ pub struct Client {
     view: ViewState,
     reader: BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: tokio::net::unix::OwnedWriteHalf,
+    picker: Picker,
+    image_tx: mpsc::UnboundedSender<(String, image::DynamicImage)>,
+    image_rx: mpsc::UnboundedReceiver<(String, image::DynamicImage)>,
 }
 
 impl Client {
@@ -624,11 +637,77 @@ impl Client {
         let stream = UnixStream::connect(&path).await?;
         let (read_half, write_half) = stream.into_split();
 
+        // Detect terminal graphics protocol (must happen before alternate screen)
+        let picker = Picker::from_query_stdio().unwrap_or_else(|_| Picker::halfblocks());
+
+        let (image_tx, image_rx) = mpsc::unbounded_channel();
+
         Ok(Self {
             view: ViewState::from_snapshot(&DaemonSnapshot::default()),
             reader: BufReader::new(read_half),
             writer: write_half,
+            picker,
+            image_tx,
+            image_rx,
         })
+    }
+
+    /// Get the current cover art URL from album/artist detail overlay.
+    fn current_cover_url(&self) -> Option<&str> {
+        if matches!(self.view.overlay, Some(Overlay::AlbumDetail { .. })) {
+            self.view
+                .album_detail
+                .as_ref()
+                .map(|d| d.cover_url.as_str())
+                .filter(|u| !u.is_empty())
+        } else if self.view.overlay == Some(Overlay::ArtistDetail) {
+            self.view
+                .artist_detail
+                .as_ref()
+                .map(|d| d.picture_url.as_str())
+                .filter(|u| !u.is_empty())
+        } else {
+            None
+        }
+    }
+
+    /// Trigger async image fetch if the cover URL changed.
+    fn maybe_fetch_cover_image(&mut self) {
+        let url = match self.current_cover_url() {
+            Some(u) => u.to_string(),
+            None => {
+                // No overlay or no URL — clear image
+                if self.view.cover_image.is_some() {
+                    self.view.cover_image = None;
+                    self.view.cover_image_url.clear();
+                }
+                return;
+            }
+        };
+
+        if url == self.view.cover_image_url {
+            return; // Already loaded or loading
+        }
+
+        // Mark as loading this URL (prevents re-triggering)
+        self.view.cover_image_url = url.clone();
+        self.view.cover_image = None;
+
+        let tx = self.image_tx.clone();
+        tokio::spawn(async move {
+            match reqwest::get(&url).await {
+                Ok(resp) => {
+                    if let Ok(bytes) = resp.bytes().await {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            let _ = tx.send((url, img));
+                        }
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to fetch cover image: {e}");
+                }
+            }
+        });
     }
 
     async fn send_cmd(&mut self, cmd: &Command) -> std::io::Result<()> {
@@ -673,7 +752,7 @@ impl Client {
             }
 
             terminal.draw(|frame| {
-                ui::draw(frame, &self.view);
+                ui::draw(frame, &mut self.view);
             })?;
 
             // Poll for input events (non-blocking with short timeout)
@@ -738,6 +817,9 @@ impl Client {
                         }
                     }
                 }
+
+                // Check if overlay changed (may need new cover image)
+                self.maybe_fetch_cover_image();
             }
 
             if !running {
@@ -753,6 +835,7 @@ impl Client {
             {
                 Ok(Ok(Some(ServerMessage::Snapshot(snap)))) => {
                     self.view.update_from_snapshot(snap);
+                    self.maybe_fetch_cover_image();
                 }
                 Ok(Ok(Some(ServerMessage::Error(err)))) => {
                     self.view.status_msg = Some(format!("Error: {err}"));
@@ -769,6 +852,14 @@ impl Client {
                 }
                 Err(_) => {
                     // Timeout — no data available, continue
+                }
+            }
+
+            // Check for completed image fetches
+            while let Ok((url, img)) = self.image_rx.try_recv() {
+                if url == self.view.cover_image_url {
+                    let proto = self.picker.new_resize_protocol(img);
+                    self.view.cover_image = Some(proto);
                 }
             }
         }
