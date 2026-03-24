@@ -81,5 +81,6 @@ To be honest, I am not a Rust developer :p. Rust was a good match for this proje
 * https://github.com/raziman18/gomu
 * https://github.com/dhulihan/grump
 * https://github.com/Kingtous/RustPlayer
+* https://github.com/Minuga-RC/deezer-tui
 
 
