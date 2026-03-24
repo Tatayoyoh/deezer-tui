@@ -10,7 +10,7 @@ pub mod radio;
 pub mod search;
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Tabs};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs};
 
 use crate::client::{Overlay, ViewState};
 use crate::i18n::t;
@@ -119,4 +119,20 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         .divider("|");
 
     frame.render_widget(tabs, area);
+
+    // Draw [Tab] hint on the same line as the tabs, aligned right
+    let hint_text = format!("[Tab] {} ", s.help_switch_tabs);
+    let hint_len = hint_text.len() as u16;
+    if area.width > hint_len {
+        let hint_area = Rect {
+            x: area.x + area.width - hint_len,
+            y: area.y + 1, // inner line where tabs are rendered
+            width: hint_len,
+            height: 1,
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(hint_text, Theme::dim())),
+            hint_area,
+        );
+    }
 }

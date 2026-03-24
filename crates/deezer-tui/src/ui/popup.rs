@@ -268,7 +268,7 @@ fn draw_help_overlay(frame: &mut Frame) {
     let s = t();
     let shortcuts: Vec<(&str, &str)> = vec![
         ("Tab / Shift+Tab", s.help_switch_tabs),
-        ("/ or Ctrl+F", s.help_search),
+        ("Ctrl+F or /", s.help_search),
         ("Enter", s.help_play_submit),
         ("Esc", s.help_settings_back),
         ("j/k or Up/Down", s.help_navigate_list),
