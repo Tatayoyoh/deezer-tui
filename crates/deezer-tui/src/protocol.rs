@@ -56,6 +56,14 @@ pub enum Command {
     AddFavorite { track_id: String },
     /// Remove a track from favorites.
     RemoveFavorite { track_id: String },
+    /// Add an artist to favorites.
+    AddFavoriteArtist { artist_id: String },
+    /// Remove an artist from favorites.
+    RemoveFavoriteArtist { artist_id: String },
+    /// Add an album to favorites.
+    AddFavoriteAlbum { album_id: String },
+    /// Remove an album from favorites.
+    RemoveFavoriteAlbum { album_id: String },
     /// Request the user's playlists (for playlist picker).
     RequestPlaylists,
     /// Add a track to a playlist.
@@ -339,6 +347,12 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
+    /// IDs of artists in the user's favorites.
+    #[serde(default)]
+    pub favorite_artist_ids: Vec<String>,
+    /// IDs of albums in the user's favorites.
+    #[serde(default)]
+    pub favorite_album_ids: Vec<String>,
 
     // Offline
     #[serde(default)]
@@ -435,6 +449,8 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            favorite_artist_ids: Vec::new(),
+            favorite_album_ids: Vec::new(),
             offline_category: OfflineCategory::default(),
             offline_tracks: Vec::new(),
             offline_albums: Vec::new(),
