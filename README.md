@@ -34,8 +34,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ login through deezer.com<br>
 ✅ background player with [ctrl+z]<br>
 ✅ search / favorites / radios pages<br>
-✅ playing track context menu [ctrl+p]<br>
-✅ focused track context menu [m]<br>
+✅ playing track context menu [ctrl+space]<br>
+✅ focused track context menu [x]<br>
 ✅ Album page ([a] shortcut)<br>
 ✅ Artist page ([t] shortcut)<br>
 ✅ Waiting list [w]<br>

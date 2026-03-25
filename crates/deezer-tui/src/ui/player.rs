@@ -99,6 +99,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
     let controls_left = Line::from(vec![
         Span::styled("  ", Theme::dim()),
+        Span::styled("[?]", Theme::text()),
+        Span::styled(format!(" {}  ", s.help), Theme::dim()),
         Span::styled("[Space]", Theme::text()),
         Span::styled(format!(" {}  ", s.play_pause), Theme::dim()),
         Span::styled("[n]", Theme::text()),
@@ -106,9 +108,6 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled("[b]", Theme::text()),
         Span::styled(format!(" {}  ", s.prev), Theme::dim()),
         Span::styled(format!("[s] {}", s.shuffle), shuffle_style),
-        Span::styled("  ", Theme::dim()),
-        Span::styled("[?]", Theme::text()),
-        Span::styled(format!(" {}", s.help), Theme::dim()),
     ]);
     let vol_label = format!("[+/-] {}: {vol_pct}% ", s.vol);
     let vol_width = vol_label.len() as u16;
