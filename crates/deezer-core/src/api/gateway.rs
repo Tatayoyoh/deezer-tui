@@ -532,6 +532,34 @@ impl DeezerClient {
         Ok(())
     }
 
+    /// Add an artist to the user's favorites.
+    pub async fn add_favorite_artist(&self, artist_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "ART_ID": artist_id });
+        self.gw_call("favorite_artist.add", params).await?;
+        Ok(())
+    }
+
+    /// Remove an artist from the user's favorites.
+    pub async fn remove_favorite_artist(&self, artist_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "ART_ID": artist_id });
+        self.gw_call("favorite_artist.remove", params).await?;
+        Ok(())
+    }
+
+    /// Add an album to the user's favorites.
+    pub async fn add_favorite_album(&self, album_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "ALB_ID": album_id });
+        self.gw_call("favorite_album.add", params).await?;
+        Ok(())
+    }
+
+    /// Remove an album from the user's favorites.
+    pub async fn remove_favorite_album(&self, album_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "ALB_ID": album_id });
+        self.gw_call("favorite_album.remove", params).await?;
+        Ok(())
+    }
+
     /// Add tracks to a playlist.
     pub async fn add_to_playlist(
         &self,

@@ -61,6 +61,8 @@ pub enum LoginMode {
 pub enum PopupAction {
     Header,
     ToggleFavorite,
+    ToggleFavoriteArtist,
+    ToggleFavoriteAlbum,
     AddToPlaylist,
     DownloadOffline,
     DislikeTrack,
@@ -71,6 +73,21 @@ pub enum PopupAction {
     TrackInfo,
     ViewAlbum,
     ViewArtist,
+}
+
+/// What the popup menu is operating on.
+#[derive(Debug, Clone)]
+pub enum PopupTarget {
+    Track(TrackData),
+    Artist {
+        artist_id: String,
+        name: String,
+    },
+    Album {
+        album_id: String,
+        title: String,
+        artist: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -95,13 +112,21 @@ pub struct PopupMenu {
     pub title: Option<String>,
     pub items: Vec<PopupMenuItem>,
     pub selected: usize,
-    pub track: TrackData,
+    pub target: PopupTarget,
     pub is_favorite: bool,
     pub sub_menu: Option<SubMenu>,
 }
 
 impl PopupMenu {
-    /// Build the full menu (for `m` key on a selected track in a list).
+    /// Get the track if this popup targets a track.
+    pub fn track(&self) -> Option<&TrackData> {
+        match &self.target {
+            PopupTarget::Track(t) => Some(t),
+            _ => None,
+        }
+    }
+
+    /// Build the full menu (for `x` key on a selected track in a list).
     fn full(track: TrackData, is_favorite: bool) -> Self {
         let s = t();
         let fav_label = if is_favorite {
@@ -185,7 +210,7 @@ impl PopupMenu {
             title: None,
             items,
             selected: 1, // First selectable item
-            track,
+            target: PopupTarget::Track(track),
             is_favorite,
             sub_menu: None,
         }
@@ -236,7 +261,81 @@ impl PopupMenu {
             title: Some(title),
             items,
             selected: 1,
-            track,
+            target: PopupTarget::Track(track),
+            is_favorite,
+            sub_menu: None,
+        }
+    }
+
+    /// Build a context menu for an artist item.
+    fn for_artist(artist_id: String, name: String, is_favorite: bool) -> Self {
+        let s = t();
+        let fav_label = if is_favorite {
+            s.remove_from_favorites
+        } else {
+            s.add_to_favorites
+        };
+        let items = vec![
+            PopupMenuItem {
+                label: s.menu_manage.into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: fav_label.into(),
+                action: PopupAction::ToggleFavoriteArtist,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.track_artist.into(),
+                action: PopupAction::ViewArtist,
+                is_header: false,
+            },
+        ];
+        Self {
+            title: Some(format!(" {} ", name)),
+            items,
+            selected: 1,
+            target: PopupTarget::Artist { artist_id, name },
+            is_favorite,
+            sub_menu: None,
+        }
+    }
+
+    /// Build a context menu for an album item.
+    fn for_album(album_id: String, title: String, artist: String, is_favorite: bool) -> Self {
+        let s = t();
+        let fav_label = if is_favorite {
+            s.remove_from_favorites
+        } else {
+            s.add_to_favorites
+        };
+        let items = vec![
+            PopupMenuItem {
+                label: s.menu_manage.into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: fav_label.into(),
+                action: PopupAction::ToggleFavoriteAlbum,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.track_album.into(),
+                action: PopupAction::ViewAlbum,
+                is_header: false,
+            },
+        ];
+        Self {
+            title: Some(format!(" {} — {} ", title, artist)),
+            items,
+            selected: 1,
+            target: PopupTarget::Album {
+                album_id,
+                title,
+                artist,
+            },
             is_favorite,
             sub_menu: None,
         }
@@ -334,6 +433,8 @@ pub struct ViewState {
     pub favorites_loading: bool,
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
+    pub favorite_artist_ids: Vec<String>,
+    pub favorite_album_ids: Vec<String>,
     pub offline_category: OfflineCategory,
     pub offline_tracks: Vec<OfflineTrack>,
     pub offline_albums: Vec<AlbumDetail>,
@@ -431,6 +532,8 @@ impl ViewState {
             favorites_loading: snap.favorites_loading,
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
+            favorite_artist_ids: snap.favorite_artist_ids.clone(),
+            favorite_album_ids: snap.favorite_album_ids.clone(),
             offline_category: snap.offline_category,
             offline_tracks: snap.offline_tracks.clone(),
             offline_albums: snap.offline_albums.clone(),
@@ -502,6 +605,8 @@ impl ViewState {
         self.favorites_loading = snap.favorites_loading;
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
+        self.favorite_artist_ids = snap.favorite_artist_ids;
+        self.favorite_album_ids = snap.favorite_album_ids;
         self.offline_category = snap.offline_category;
         self.offline_tracks = snap.offline_tracks;
         self.offline_albums = snap.offline_albums;
@@ -569,6 +674,16 @@ impl ViewState {
     /// Check if a track is in the user's favorites.
     fn is_track_favorite(&self, track_id: &str) -> bool {
         self.favorites.iter().any(|t| t.track_id == track_id)
+    }
+
+    /// Check if an artist is in the user's favorites.
+    fn is_artist_favorite(&self, artist_id: &str) -> bool {
+        self.favorite_artist_ids.iter().any(|id| id == artist_id)
+    }
+
+    /// Check if an album is in the user's favorites.
+    fn is_album_favorite(&self, album_id: &str) -> bool {
+        self.favorite_album_ids.iter().any(|id| id == album_id)
     }
 
     /// Apply the current filter text to the full radios list.
@@ -1118,7 +1233,7 @@ impl Client {
 
             // Open track context menu
             KeyCode::Char('x') => {
-                self.open_track_popup();
+                self.open_item_popup();
                 KeyAction::Continue
             }
 
@@ -1476,18 +1591,52 @@ impl Client {
         KeyAction::Continue
     }
 
-    fn open_track_popup(&mut self) {
-        let track = match self.view.active_tab {
+    fn open_item_popup(&mut self) {
+        // Try to get a DisplayItem from the current tab
+        let display_item = match self.view.active_tab {
             ActiveTab::Search => self
                 .view
                 .search_display
                 .get(self.view.search_selected)
-                .and_then(|d| d.track.clone()),
+                .cloned(),
             ActiveTab::Favorites => self
                 .view
                 .favorites_display
                 .get(self.view.favorites_selected)
-                .and_then(|d| d.track.clone()),
+                .cloned(),
+            _ => None,
+        };
+
+        // Check if the item is an artist or album (non-track item)
+        if let Some(ref item) = display_item {
+            if let Some(ref artist_id) = item.artist_id {
+                if item.track.is_none() {
+                    let is_fav = self.view.is_artist_favorite(artist_id);
+                    self.view.popup = Some(PopupMenu::for_artist(
+                        artist_id.clone(),
+                        item.col1.clone(),
+                        is_fav,
+                    ));
+                    return;
+                }
+            }
+            if let Some(ref album_id) = item.album_id {
+                if item.track.is_none() {
+                    let is_fav = self.view.is_album_favorite(album_id);
+                    self.view.popup = Some(PopupMenu::for_album(
+                        album_id.clone(),
+                        item.col1.clone(),
+                        item.col2.clone(),
+                        is_fav,
+                    ));
+                    return;
+                }
+            }
+        }
+
+        // Fall back to track popup
+        let track = match self.view.active_tab {
+            ActiveTab::Search | ActiveTab::Favorites => display_item.and_then(|d| d.track),
             ActiveTab::Downloads => match self.view.offline_category {
                 OfflineCategory::Tracks => self
                     .view
@@ -1898,6 +2047,9 @@ impl Client {
     fn handle_popup_key(&mut self, key: KeyEvent) -> KeyAction {
         let popup = self.view.popup.as_mut().unwrap();
 
+        // Pre-extract track_id for playlist picker (avoids borrow conflict)
+        let track_id_for_playlist = popup.track().map(|t| t.track_id.clone());
+
         // Handle playlist picker sub-menu
         if let Some(ref mut sub) = popup.sub_menu {
             match sub {
@@ -1929,12 +2081,14 @@ impl Client {
                         }
                         KeyCode::Enter => {
                             if let Some(pl) = playlists.get(*selected) {
-                                let cmd = Command::AddToPlaylist {
-                                    playlist_id: pl.playlist_id.clone(),
-                                    track_id: popup.track.track_id.clone(),
-                                };
-                                self.view.popup = None;
-                                return KeyAction::SendCommand(cmd);
+                                if let Some(ref track_id) = track_id_for_playlist {
+                                    let cmd = Command::AddToPlaylist {
+                                        playlist_id: pl.playlist_id.clone(),
+                                        track_id: track_id.clone(),
+                                    };
+                                    self.view.popup = None;
+                                    return KeyAction::SendCommand(cmd);
+                                }
                             }
                             return KeyAction::Continue;
                         }
@@ -1975,23 +2129,53 @@ impl Client {
     /// Execute a popup menu action.
     fn execute_popup_action(&mut self, action: PopupAction) -> KeyAction {
         let popup = self.view.popup.as_ref().unwrap();
-        let track = popup.track.clone();
+        let target = popup.target.clone();
         let is_favorite = popup.is_favorite;
 
         match action {
             PopupAction::Header => KeyAction::Continue,
             PopupAction::ToggleFavorite => {
-                let cmd = if is_favorite {
-                    Command::RemoveFavorite {
-                        track_id: track.track_id,
-                    }
+                if let PopupTarget::Track(track) = target {
+                    let cmd = if is_favorite {
+                        Command::RemoveFavorite {
+                            track_id: track.track_id,
+                        }
+                    } else {
+                        Command::AddFavorite {
+                            track_id: track.track_id,
+                        }
+                    };
+                    self.view.popup = None;
+                    KeyAction::SendCommand(cmd)
                 } else {
-                    Command::AddFavorite {
-                        track_id: track.track_id,
-                    }
-                };
-                self.view.popup = None;
-                KeyAction::SendCommand(cmd)
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::ToggleFavoriteArtist => {
+                if let PopupTarget::Artist { artist_id, .. } = target {
+                    let cmd = if is_favorite {
+                        Command::RemoveFavoriteArtist { artist_id }
+                    } else {
+                        Command::AddFavoriteArtist { artist_id }
+                    };
+                    self.view.popup = None;
+                    KeyAction::SendCommand(cmd)
+                } else {
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::ToggleFavoriteAlbum => {
+                if let PopupTarget::Album { album_id, .. } = target {
+                    let cmd = if is_favorite {
+                        Command::RemoveFavoriteAlbum { album_id }
+                    } else {
+                        Command::AddFavoriteAlbum { album_id }
+                    };
+                    self.view.popup = None;
+                    KeyAction::SendCommand(cmd)
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::AddToPlaylist => {
                 // Open playlist picker sub-menu
@@ -2019,31 +2203,61 @@ impl Client {
                 }
             }
             PopupAction::DownloadOffline => {
-                self.view.popup = None;
-                KeyAction::SendCommand(Command::DownloadOffline { track })
+                if let PopupTarget::Track(track) = target {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::DownloadOffline { track })
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::DislikeTrack => {
-                self.view.popup = None;
-                KeyAction::SendCommand(Command::DislikeTrack {
-                    track_id: track.track_id,
-                })
+                if let PopupTarget::Track(track) = target {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::DislikeTrack {
+                        track_id: track.track_id,
+                    })
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::PlayNext => {
-                self.view.popup = None;
-                KeyAction::SendCommand(Command::PlayNext { track })
+                if let PopupTarget::Track(track) = target {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::PlayNext { track })
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::AddToQueue => {
-                self.view.popup = None;
-                KeyAction::SendCommand(Command::AddToQueue { track })
+                if let PopupTarget::Track(track) = target {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::AddToQueue { track })
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::MixFromTrack => {
-                self.view.popup = None;
-                KeyAction::SendCommand(Command::StartMix {
-                    track_id: track.track_id,
-                })
+                if let PopupTarget::Track(track) = target {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::StartMix {
+                        track_id: track.track_id,
+                    })
+                } else {
+                    KeyAction::Continue
+                }
             }
             PopupAction::Share => {
-                let url = format!("https://www.deezer.com/track/{}", track.track_id);
+                let url = match &target {
+                    PopupTarget::Track(track) => {
+                        format!("https://www.deezer.com/track/{}", track.track_id)
+                    }
+                    PopupTarget::Artist { artist_id, .. } => {
+                        format!("https://www.deezer.com/artist/{artist_id}")
+                    }
+                    PopupTarget::Album { album_id, .. } => {
+                        format!("https://www.deezer.com/album/{album_id}")
+                    }
+                };
                 match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
                     Ok(()) => {
                         self.view.toast =
@@ -2066,8 +2280,12 @@ impl Client {
                 KeyAction::Continue
             }
             PopupAction::ViewAlbum => {
-                if let Some(ref album_id) = track.album_id {
-                    let album_id = album_id.clone();
+                let album_id = match &target {
+                    PopupTarget::Track(track) => track.album_id.clone(),
+                    PopupTarget::Album { album_id, .. } => Some(album_id.clone()),
+                    _ => None,
+                };
+                if let Some(album_id) = album_id {
                     self.view.popup = None;
                     self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
                     self.view.album_detail_selected = 0;
@@ -2080,8 +2298,12 @@ impl Client {
                 }
             }
             PopupAction::ViewArtist => {
-                if let Some(ref artist_id) = track.artist_id {
-                    let artist_id = artist_id.clone();
+                let artist_id = match &target {
+                    PopupTarget::Track(track) => track.artist_id.clone(),
+                    PopupTarget::Artist { artist_id, .. } => Some(artist_id.clone()),
+                    _ => None,
+                };
+                if let Some(artist_id) = artist_id {
                     self.view.popup = None;
                     self.view.overlay = Some(Overlay::ArtistDetail);
                     self.view.artist_detail_selected = 0;

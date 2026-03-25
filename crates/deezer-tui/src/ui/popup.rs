@@ -74,7 +74,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             selected,
             loading,
         }) => {
-            draw_playlist_picker(frame, playlists, *selected, *loading, &popup.track.title);
+            let picker_title = popup.track().map(|t| t.title.as_str()).unwrap_or("");
+            draw_playlist_picker(frame, playlists, *selected, *loading, picker_title);
         }
         Some(SubMenu::TrackInfo) => {
             draw_track_info(frame, popup);
@@ -96,7 +97,17 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
     let title = if let Some(ref t) = popup.title {
         format!(" {} ", t)
     } else {
-        format!(" {} — {} ", popup.track.title, popup.track.artist)
+        match &popup.target {
+            crate::client::PopupTarget::Track(track) => {
+                format!(" {} — {} ", track.title, track.artist)
+            }
+            crate::client::PopupTarget::Artist { name, .. } => {
+                format!(" {} ", name)
+            }
+            crate::client::PopupTarget::Album { title, artist, .. } => {
+                format!(" {} — {} ", title, artist)
+            }
+        }
     };
 
     let block = Block::default()
@@ -226,7 +237,9 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
     frame.render_widget(block, popup_area);
 
     let s = t();
-    let track = &popup.track;
+    let Some(track) = popup.track() else {
+        return;
+    };
     let dur = track.duration_secs();
 
     let info_lines = vec![
