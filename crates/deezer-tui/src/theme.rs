@@ -227,7 +227,7 @@ impl Theme {
     }
 
     pub fn tab_inactive_color() -> Color {
-        Self::text_dim_color()
+        Self::text_color()
     }
 
     // ── Style helpers (unchanged API) ────────────────────────────

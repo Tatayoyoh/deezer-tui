@@ -191,7 +191,7 @@ impl PopupMenu {
         }
     }
 
-    /// Build the manage-only menu (for `Ctrl+P` on currently playing track).
+    /// Build the manage-only menu (for `Ctrl+Space` on currently playing track).
     fn manage_only(track: TrackData, is_favorite: bool) -> Self {
         let s = t();
         let fav_label = if is_favorite {
@@ -280,7 +280,7 @@ impl PopupMenu {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Overlay {
     /// Keyboard shortcuts help screen.
-    Help,
+    Help { scroll: usize },
     /// Settings menu with selectable entries.
     Settings { selected: usize },
     /// Theme picker.
@@ -893,8 +893,8 @@ impl Client {
             && !self.view.radio_filter_typing
         {
             self.view.overlay = match self.view.overlay {
-                Some(Overlay::Help) => None,
-                _ => Some(Overlay::Help),
+                Some(Overlay::Help { .. }) => None,
+                _ => Some(Overlay::Help { scroll: 0 }),
             };
             return KeyAction::Continue;
         }
@@ -1020,6 +1020,15 @@ impl Client {
             return self.handle_popup_key(key);
         }
 
+        // Ctrl+Space: open manage popup for currently playing track (global)
+        if key.code == KeyCode::Char(' ') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(ref track) = self.view.current_track {
+                let is_fav = self.view.is_track_favorite(&track.track_id);
+                self.view.popup = Some(PopupMenu::manage_only(track.clone(), is_fav));
+            }
+            return KeyAction::Continue;
+        }
+
         // Overlay mode — intercept all keys
         if self.view.overlay.is_some() {
             return self.handle_overlay_key(key);
@@ -1078,15 +1087,6 @@ impl Client {
             }
         }
 
-        // Ctrl+P: open manage popup for currently playing track
-        if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(ref track) = self.view.current_track {
-                let is_fav = self.view.is_track_favorite(&track.track_id);
-                self.view.popup = Some(PopupMenu::manage_only(track.clone(), is_fav));
-            }
-            return KeyAction::Continue;
-        }
-
         // Ctrl+Q: quit (send Shutdown to daemon)
         if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return KeyAction::Quit;
@@ -1117,7 +1117,7 @@ impl Client {
             }
 
             // Open track context menu
-            KeyCode::Char('m') => {
+            KeyCode::Char('x') => {
                 self.open_track_popup();
                 KeyAction::Continue
             }
@@ -1289,10 +1289,19 @@ impl Client {
     fn handle_overlay_key(&mut self, key: KeyEvent) -> KeyAction {
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
-            Overlay::Help => {
+            Overlay::Help { scroll } => {
+                const HELP_ITEM_COUNT: usize = 30;
                 match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('?') => {
+                    KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.overlay = None;
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        if *scroll + 1 < HELP_ITEM_COUNT {
+                            *scroll += 1;
+                        }
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *scroll = scroll.saturating_sub(1);
                     }
                     _ => {}
                 }
@@ -1323,7 +1332,7 @@ impl Client {
                         match *selected {
                             0 => {
                                 // Keyboard shortcuts
-                                self.view.overlay = Some(Overlay::Help);
+                                self.view.overlay = Some(Overlay::Help { scroll: 0 });
                                 return KeyAction::Continue;
                             }
                             1 => {
@@ -1508,6 +1517,16 @@ impl Client {
 
     /// Handle key events in the album detail overlay.
     fn handle_album_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        // x: context menu for focused track
+        if key.code == KeyCode::Char('x') {
+            if let Some(ref detail) = self.view.album_detail {
+                if let Some(track) = detail.tracks.get(self.view.album_detail_selected).cloned() {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    self.view.popup = Some(PopupMenu::full(track, is_fav));
+                }
+            }
+            return KeyAction::Continue;
+        }
         let from_artist = matches!(
             self.view.overlay,
             Some(Overlay::AlbumDetail { from_artist: true })
@@ -1538,16 +1557,6 @@ impl Client {
                 let index = self.view.album_detail_selected;
                 KeyAction::SendCommand(Command::PlayFromAlbum { index })
             }
-            KeyCode::Char('m') => {
-                if let Some(ref detail) = self.view.album_detail {
-                    if let Some(track) = detail.tracks.get(self.view.album_detail_selected).cloned()
-                    {
-                        let is_fav = self.view.is_track_favorite(&track.track_id);
-                        self.view.popup = Some(PopupMenu::full(track, is_fav));
-                    }
-                }
-                KeyAction::Continue
-            }
             KeyCode::Char('t') => {
                 if let Some(ref detail) = self.view.album_detail {
                     if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
@@ -1561,7 +1570,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Char('o') => {
+            KeyCode::Char('d') => {
                 if let Some(ref detail) = self.view.album_detail {
                     let album_id = detail.album_id.clone();
                     KeyAction::SendCommand(Command::DownloadAlbumOffline { album_id })
@@ -1587,6 +1596,22 @@ impl Client {
 
     /// Handle key events in the artist detail overlay.
     fn handle_artist_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        // x: context menu for focused track
+        if key.code == KeyCode::Char('x') {
+            if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                if let Some(ref detail) = self.view.artist_detail {
+                    if let Some(track) = detail
+                        .top_tracks
+                        .get(self.view.artist_detail_selected)
+                        .cloned()
+                    {
+                        let is_fav = self.view.is_track_favorite(&track.track_id);
+                        self.view.popup = Some(PopupMenu::full(track, is_fav));
+                    }
+                }
+            }
+            return KeyAction::Continue;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.view.overlay = None;
@@ -1634,21 +1659,6 @@ impl Client {
                     }
                     KeyAction::Continue
                 }
-            }
-            KeyCode::Char('m') => {
-                if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
-                    if let Some(ref detail) = self.view.artist_detail {
-                        if let Some(track) = detail
-                            .top_tracks
-                            .get(self.view.artist_detail_selected)
-                            .cloned()
-                        {
-                            let is_fav = self.view.is_track_favorite(&track.track_id);
-                            self.view.popup = Some(PopupMenu::full(track, is_fav));
-                        }
-                    }
-                }
-                KeyAction::Continue
             }
             // Player controls still work
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
@@ -1747,6 +1757,21 @@ impl Client {
             _ => return KeyAction::Continue,
         };
 
+        // x: context menu for focused track
+        if key.code == KeyCode::Char('x') {
+            if let Some(track) = self
+                .view
+                .playlist_detail
+                .as_ref()
+                .and_then(|d| d.tracks.get(selected))
+                .cloned()
+            {
+                let is_fav = self.view.is_track_favorite(&track.track_id);
+                self.view.popup = Some(PopupMenu::full(track, is_fav));
+            }
+            return KeyAction::Continue;
+        }
+
         let track_count = self
             .view
             .playlist_detail
@@ -1771,20 +1796,6 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
-            // Context menu for selected track
-            KeyCode::Char('m') => {
-                if let Some(track) = self
-                    .view
-                    .playlist_detail
-                    .as_ref()
-                    .and_then(|d| d.tracks.get(selected))
-                    .cloned()
-                {
-                    let is_fav = self.view.is_track_favorite(&track.track_id);
-                    self.view.popup = Some(PopupMenu::full(track, is_fav));
-                }
-                KeyAction::Continue
-            }
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
@@ -1807,6 +1818,15 @@ impl Client {
             Some(Overlay::WaitingList { selected }) => selected,
             _ => return KeyAction::Continue,
         };
+
+        // x: context menu for focused track
+        if key.code == KeyCode::Char('x') {
+            if let Some(track) = self.view.queue.get(selected).cloned() {
+                let is_fav = self.view.is_track_favorite(&track.track_id);
+                self.view.popup = Some(PopupMenu::full(track, is_fav));
+            }
+            return KeyAction::Continue;
+        }
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('w') => {
@@ -1855,14 +1875,6 @@ impl Client {
                         }
                     };
                     return KeyAction::SendCommand(cmd);
-                }
-                KeyAction::Continue
-            }
-            // Open full context menu for selected track
-            KeyCode::Char('m') => {
-                if let Some(track) = self.view.queue.get(selected).cloned() {
-                    let is_fav = self.view.is_track_favorite(&track.track_id);
-                    self.view.popup = Some(PopupMenu::full(track, is_fav));
                 }
                 KeyAction::Continue
             }

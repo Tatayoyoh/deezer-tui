@@ -1,6 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+    ScrollbarOrientation, ScrollbarState, Table, TableState,
 };
 
 use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
@@ -23,8 +24,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
 
     // Overlays take priority over track popups
     match &view.overlay {
-        Some(Overlay::Help) => {
-            draw_help_overlay(frame);
+        Some(Overlay::Help { scroll }) => {
+            draw_help_overlay(frame, *scroll);
             return;
         }
         Some(Overlay::Settings { selected }) => {
@@ -263,38 +264,47 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
     frame.render_widget(paragraph, inner);
 }
 
-/// Draw the help overlay showing all keyboard shortcuts.
-fn draw_help_overlay(frame: &mut Frame) {
+/// Draw the help overlay showing all keyboard shortcuts grouped by section.
+fn draw_help_overlay(frame: &mut Frame, scroll: usize) {
     let s = t();
-    let shortcuts: Vec<(&str, &str)> = vec![
-        ("Tab / Shift+Tab", s.help_switch_tabs),
-        ("Ctrl+F or /", s.help_search),
-        ("Enter", s.help_play_submit),
-        ("Esc", s.help_settings_back),
-        ("j/k or Up/Down", s.help_navigate_list),
-        ("h/l or Left/Right", s.help_navigate_categories),
-        ("Space", s.help_play_pause),
-        ("n", s.help_next_track),
-        ("b", s.help_prev_track),
-        ("s", s.help_toggle_shuffle),
-        ("r", s.help_cycle_repeat),
-        ("+/-", s.help_volume),
-        ("a", s.help_album_detail),
-        ("t", s.help_artist_detail),
-        ("w", s.help_waiting_list),
-        ("m", s.help_context_menu),
-        ("Ctrl+P", s.help_playing_menu),
-        ("g", s.help_shuffle_favorites),
-        ("?", s.help_this_help),
-        ("Ctrl+O", s.help_settings),
-        ("i", s.help_info),
-        ("q", s.help_quit),
-        ("Ctrl+Z", s.help_detach),
+    // (Option<key>, label) — None key = section header
+    let shortcuts: Vec<(Option<&str>, &str)> = vec![
+        // Navigation
+        (None, s.help_section_navigation),
+        (Some("Tab / Shift+Tab"), s.help_switch_tabs),
+        (Some("Ctrl+F or /"), s.help_search),
+        (Some("Enter"), s.help_play_submit),
+        (Some("Esc"), s.help_settings_back),
+        (Some("j/k or Up/Down"), s.help_navigate_list),
+        (Some("h/l or Left/Right"), s.help_navigate_categories),
+        // Playback
+        (None, s.help_section_playback),
+        (Some("Space"), s.help_play_pause),
+        (Some("n"), s.help_next_track),
+        (Some("b"), s.help_prev_track),
+        (Some("s"), s.help_toggle_shuffle),
+        (Some("r"), s.help_cycle_repeat),
+        (Some("+/-"), s.help_volume),
+        // Menus
+        (None, s.help_section_menus),
+        (Some("a"), s.help_album_detail),
+        (Some("t"), s.help_artist_detail),
+        (Some("w"), s.help_waiting_list),
+        (Some("x"), s.help_context_menu),
+        (Some("Ctrl+Space"), s.help_playing_menu),
+        (Some("?"), s.help_this_help),
+        (Some("Ctrl+O"), s.help_settings),
+        (Some("i"), s.help_info),
+        // Actions
+        (None, s.help_section_actions),
+        (Some("g"), s.help_shuffle_favorites),
+        (Some("Ctrl+Q"), s.help_quit),
+        (Some("Ctrl+Z"), s.help_detach),
     ];
 
     let area = frame.area();
-    let height = shortcuts.len() as u16 + 4;
-    let popup_area = centered_rect(60, height, area);
+    let ideal_height = shortcuts.len() as u16 + 4;
+    let popup_area = centered_rect(60, ideal_height, area);
 
     frame.render_widget(Clear, popup_area);
 
@@ -310,21 +320,36 @@ fn draw_help_overlay(frame: &mut Frame) {
 
     let items: Vec<ListItem> = shortcuts
         .iter()
-        .map(|(key, desc)| {
-            ListItem::new(Line::from(vec![
+        .map(|(key, desc)| match key {
+            Some(k) => ListItem::new(Line::from(vec![
                 Span::styled(
-                    format!("  {:<22}", key),
+                    format!("  {:<22}", k),
                     Style::default()
                         .fg(Theme::primary())
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(*desc, Theme::text()),
-            ]))
+            ])),
+            None => ListItem::new(Line::from(Span::styled(
+                format!("  {}", desc),
+                Theme::dim(),
+            ))),
         })
         .collect();
 
+    let item_count = items.len();
+    let mut state = ListState::default().with_offset(scroll);
     let list = List::new(items);
-    frame.render_widget(list, inner);
+    frame.render_stateful_widget(list, inner, &mut state);
+
+    // Scrollbar (only when content overflows)
+    if item_count as u16 > inner.height {
+        let mut scrollbar_state =
+            ScrollbarState::new(item_count.saturating_sub(inner.height as usize)).position(scroll);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Theme::primary()));
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
 }
 
 /// Draw the application info modal.
@@ -685,7 +710,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         ),
         Span::styled(s.hint_play, Theme::dim()),
         Span::styled(
-            "m",
+            "x",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),
@@ -819,7 +844,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         ),
         Span::styled(s.hint_favorite, Theme::dim()),
         Span::styled(
-            "m",
+            "x",
             Style::default()
                 .fg(Theme::primary())
                 .add_modifier(Modifier::BOLD),

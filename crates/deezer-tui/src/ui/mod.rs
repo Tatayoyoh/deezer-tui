@@ -101,7 +101,7 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         .borders(Borders::BOTTOM)
         .border_style(Theme::border())
         .title(header_title)
-        .title_style(Theme::title());
+        .title_style(Theme::dim());
 
     if let Some(ref msg) = view.status_msg {
         let status_line = Line::from(vec![Span::styled(

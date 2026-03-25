@@ -161,12 +161,7 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
     lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
     lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
     lines.push(Line::from(vec![
-        Span::styled(
-            "o",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("[d]", Theme::dim()),
         Span::styled(s.hint_download_album, Theme::dim()),
     ]));
 
