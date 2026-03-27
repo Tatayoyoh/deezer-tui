@@ -717,7 +717,8 @@ impl DeezerClient {
             .to_string();
         let nb_fan = resp.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
         let picture_url = resp
-            .get("picture_medium")
+            .get("picture_big")
+            .or_else(|| resp.get("picture_medium"))
             .or_else(|| resp.get("picture_small"))
             .and_then(|v| v.as_str())
             .unwrap_or("")

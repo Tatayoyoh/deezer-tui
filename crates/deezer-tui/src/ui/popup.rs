@@ -15,10 +15,13 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
         draw_toast(frame, &toast.message);
     }
 
+    // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it)
+    let is_detail_overlay = matches!(
+        view.overlay,
+        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
+    );
     let has_modal = view.overlay.is_some() || view.popup.is_some();
-
-    // Dim backdrop behind modals
-    if has_modal {
+    if has_modal && !is_detail_overlay {
         draw_backdrop(frame);
     }
 
