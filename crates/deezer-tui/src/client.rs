@@ -1544,7 +1544,7 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 4;
+                const SETTINGS_COUNT: usize = 6;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.overlay = None;
@@ -1582,6 +1582,14 @@ impl Client {
                                 // Logout
                                 self.view.overlay = None;
                                 return KeyAction::SendCommand(Command::Logout);
+                            }
+                            4 => {
+                                // Send to background
+                                return KeyAction::Detach;
+                            }
+                            5 => {
+                                // Quit
+                                return KeyAction::Quit;
                             }
                             _ => {}
                         }
