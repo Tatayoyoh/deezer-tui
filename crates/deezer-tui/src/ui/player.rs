@@ -83,7 +83,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .bg(Theme::progress_bg()),
         )
         .ratio(ratio)
-        .label(Span::styled(time_label, Theme::text()));
+        .label(time_label);
 
     frame.render_widget(progress, chunks[1]);
 
