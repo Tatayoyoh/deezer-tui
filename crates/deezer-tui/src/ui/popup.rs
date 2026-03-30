@@ -434,11 +434,13 @@ fn draw_info_overlay(frame: &mut Frame) {
 /// Draw the settings overlay with selectable entries.
 fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let s = t();
-    let entries = [
-        s.settings_shortcuts,
-        s.settings_themes,
-        s.settings_language,
-        s.settings_logout,
+    let entries: &[(&str, &str)] = &[
+        (s.settings_shortcuts, "[?]"),
+        (s.settings_themes, ""),
+        (s.settings_language, ""),
+        (s.settings_logout, ""),
+        (s.settings_background, "[Ctrl+Z]"),
+        (s.settings_quit, "[Ctrl+Q]"),
     ];
 
     let area = frame.area();
@@ -460,16 +462,27 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let items: Vec<ListItem> = entries
         .iter()
         .enumerate()
-        .map(|(i, entry)| {
+        .map(|(i, (label, shortcut))| {
             let prefix = if i == selected { " > " } else { "   " };
-            ListItem::new(Line::from(Span::styled(
-                format!("{}{}", prefix, entry),
-                if i == selected {
-                    Theme::highlight()
-                } else {
-                    Theme::text()
-                },
-            )))
+            let style = if i == selected {
+                Theme::highlight()
+            } else {
+                Theme::text()
+            };
+            if shortcut.is_empty() {
+                ListItem::new(Line::from(Span::styled(format!("{prefix}{label}"), style)))
+            } else {
+                let text_part = format!("{prefix}{label}");
+                let pad = inner
+                    .width
+                    .saturating_sub(text_part.len() as u16 + shortcut.len() as u16)
+                    as usize;
+                ListItem::new(Line::from(vec![
+                    Span::styled(text_part, style),
+                    Span::styled(" ".repeat(pad), style),
+                    Span::styled(*shortcut, if i == selected { style } else { Theme::dim() }),
+                ]))
+            }
         })
         .collect();
 

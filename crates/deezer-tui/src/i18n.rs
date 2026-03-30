@@ -160,6 +160,8 @@ pub struct Strings {
     pub settings_themes: &'static str,
     pub settings_language: &'static str,
     pub settings_logout: &'static str,
+    pub settings_background: &'static str,
+    pub settings_quit: &'static str,
 
     // --- About modal ---
     pub about_title: &'static str,
@@ -576,11 +578,13 @@ static EN: Strings = Strings {
     help_detach: "Detach (keep playing)",
     help_info: "Application info",
 
-    settings: " Settings ",
+    settings: " Menu ",
     settings_shortcuts: "Keyboard shortcuts",
     settings_themes: "Themes",
     settings_language: "Language",
     settings_logout: "Logout",
+    settings_background: "Send to background",
+    settings_quit: "Quit",
 
     about_title: " About Deezer TUI ",
     about_version: "Version",
@@ -805,11 +809,13 @@ static FR: Strings = Strings {
     help_detach: "Détacher (continuer la lecture)",
     help_info: "Infos application",
 
-    settings: " Paramètres ",
+    settings: " Menu ",
     settings_shortcuts: "Raccourcis clavier",
     settings_themes: "Thèmes",
     settings_language: "Langue",
     settings_logout: "Déconnexion",
+    settings_background: "Mettre en arrière-plan",
+    settings_quit: "Quitter",
 
     about_title: " À propos de Deezer TUI ",
     about_version: "Version",
@@ -1033,11 +1039,13 @@ static ES: Strings = Strings {
     help_detach: "Desacoplar (seguir reproduciendo)",
     help_info: "Info de la aplicación",
 
-    settings: " Ajustes ",
+    settings: " Menu ",
     settings_shortcuts: "Atajos de teclado",
     settings_themes: "Temas",
     settings_language: "Idioma",
     settings_logout: "Cerrar sesión",
+    settings_background: "Enviar al fondo",
+    settings_quit: "Salir",
 
     about_title: " Acerca de Deezer TUI ",
     about_version: "Versión",
@@ -1261,11 +1269,13 @@ static PT: Strings = Strings {
     help_detach: "Desanexar (continuar tocando)",
     help_info: "Info do aplicativo",
 
-    settings: " Configurações ",
+    settings: " Menu ",
     settings_shortcuts: "Atalhos do teclado",
     settings_themes: "Temas",
     settings_language: "Idioma",
     settings_logout: "Sair",
+    settings_background: "Enviar para segundo plano",
+    settings_quit: "Sair do aplicativo",
 
     about_title: " Sobre Deezer TUI ",
     about_version: "Versão",
@@ -1489,11 +1499,13 @@ static DE: Strings = Strings {
     help_detach: "Trennen (weiterspielen)",
     help_info: "App-Informationen",
 
-    settings: " Einstellungen ",
+    settings: " Menu ",
     settings_shortcuts: "Tastenkürzel",
     settings_themes: "Themen",
     settings_language: "Sprache",
     settings_logout: "Abmelden",
+    settings_background: "In den Hintergrund senden",
+    settings_quit: "Beenden",
 
     about_title: " Über Deezer TUI ",
     about_version: "Version",
