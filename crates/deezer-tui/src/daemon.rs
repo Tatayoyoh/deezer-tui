@@ -146,6 +146,10 @@ pub struct Daemon {
     playlist_detail_selected: usize,
     playlist_detail_loading: bool,
 
+    // Navigation overlay stack (persisted across client reconnections)
+    nav_overlay: Option<crate::protocol::NavOverlay>,
+    nav_overlay_stack: Vec<crate::protocol::NavOverlay>,
+
     // Player
     player_state: Arc<Mutex<PlayerState>>,
     client: Arc<tokio::sync::Mutex<DeezerClient>>,
@@ -248,6 +252,9 @@ impl Daemon {
             playlist_detail: None,
             playlist_detail_selected: 0,
             playlist_detail_loading: false,
+
+            nav_overlay: None,
+            nav_overlay_stack: Vec::new(),
 
             player_state: Arc::new(Mutex::new(PlayerState::default())),
 
@@ -756,6 +763,8 @@ impl Daemon {
                 self.favorites_display.clear();
                 self.radios.clear();
                 self.playlists.clear();
+                self.nav_overlay = None;
+                self.nav_overlay_stack.clear();
                 self.status_msg = None;
                 self.login_error = None;
                 self.login_loading = false;
@@ -819,6 +828,19 @@ impl Daemon {
                         self.start_play_offline_track(track);
                     }
                 }
+            }
+            Command::PushNavOverlay(nav) => {
+                if let Some(current) = self.nav_overlay.take() {
+                    self.nav_overlay_stack.push(current);
+                }
+                self.nav_overlay = Some(nav);
+            }
+            Command::PopNavOverlay => {
+                self.nav_overlay = self.nav_overlay_stack.pop();
+            }
+            Command::ClearNavOverlayStack => {
+                self.nav_overlay = None;
+                self.nav_overlay_stack.clear();
             }
             Command::Shutdown => {
                 // Handled in the main loop
@@ -886,6 +908,8 @@ impl Daemon {
             playlist_detail: self.playlist_detail.clone(),
             playlist_detail_selected: self.playlist_detail_selected,
             playlist_detail_loading: self.playlist_detail_loading,
+            nav_overlay: self.nav_overlay.clone(),
+            nav_overlay_stack: self.nav_overlay_stack.clone(),
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,

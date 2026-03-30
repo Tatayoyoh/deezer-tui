@@ -116,8 +116,24 @@ pub enum Command {
         album_id: String,
         track_index: usize,
     },
+    /// Push a navigation overlay onto the daemon-side stack.
+    PushNavOverlay(NavOverlay),
+    /// Pop the top navigation overlay from the daemon-side stack.
+    PopNavOverlay,
+    /// Clear the entire navigation overlay stack (e.g. when entering a new top-level detail).
+    ClearNavOverlayStack,
     /// Graceful shutdown — daemon exits.
     Shutdown,
+}
+
+/// Navigation overlays that are persisted in the daemon across client reconnections.
+/// Only content-detail views that correspond to loaded daemon data belong here.
+/// Pure UI overlays (Help, Settings, WaitingList, etc.) stay client-side only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NavOverlay {
+    ArtistDetail,
+    AlbumDetail { from_artist: bool },
+    PlaylistDetail,
 }
 
 /// Messages sent from the daemon to the TUI client.
@@ -407,6 +423,12 @@ pub struct DaemonSnapshot {
     #[serde(default)]
     pub playlist_detail_loading: bool,
 
+    // Navigation overlay stack (persisted across reconnections)
+    #[serde(default)]
+    pub nav_overlay: Option<NavOverlay>,
+    #[serde(default)]
+    pub nav_overlay_stack: Vec<NavOverlay>,
+
     // UI hints
     #[serde(default)]
     pub status_msg: Option<String>,
@@ -471,6 +493,8 @@ impl Default for DaemonSnapshot {
             playlist_detail: None,
             playlist_detail_selected: 0,
             playlist_detail_loading: false,
+            nav_overlay: None,
+            nav_overlay_stack: Vec::new(),
             status_msg: None,
             login_error: None,
             login_loading: false,
