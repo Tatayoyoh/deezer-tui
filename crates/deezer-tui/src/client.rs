@@ -1130,6 +1130,11 @@ impl Client {
     }
 
     fn handle_main_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Ctrl+Q: quit from anywhere (send Shutdown to daemon)
+        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::Quit;
+        }
+
         // Popup mode takes priority over overlays (popups can open on top of overlays)
         if self.view.popup.is_some() {
             return self.handle_popup_key(key);
@@ -1200,11 +1205,6 @@ impl Client {
                 }
                 _ => return KeyAction::Continue,
             }
-        }
-
-        // Ctrl+Q: quit (send Shutdown to daemon)
-        if key.code == KeyCode::Char('q') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            return KeyAction::Quit;
         }
 
         // Normal mode
