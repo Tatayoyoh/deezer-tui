@@ -31,8 +31,8 @@ use crate::i18n::{self, t, Locale};
 use deezer_core::offline::OfflineTrack;
 
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, OfflineCategory,
-    RadioItem, Screen, SearchCategory, ServerMessage,
+    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, NavOverlay,
+    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -398,6 +398,31 @@ pub enum Overlay {
     Info,
 }
 
+impl NavOverlay {
+    /// Convert a daemon-side NavOverlay into a client-side Overlay.
+    fn to_overlay(self) -> Overlay {
+        match self {
+            NavOverlay::ArtistDetail => Overlay::ArtistDetail,
+            NavOverlay::AlbumDetail { from_artist } => Overlay::AlbumDetail { from_artist },
+            NavOverlay::PlaylistDetail => Overlay::PlaylistDetail { selected: 0 },
+        }
+    }
+}
+
+impl Overlay {
+    /// Convert a client-side Overlay to a daemon-side NavOverlay (if applicable).
+    fn to_nav(&self) -> Option<NavOverlay> {
+        match self {
+            Overlay::ArtistDetail => Some(NavOverlay::ArtistDetail),
+            Overlay::AlbumDetail { from_artist } => Some(NavOverlay::AlbumDetail {
+                from_artist: *from_artist,
+            }),
+            Overlay::PlaylistDetail { .. } => Some(NavOverlay::PlaylistDetail),
+            _ => None,
+        }
+    }
+}
+
 /// An item in the offline albums tree view.
 #[derive(Debug, Clone)]
 pub enum OfflineTreeItem {
@@ -474,6 +499,10 @@ pub struct ViewState {
     pub login_cursor: usize,
     pub popup: Option<PopupMenu>,
     pub overlay: Option<Overlay>,
+    /// Navigation history stack for overlays (Esc pops back).
+    pub overlay_stack: Vec<Overlay>,
+    /// Pending navigation commands to send to daemon (queued by overlay changes).
+    pub nav_commands: Vec<Command>,
     pub toast: Option<Toast>,
 
     // Cover art image (client-side only)
@@ -571,11 +600,69 @@ impl ViewState {
             login_input: String::new(),
             login_cursor: 0,
             popup: None,
-            overlay: None,
+            overlay: snap.nav_overlay.clone().map(|n| n.to_overlay()),
+            overlay_stack: snap
+                .nav_overlay_stack
+                .iter()
+                .cloned()
+                .map(|n| n.to_overlay())
+                .collect(),
+            nav_commands: Vec::new(),
             toast: None,
             cover_image: None,
             cover_image_url: String::new(),
             login_button_area: Cell::new(None),
+        }
+    }
+
+    /// Push current overlay onto the stack and navigate to a new one.
+    /// Also queues the corresponding daemon nav command if it's a nav overlay.
+    fn push_overlay(&mut self, new: Overlay) {
+        if let Some(nav) = new.to_nav() {
+            self.nav_commands.push(Command::PushNavOverlay(nav));
+        }
+        if let Some(current) = self.overlay.take() {
+            self.overlay_stack.push(current);
+        }
+        self.overlay = Some(new);
+    }
+
+    /// Pop back to the previous overlay (or None if stack is empty).
+    /// Only sends daemon nav command if the current overlay is a nav type.
+    fn pop_overlay(&mut self) {
+        if self.overlay.as_ref().and_then(|o| o.to_nav()).is_some() {
+            self.nav_commands.push(Command::PopNavOverlay);
+        }
+        self.overlay = self.overlay_stack.pop();
+    }
+
+    /// Set a nav overlay as the top-level (clear stack first).
+    /// Used when entering a detail view from the main content area.
+    fn set_nav_overlay(&mut self, new: Overlay) {
+        self.overlay_stack.clear();
+        self.overlay = Some(new.clone());
+        if let Some(nav) = new.to_nav() {
+            self.nav_commands.push(Command::ClearNavOverlayStack);
+            self.nav_commands.push(Command::PushNavOverlay(nav));
+        }
+    }
+
+    /// Clear all overlays (nav + UI).
+    fn clear_overlays(&mut self) {
+        self.overlay = None;
+        self.overlay_stack.clear();
+        self.nav_commands.push(Command::ClearNavOverlayStack);
+    }
+
+    /// Returns true if the current overlay is a navigation overlay (or None).
+    /// Used to decide whether to sync from daemon nav state.
+    fn is_nav_or_none_overlay(&self) -> bool {
+        match &self.overlay {
+            None => true,
+            Some(Overlay::ArtistDetail)
+            | Some(Overlay::AlbumDetail { .. })
+            | Some(Overlay::PlaylistDetail { .. }) => true,
+            _ => false,
         }
     }
 
@@ -629,6 +716,17 @@ impl ViewState {
         self.playlist_detail = snap.playlist_detail;
         // Don't overwrite playlist_detail selected — it's managed client-side via Overlay
         self.playlist_detail_loading = snap.playlist_detail_loading;
+
+        // Restore navigation overlay from daemon state.
+        // Only apply if the current overlay is a nav type or None (don't clobber UI overlays).
+        if self.is_nav_or_none_overlay() {
+            self.overlay = snap.nav_overlay.map(|n| n.to_overlay());
+            self.overlay_stack = snap
+                .nav_overlay_stack
+                .into_iter()
+                .map(|n| n.to_overlay())
+                .collect();
+        }
         self.status_msg = snap.status_msg;
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
@@ -665,6 +763,7 @@ impl ViewState {
             self.login_input.clear();
             self.login_cursor = 0;
             self.overlay = None;
+            self.overlay_stack.clear();
             self.popup = None;
             self.radio_filter_input.clear();
             self.radio_filter_typing = false;
@@ -935,6 +1034,17 @@ impl Client {
 
                 // Check if overlay changed (may need new cover image)
                 self.maybe_fetch_cover_image();
+            }
+
+            // Send any queued navigation overlay commands to the daemon
+            let nav_cmds: Vec<Command> = self.view.nav_commands.drain(..).collect();
+            for cmd in &nav_cmds {
+                if let Err(e) = self.send_cmd(cmd).await {
+                    debug!("Send nav command error: {e}");
+                    self.view.status_msg = Some(t().daemon_disconnected.into());
+                    running = false;
+                    break;
+                }
             }
 
             if !running {
@@ -1312,17 +1422,19 @@ impl Client {
                 if let Some(item) = item {
                     if item.track.is_none() {
                         if let Some(artist_id) = item.artist_id.clone() {
-                            self.view.overlay = Some(Overlay::ArtistDetail);
+                            self.view.set_nav_overlay(Overlay::ArtistDetail);
                             self.view.artist_detail_selected = 0;
                             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
                         }
                         if let Some(album_id) = item.album_id.clone() {
-                            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
+                            self.view
+                                .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
                             self.view.album_detail_selected = 0;
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
                         if let Some(playlist_id) = item.playlist_id.clone() {
-                            self.view.overlay = Some(Overlay::PlaylistDetail { selected: 0 });
+                            self.view
+                                .set_nav_overlay(Overlay::PlaylistDetail { selected: 0 });
                             return KeyAction::SendCommand(Command::GetPlaylistDetail {
                                 playlist_id,
                             });
@@ -1676,17 +1788,9 @@ impl Client {
             }
             return KeyAction::Continue;
         }
-        let from_artist = matches!(
-            self.view.overlay,
-            Some(Overlay::AlbumDetail { from_artist: true })
-        );
         match key.code {
             KeyCode::Esc => {
-                if from_artist {
-                    self.view.overlay = Some(Overlay::ArtistDetail);
-                } else {
-                    self.view.overlay = None;
-                }
+                self.view.pop_overlay();
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1711,7 +1815,7 @@ impl Client {
                     if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
                         if let Some(ref artist_id) = track.artist_id {
                             let artist_id = artist_id.clone();
-                            self.view.overlay = Some(Overlay::ArtistDetail);
+                            self.view.push_overlay(Overlay::ArtistDetail);
                             self.view.artist_detail_selected = 0;
                             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
                         }
@@ -1763,7 +1867,7 @@ impl Client {
         }
         match key.code {
             KeyCode::Esc => {
-                self.view.overlay = None;
+                self.view.pop_overlay();
                 KeyAction::Continue
             }
             // Switch sub-tab with h/l
@@ -1801,7 +1905,8 @@ impl Client {
                         let albums = detail.albums_for_tab(sub_tab);
                         if let Some(album) = albums.get(index) {
                             let album_id = album.album_id.clone();
-                            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: true });
+                            self.view
+                                .push_overlay(Overlay::AlbumDetail { from_artist: false });
                             self.view.album_detail_selected = 0;
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
@@ -1850,7 +1955,8 @@ impl Client {
 
         // Try to get album_id from the DisplayItem directly (album search/favorites)
         if let Some(album_id) = item.and_then(|i| i.album_id.clone()) {
-            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
+            self.view
+                .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
             self.view.album_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
         }
@@ -1860,7 +1966,8 @@ impl Client {
             .and_then(|i| i.track.as_ref())
             .and_then(|t| t.album_id.clone())
         {
-            self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
+            self.view
+                .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
             self.view.album_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
         }
@@ -1881,7 +1988,7 @@ impl Client {
 
         // Try artist_id directly from the DisplayItem (artist search/favorites)
         if let Some(artist_id) = item.and_then(|i| i.artist_id.clone()) {
-            self.view.overlay = Some(Overlay::ArtistDetail);
+            self.view.set_nav_overlay(Overlay::ArtistDetail);
             self.view.artist_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
         }
@@ -1891,7 +1998,7 @@ impl Client {
             .and_then(|i| i.track.as_ref())
             .and_then(|t| t.artist_id.clone())
         {
-            self.view.overlay = Some(Overlay::ArtistDetail);
+            self.view.set_nav_overlay(Overlay::ArtistDetail);
             self.view.artist_detail_selected = 0;
             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
         }
@@ -1930,7 +2037,7 @@ impl Client {
 
         match key.code {
             KeyCode::Esc => {
-                self.view.overlay = None;
+                self.view.pop_overlay();
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -1979,7 +2086,7 @@ impl Client {
 
         match key.code {
             KeyCode::Esc | KeyCode::Char('w') => {
-                self.view.overlay = None;
+                self.view.pop_overlay();
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -2287,7 +2394,8 @@ impl Client {
                 };
                 if let Some(album_id) = album_id {
                     self.view.popup = None;
-                    self.view.overlay = Some(Overlay::AlbumDetail { from_artist: false });
+                    self.view
+                        .push_overlay(Overlay::AlbumDetail { from_artist: false });
                     self.view.album_detail_selected = 0;
                     KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
                 } else {
@@ -2305,7 +2413,7 @@ impl Client {
                 };
                 if let Some(artist_id) = artist_id {
                     self.view.popup = None;
-                    self.view.overlay = Some(Overlay::ArtistDetail);
+                    self.view.push_overlay(Overlay::ArtistDetail);
                     self.view.artist_detail_selected = 0;
                     KeyAction::SendCommand(Command::GetArtistDetail { artist_id })
                 } else {
