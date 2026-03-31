@@ -316,6 +316,21 @@ cargo fmt && cargo build --release
 This ensures formatting is correct (CI will reject unformatted code) and the project compiles.
 Run `cargo clippy -- -D warnings` for additional lint checks when relevant.
 
+## Release Routine
+
+When preparing a version release:
+
+1. Update `CHANGELOG.md`:
+   - Move items from `[Unreleased]` into a new version section `[X.Y.Z] - YYYY-MM-DD`
+   - Categorize changes under `### Added`, `### Changed`, `### Fixed`, `### Removed` as appropriate
+   - Add a fresh empty `[Unreleased]` section at the top
+2. Update version in `Cargo.toml` files (workspace root + both crates)
+3. Run `cargo fmt && cargo build --release`
+4. Commit and tag: `git tag vX.Y.Z`
+
+When adding new features or fixes (not during a release), add a brief entry under
+`[Unreleased]` in `CHANGELOG.md` so nothing is forgotten at release time.
+
 ## Legal Notice
 
 This project uses Deezer's undocumented private API for personal use.

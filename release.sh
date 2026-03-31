@@ -31,11 +31,20 @@ sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
 # Update Cargo.lock
 cargo check --quiet 2>/dev/null
 
+# Update CHANGELOG.md — replace [Unreleased] with [VERSION] - DATE
+DATE=$(date +%Y-%m-%d)
+if [ -f CHANGELOG.md ]; then
+    sed -i "s/^## \[Unreleased\]/## [${VERSION}] - ${DATE}/" CHANGELOG.md
+    echo "Updated CHANGELOG.md: [Unreleased] → [${VERSION}] - ${DATE}"
+else
+    echo "Warning: CHANGELOG.md not found, skipping changelog update"
+fi
+
 echo "Bumped to ${VERSION}"
 echo ""
 
 # Commit + tag + push
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock CHANGELOG.md
 git commit -m "Release ${TAG}"
 git tag "${TAG}"
 git push
