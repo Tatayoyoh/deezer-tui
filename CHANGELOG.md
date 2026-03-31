@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.8.0] - 2026-03-31
 
 ### Added
 - Deezer Flow support with `[f]` shortcut
