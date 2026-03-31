@@ -9,7 +9,7 @@ use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
 
 /// Draw the popup overlay if one is active.
-pub fn draw(frame: &mut Frame, view: &ViewState) {
+pub fn draw(frame: &mut Frame, view: &mut ViewState) {
     // Draw toast notification (takes priority display but doesn't block popup)
     if let Some(ref toast) = view.toast {
         draw_toast(frame, &toast.message, toast.is_error);
@@ -25,12 +25,14 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
         draw_backdrop(frame);
     }
 
+    // Clamp help scroll in-place so it doesn't exceed visible area
+    if let Some(Overlay::Help { scroll }) = &mut view.overlay {
+        draw_help_overlay(frame, scroll);
+        return;
+    }
+
     // Overlays take priority over track popups
     match &view.overlay {
-        Some(Overlay::Help { scroll }) => {
-            draw_help_overlay(frame, *scroll);
-            return;
-        }
         Some(Overlay::Settings { selected }) => {
             draw_settings_overlay(frame, *selected);
             return;
@@ -74,6 +76,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
             draw_waiting_list(frame, view, *selected);
             // Don't return — let the popup (context menu) render on top if open
         }
+        Some(Overlay::Help { .. }) => unreachable!(),
         None => {}
     }
 
@@ -296,7 +299,7 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
 }
 
 /// Draw the help overlay showing all keyboard shortcuts grouped by section.
-fn draw_help_overlay(frame: &mut Frame, scroll: usize) {
+fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
     let s = t();
     // (Option<key>, label) — None key = section header
     let shortcuts: Vec<(Option<&str>, &str)> = vec![
@@ -372,14 +375,17 @@ fn draw_help_overlay(frame: &mut Frame, scroll: usize) {
         .collect();
 
     let item_count = items.len();
-    let mut state = ListState::default().with_offset(scroll);
+    let max_scroll = item_count.saturating_sub(inner.height as usize);
+    if *scroll > max_scroll {
+        *scroll = max_scroll;
+    }
+    let mut state = ListState::default().with_offset(*scroll);
     let list = List::new(items);
     frame.render_stateful_widget(list, inner, &mut state);
 
     // Scrollbar (only when content overflows)
     if item_count as u16 > inner.height {
-        let mut scrollbar_state =
-            ScrollbarState::new(item_count.saturating_sub(inner.height as usize)).position(scroll);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll).position(*scroll);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Theme::primary()));
         frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
