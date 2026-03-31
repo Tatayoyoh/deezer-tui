@@ -84,6 +84,8 @@ fn main() -> Result<()> {
         return send_command_to_daemon(Command::TogglePause);
     }
 
+    let show_updated = args.iter().any(|a| a == "--updated");
+
     // Try to connect to an existing daemon
     let sock_path = socket_path();
     if try_connect_sync(&sock_path) {
@@ -92,13 +94,13 @@ fn main() -> Result<()> {
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(async {
             let mut client = client::Client::connect().await?;
-            client.run().await
+            client.run(show_updated).await
         })
     } else {
         // No daemon running — fork: child becomes daemon, parent becomes client
         #[cfg(unix)]
         {
-            start_with_fork()
+            start_with_fork(show_updated)
         }
         #[cfg(not(unix))]
         {
@@ -197,7 +199,7 @@ fn try_connect_sync(sock_path: &std::path::Path) -> bool {
 
 /// Fork: child becomes daemon, parent waits then launches as client.
 #[cfg(unix)]
-fn start_with_fork() -> Result<()> {
+fn start_with_fork(show_updated: bool) -> Result<()> {
     let sock_path = socket_path();
 
     match unsafe { libc::fork() } {
@@ -257,7 +259,7 @@ fn start_with_fork() -> Result<()> {
             let rt = tokio::runtime::Runtime::new()?;
             rt.block_on(async {
                 let mut client = client::Client::connect().await?;
-                client.run().await
+                client.run(show_updated).await
             })
         }
     }

@@ -396,6 +396,17 @@ pub enum Overlay {
     WaitingList { selected: usize },
     /// Application info modal.
     Info,
+    /// Update available dialog with 3 options.
+    UpdateAvailable {
+        version: String,
+        download_url: String,
+        selected: usize,
+    },
+    /// Update in progress (downloading/installing).
+    Updating {
+        version: String,
+        progress_msg: String,
+    },
 }
 
 impl NavOverlay {
@@ -520,6 +531,7 @@ pub struct Toast {
     pub message: String,
     pub created_at: Instant,
     pub duration: Duration,
+    pub is_error: bool,
 }
 
 impl Toast {
@@ -528,6 +540,16 @@ impl Toast {
             message,
             created_at: Instant::now(),
             duration,
+            is_error: false,
+        }
+    }
+
+    pub fn error(message: String, duration: Duration) -> Self {
+        Self {
+            message,
+            created_at: Instant::now(),
+            duration,
+            is_error: true,
         }
     }
 
@@ -933,7 +955,7 @@ impl Client {
         self.writer.flush().await
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self, show_updated: bool) -> Result<()> {
         // Load saved theme from config
         let config = Config::load();
         if let Some(ref theme_str) = config.theme {
@@ -950,14 +972,48 @@ impl Client {
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
 
+        // Spawn update check in background (non-blocking)
+        let (update_tx, mut update_rx) = mpsc::unbounded_channel::<(String, String)>();
+        if !config.skip_update_check {
+            let tx = update_tx.clone();
+            tokio::spawn(async move {
+                if let Some(result) = check_for_update().await {
+                    let _ = tx.send(result);
+                }
+            });
+        }
+        drop(update_tx); // Drop our copy so the channel closes when the task finishes
+
+        // Wait for initial snapshot from daemon before drawing anything.
+        // This avoids a brief flash of the Login screen when the user is already logged in.
+        match tokio::time::timeout(
+            Duration::from_secs(3),
+            read_line::<ServerMessage, _>(&mut self.reader),
+        )
+        .await
+        {
+            Ok(Ok(Some(ServerMessage::Snapshot(snap)))) => {
+                self.view.update_from_snapshot(snap);
+            }
+            _ => {
+                // Timeout or error — proceed with default state
+            }
+        }
+
         // Reset login mode when starting on login screen
         if self.view.screen == Screen::Login {
             self.view.login_mode = LoginMode::Button;
         }
 
+        // Show Info overlay after a successful update (--updated flag)
+        if show_updated && self.view.screen == Screen::Main {
+            self.view.overlay = Some(Overlay::Info);
+        }
+
         // Main client loop
         let mut running = true;
         let mut send_shutdown = false;
+        let mut update_check_done = config.skip_update_check;
 
         while running {
             // Clear expired toast
@@ -1030,6 +1086,74 @@ impl Client {
                             self.send_cmd(&Command::Login { arl }).await?;
                         }
                     }
+                    KeyAction::PerformUpdate {
+                        version,
+                        download_url,
+                    } => {
+                        // Show "Downloading..." overlay and redraw
+                        self.view.overlay = Some(Overlay::Updating {
+                            version: version.clone(),
+                            progress_msg: t().update_downloading.into(),
+                        });
+                        terminal.draw(|frame| {
+                            ui::draw(frame, &mut self.view);
+                        })?;
+
+                        // Suspend TUI so sudo can prompt for password if needed
+                        io::stdout().execute(DisableMouseCapture)?;
+                        disable_raw_mode()?;
+                        io::stdout().execute(LeaveAlternateScreen)?;
+                        drop(terminal);
+
+                        let update_result = perform_update(&download_url).await;
+
+                        // Always re-create terminal (borrow checker requires it)
+                        enable_raw_mode()?;
+                        io::stdout().execute(EnterAlternateScreen)?;
+                        io::stdout().execute(EnableMouseCapture)?;
+                        terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+                        terminal.clear()?;
+
+                        match update_result {
+                            Ok(binary_path) => {
+                                // Restore terminal before exec
+                                io::stdout().execute(DisableMouseCapture)?;
+                                disable_raw_mode()?;
+                                io::stdout().execute(LeaveAlternateScreen)?;
+
+                                // Shut down the daemon before restarting
+                                let _ = self.send_cmd(&Command::Shutdown).await;
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+
+                                // Try to exec into the new binary (replaces this process)
+                                #[cfg(unix)]
+                                {
+                                    use std::os::unix::process::CommandExt;
+                                    let err = std::process::Command::new(&binary_path)
+                                        .arg("--updated")
+                                        .exec();
+                                    // exec() only returns on error
+                                    eprintln!("Failed to restart: {err}");
+                                    eprintln!("{}", t().update_restart_manually);
+                                }
+
+                                #[cfg(not(unix))]
+                                {
+                                    eprintln!("{}", t().update_restart_manually);
+                                    let _ = binary_path;
+                                }
+
+                                running = false;
+                            }
+                            Err(e) => {
+                                self.view.overlay = None;
+                                self.view.toast = Some(Toast::error(
+                                    format!("{}: {e}", t().update_failed),
+                                    Duration::from_secs(5),
+                                ));
+                            }
+                        }
+                    }
                 }
 
                 // Check if overlay changed (may need new cover image)
@@ -1085,6 +1209,20 @@ impl Client {
                 if url == self.view.cover_image_url {
                     let proto = self.picker.new_resize_protocol(img);
                     self.view.cover_image = Some(proto);
+                }
+            }
+
+            // Check for update availability (background check result)
+            if !update_check_done {
+                if let Ok((version, download_url)) = update_rx.try_recv() {
+                    if self.view.overlay.is_none() {
+                        self.view.overlay = Some(Overlay::UpdateAvailable {
+                            version,
+                            download_url,
+                            selected: 0,
+                        });
+                    }
+                    update_check_done = true;
                 }
             }
         }
@@ -1655,6 +1793,52 @@ impl Client {
                     }
                     _ => {}
                 }
+                KeyAction::Continue
+            }
+            Overlay::UpdateAvailable {
+                version,
+                download_url,
+                selected,
+            } => {
+                const UPDATE_OPTIONS: usize = 3;
+                match key.code {
+                    KeyCode::Esc => {
+                        self.view.overlay = None;
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(UPDATE_OPTIONS - 1);
+                    }
+                    KeyCode::Enter => match *selected {
+                        0 => {
+                            let ver = version.clone();
+                            let url = download_url.clone();
+                            return KeyAction::PerformUpdate {
+                                version: ver,
+                                download_url: url,
+                            };
+                        }
+                        1 => {
+                            // "Later" — dismiss for this session
+                            self.view.overlay = None;
+                        }
+                        2 => {
+                            // "Never ask again" — persist to config
+                            let mut config = Config::load();
+                            config.skip_update_check = true;
+                            let _ = config.save();
+                            self.view.overlay = None;
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
+            Overlay::Updating { .. } => {
+                // Ignore all keys while update is in progress
                 KeyAction::Continue
             }
         }
@@ -2467,4 +2651,138 @@ enum KeyAction {
     Detach,
     /// Open browser for Deezer web login.
     WebLogin,
+    /// Download and install an update, then restart.
+    PerformUpdate {
+        version: String,
+        download_url: String,
+    },
+}
+
+// ── Update check & install ──────────────────────────────────────────
+
+/// Simple semver comparison: returns true if `remote` > `current`.
+fn version_is_newer(remote: &str, current: &str) -> bool {
+    let parse = |s: &str| -> (u32, u32, u32) {
+        let parts: Vec<u32> = s.split('.').filter_map(|p| p.parse().ok()).collect();
+        (
+            parts.first().copied().unwrap_or(0),
+            parts.get(1).copied().unwrap_or(0),
+            parts.get(2).copied().unwrap_or(0),
+        )
+    };
+    parse(remote) > parse(current)
+}
+
+/// Check GitHub for a newer release. Returns (version, download_url) if newer.
+async fn check_for_update() -> Option<(String, String)> {
+    let url = "https://api.github.com/repos/Tatayoyoh/deezer-tui/releases/latest";
+
+    let client = reqwest::Client::builder()
+        .user_agent("deezer-tui")
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+
+    let resp = client.get(url).send().await.ok()?;
+    let json: serde_json::Value = resp.json().await.ok()?;
+
+    let tag = json["tag_name"].as_str()?;
+    let remote_version = tag.strip_prefix('v').unwrap_or(tag);
+    let current_version = env!("CARGO_PKG_VERSION");
+
+    if !version_is_newer(remote_version, current_version) {
+        return None;
+    }
+
+    // Select correct asset for this platform
+    let asset_name = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "deezer-tui-linux-x86_64",
+        ("linux", "aarch64") => "deezer-tui-linux-aarch64",
+        ("macos", _) => "deezer-tui-macos-universal",
+        _ => return None,
+    };
+
+    let assets = json["assets"].as_array()?;
+    let download_url = assets
+        .iter()
+        .find(|a| a["name"].as_str() == Some(asset_name))
+        .and_then(|a| a["browser_download_url"].as_str())
+        .map(String::from)?;
+
+    Some((remote_version.to_string(), download_url))
+}
+
+/// Download the new binary and replace the current executable.
+/// Returns the path of the installed binary.
+async fn perform_update(download_url: &str) -> Result<std::path::PathBuf> {
+    use std::io::Write;
+
+    let current_exe = std::env::current_exe()
+        .map_err(|e| anyhow::anyhow!("Cannot determine current binary path: {e}"))?;
+
+    // Download the new binary
+    let client = reqwest::Client::builder()
+        .user_agent("deezer-tui")
+        .timeout(Duration::from_secs(120))
+        .build()?;
+
+    let resp = client.get(download_url).send().await?;
+    if !resp.status().is_success() {
+        anyhow::bail!("Download failed: HTTP {}", resp.status());
+    }
+
+    let bytes = resp.bytes().await?;
+    let tmp_path = std::path::PathBuf::from("/tmp/deezer-tui-update.tmp");
+
+    // Write to temp file
+    {
+        let mut f = std::fs::File::create(&tmp_path)?;
+        f.write_all(&bytes)?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    // Try direct rename first (works if same filesystem and writable)
+    if std::fs::rename(&tmp_path, &current_exe).is_ok() {
+        return Ok(current_exe);
+    }
+
+    // Rename failed — try sudo install (needed for e.g. /usr/local/bin)
+    // Re-open /dev/tty so sudo can prompt for a password even if
+    // stdin/stdout were redirected by the TUI or by tokio.
+    eprintln!("{}", t().update_sudo_prompt);
+
+    let tty_in = std::fs::File::open("/dev/tty")
+        .map_err(|e| anyhow::anyhow!("Cannot open /dev/tty for sudo prompt: {e}"))?;
+    let tty_out = std::fs::OpenOptions::new()
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|e| anyhow::anyhow!("Cannot open /dev/tty for sudo output: {e}"))?;
+
+    let status = std::process::Command::new("sudo")
+        .args([
+            "install",
+            "-m",
+            "755",
+            tmp_path.to_str().unwrap_or("/tmp/deezer-tui-update.tmp"),
+            current_exe
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid binary path"))?,
+        ])
+        .stdin(std::process::Stdio::from(tty_in))
+        .stdout(std::process::Stdio::from(tty_out.try_clone()?))
+        .stderr(std::process::Stdio::from(tty_out))
+        .status()?;
+
+    let _ = std::fs::remove_file(&tmp_path);
+
+    if !status.success() {
+        anyhow::bail!("sudo install failed (exit code: {:?})", status.code());
+    }
+
+    Ok(current_exe)
 }

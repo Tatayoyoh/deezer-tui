@@ -305,6 +305,20 @@ pub struct Strings {
     // --- Favorites categories ---
     pub cat_recently_played: &'static str,
     pub cat_following: &'static str,
+
+    // --- Update ---
+    pub update_available_title: &'static str,
+    pub update_new_version: &'static str,
+    pub update_current_version: &'static str,
+    pub update_now: &'static str,
+    pub update_later: &'static str,
+    pub update_never: &'static str,
+    pub update_downloading: &'static str,
+    pub update_installing: &'static str,
+    pub update_restarting: &'static str,
+    pub update_failed: &'static str,
+    pub update_restart_manually: &'static str,
+    pub update_sudo_prompt: &'static str,
 }
 
 impl Strings {
@@ -483,6 +497,16 @@ impl Strings {
     /// Format error with prefix
     pub fn fmt_error(&self, prefix: &str, err: &str) -> String {
         format!("{}: {}", prefix, err)
+    }
+
+    /// Format "New version available: v1.7.0"
+    pub fn fmt_update_new_version(&self, version: &str) -> String {
+        format!("{} v{}", self.update_new_version, version)
+    }
+
+    /// Format "Current version: v1.6.0"
+    pub fn fmt_update_current_version(&self, version: &str) -> String {
+        format!("{} v{}", self.update_current_version, version)
     }
 }
 
@@ -715,6 +739,19 @@ static EN: Strings = Strings {
 
     cat_recently_played: "Recently Played",
     cat_following: "Following",
+
+    update_available_title: " Update Available ",
+    update_new_version: "New version available:",
+    update_current_version: "Current version:",
+    update_now: "Update now",
+    update_later: "Later",
+    update_never: "Never ask again",
+    update_downloading: "Downloading update...",
+    update_installing: "Installing update...",
+    update_restarting: "Restarting...",
+    update_failed: "Update failed",
+    update_restart_manually: "Update complete! Please restart deezer-tui to apply changes.",
+    update_sudo_prompt: "Root access required to install update...",
 };
 
 // ── French ───────────────────────────────────────────────────────────
@@ -945,6 +982,19 @@ static FR: Strings = Strings {
 
     cat_recently_played: "Écouté récemment",
     cat_following: "Abonnements",
+
+    update_available_title: " Mise à jour disponible ",
+    update_new_version: "Nouvelle version disponible :",
+    update_current_version: "Version actuelle :",
+    update_now: "Mettre à jour",
+    update_later: "Plus tard",
+    update_never: "Ne plus demander",
+    update_downloading: "Téléchargement de la mise à jour...",
+    update_installing: "Installation de la mise à jour...",
+    update_restarting: "Redémarrage...",
+    update_failed: "Échec de la mise à jour",
+    update_restart_manually: "Mise à jour terminée ! Veuillez redémarrer deezer-tui.",
+    update_sudo_prompt: "Accès root nécessaire pour installer la mise à jour...",
 };
 
 // ── Spanish (Mexico) ─────────────────────────────────────────────────
@@ -1175,6 +1225,19 @@ static ES: Strings = Strings {
 
     cat_recently_played: "Escuchado recientemente",
     cat_following: "Siguiendo",
+
+    update_available_title: " Actualización disponible ",
+    update_new_version: "Nueva versión disponible:",
+    update_current_version: "Versión actual:",
+    update_now: "Actualizar ahora",
+    update_later: "Más tarde",
+    update_never: "No volver a preguntar",
+    update_downloading: "Descargando actualización...",
+    update_installing: "Instalando actualización...",
+    update_restarting: "Reiniciando...",
+    update_failed: "Error en la actualización",
+    update_restart_manually: "¡Actualización completada! Reinicie deezer-tui para aplicar los cambios.",
+    update_sudo_prompt: "Se requiere acceso root para instalar la actualización...",
 };
 
 // ── Portuguese (Brazil) ──────────────────────────────────────────────
@@ -1405,6 +1468,19 @@ static PT: Strings = Strings {
 
     cat_recently_played: "Ouvidos recentemente",
     cat_following: "Seguindo",
+
+    update_available_title: " Atualização disponível ",
+    update_new_version: "Nova versão disponível:",
+    update_current_version: "Versão atual:",
+    update_now: "Atualizar agora",
+    update_later: "Mais tarde",
+    update_never: "Não perguntar novamente",
+    update_downloading: "Baixando atualização...",
+    update_installing: "Instalando atualização...",
+    update_restarting: "Reiniciando...",
+    update_failed: "Falha na atualização",
+    update_restart_manually: "Atualização concluída! Reinicie o deezer-tui para aplicar as alterações.",
+    update_sudo_prompt: "Acesso root necessário para instalar a atualização...",
 };
 
 // ── German ───────────────────────────────────────────────────────────
@@ -1635,6 +1711,19 @@ static DE: Strings = Strings {
 
     cat_recently_played: "Kürzlich gehört",
     cat_following: "Folge ich",
+
+    update_available_title: " Update verfügbar ",
+    update_new_version: "Neue Version verfügbar:",
+    update_current_version: "Aktuelle Version:",
+    update_now: "Jetzt aktualisieren",
+    update_later: "Später",
+    update_never: "Nicht mehr fragen",
+    update_downloading: "Update wird heruntergeladen...",
+    update_installing: "Update wird installiert...",
+    update_restarting: "Neustart...",
+    update_failed: "Update fehlgeschlagen",
+    update_restart_manually: "Update abgeschlossen! Bitte starten Sie deezer-tui neu.",
+    update_sudo_prompt: "Root-Zugriff erforderlich für die Installation...",
 };
 
 // ── Global accessor ──────────────────────────────────────────────────
