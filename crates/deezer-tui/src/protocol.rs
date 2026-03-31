@@ -81,6 +81,8 @@ pub enum Command {
     StartMix { track_id: String },
     /// Start Deezer Flow (personalized radio).
     StartFlow,
+    /// Jump to and play a specific track in the queue by index.
+    PlayFromQueue { index: usize },
     /// Remove a track from the queue by index.
     RemoveFromQueue { index: usize },
     /// Load album detail (tracks, metadata).

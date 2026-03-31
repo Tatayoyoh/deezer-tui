@@ -2280,6 +2280,13 @@ impl Client {
         }
 
         match key.code {
+            KeyCode::Enter => {
+                if selected < self.view.queue.len() {
+                    KeyAction::SendCommand(Command::PlayFromQueue { index: selected })
+                } else {
+                    KeyAction::Continue
+                }
+            }
             KeyCode::Esc | KeyCode::Char('w') => {
                 self.view.pop_overlay();
                 KeyAction::Continue
