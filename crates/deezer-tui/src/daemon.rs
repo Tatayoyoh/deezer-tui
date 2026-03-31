@@ -67,6 +67,8 @@ enum AsyncResult {
     DislikeError(String),
     MixReady(Vec<TrackData>),
     MixError(String),
+    FlowReady(Vec<TrackData>),
+    FlowError(String),
     AlbumDetailReady(AlbumDetail),
     AlbumDetailError(String),
     ArtistDetailReady(ArtistDetail),
@@ -174,6 +176,9 @@ pub struct Daemon {
     track_generation: u64,
     // Count consecutive failed track fetches to avoid infinite skip loop
     consecutive_skip_count: u32,
+
+    // Flow mode — when true, auto-fetch more Flow tracks when queue ends
+    flow_active: bool,
 }
 
 impl Daemon {
@@ -272,6 +277,7 @@ impl Daemon {
             playback_offset_secs: 0,
             track_generation: 0,
             consecutive_skip_count: 0,
+            flow_active: false,
         })
     }
 
@@ -438,6 +444,7 @@ impl Daemon {
                             .iter()
                             .position(|t| t.track_id == track.track_id)
                             .unwrap_or(0);
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = playable;
                             state.queue_index = queue_idx;
@@ -464,6 +471,7 @@ impl Daemon {
                             .position(|t| t.track_id == track.track_id)
                             .unwrap_or(0);
                         info!(track_id = %track.track_id, title = %track.title, queue_len = playable.len(), queue_idx, "PlayFromFavorites: setting queue and playing");
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = playable;
                             state.queue_index = queue_idx;
@@ -612,6 +620,7 @@ impl Daemon {
             Command::ShuffleFavorites => {
                 if !self.favorites.is_empty() {
                     // Set queue from favorites with shuffle enabled
+                    self.flow_active = false;
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue = self.favorites.clone();
                         state.shuffle = true;
@@ -691,6 +700,10 @@ impl Daemon {
             Command::StartMix { track_id } => {
                 self.start_mix(track_id);
             }
+            Command::StartFlow => {
+                self.flow_active = false;
+                self.start_flow();
+            }
             Command::GetAlbumDetail { album_id } => {
                 self.start_load_album_detail(album_id);
             }
@@ -700,6 +713,7 @@ impl Daemon {
             Command::PlayFromArtist { index } => {
                 if let Some(ref detail) = self.artist_detail {
                     if let Some(track) = detail.top_tracks.get(index).cloned() {
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.top_tracks.clone();
                             state.queue_index = index;
@@ -721,6 +735,7 @@ impl Daemon {
                 if let Some(ref detail) = self.album_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
                         // Set queue from album tracks
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.tracks.clone();
                             state.queue_index = index;
@@ -735,6 +750,7 @@ impl Daemon {
             Command::PlayFromPlaylist { index } => {
                 if let Some(ref detail) = self.playlist_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.tracks.clone();
                             state.queue_index = index;
@@ -802,6 +818,7 @@ impl Daemon {
                     .map(|ot| ot.track.clone())
                     .collect();
                 if let Some(track) = tracks.get(index).cloned() {
+                    self.flow_active = false;
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue = tracks;
                         state.queue_index = index;
@@ -821,6 +838,7 @@ impl Daemon {
                 {
                     let tracks = album.tracks.clone();
                     if let Some(track) = tracks.get(track_index).cloned() {
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = track_index;
@@ -1305,6 +1323,23 @@ impl Daemon {
         });
     }
 
+    fn start_flow(&mut self) {
+        self.status_msg = Some(t().status_loading_flow.into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_flow().await {
+                Ok(tracks) => {
+                    let _ = tx.send(AsyncResult::FlowReady(tracks));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::FlowError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_load_album_detail(&mut self, album_id: String) {
         if self.is_offline {
             self.status_msg = Some(t().no_internet.into());
@@ -1645,6 +1680,13 @@ impl Daemon {
             } else {
                 let next = state.queue_index + 1;
                 if next >= state.queue.len() {
+                    if self.flow_active {
+                        // Flow mode — fetch more tracks to continue playback
+                        drop(state);
+                        info!("play_next: end of Flow queue, fetching more tracks");
+                        self.start_flow();
+                        return;
+                    }
                     match state.repeat {
                         RepeatMode::Queue => 0,
                         _ => {
@@ -1864,6 +1906,7 @@ impl Daemon {
                     } else {
                         self.status_msg = Some(t().fmt_mix_tracks(tracks.len()));
                         let first = tracks[0].clone();
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = 0;
@@ -1873,6 +1916,35 @@ impl Daemon {
                 }
                 AsyncResult::MixError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_mix_error, &err));
+                }
+                AsyncResult::FlowReady(tracks) => {
+                    if tracks.is_empty() {
+                        self.status_msg = Some(t().status_no_flow_tracks.into());
+                    } else if self.flow_active {
+                        // Continuation — append new tracks to existing queue and advance
+                        let next_track = tracks[0].clone();
+                        let count = tracks.len();
+                        if let Ok(mut state) = self.player_state.lock() {
+                            let append_idx = state.queue.len();
+                            state.queue.extend(tracks);
+                            state.queue_index = append_idx;
+                        }
+                        self.status_msg = Some(t().fmt_flow_tracks(count));
+                        self.start_play_track(next_track);
+                    } else {
+                        // Initial Flow start — replace queue
+                        self.status_msg = Some(t().fmt_flow_tracks(tracks.len()));
+                        let first = tracks[0].clone();
+                        self.flow_active = true;
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = 0;
+                        }
+                        self.start_play_track(first);
+                    }
+                }
+                AsyncResult::FlowError(err) => {
+                    self.status_msg = Some(t().fmt_error(t().status_flow_error, &err));
                 }
                 AsyncResult::AlbumDetailReady(detail) => {
                     self.album_detail_loading = false;
@@ -1927,6 +1999,7 @@ impl Daemon {
                     } else {
                         self.status_msg = Some(t().fmt_radio_tracks(tracks.len()));
                         let first = tracks[0].clone();
+                        self.flow_active = false;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = 0;

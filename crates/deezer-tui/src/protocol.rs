@@ -79,6 +79,8 @@ pub enum Command {
     AddToQueue { track: TrackData },
     /// Start a mix inspired by a track.
     StartMix { track_id: String },
+    /// Start Deezer Flow (personalized radio).
+    StartFlow,
     /// Remove a track from the queue by index.
     RemoveFromQueue { index: usize },
     /// Load album detail (tracks, metadata).

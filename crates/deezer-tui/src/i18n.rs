@@ -94,6 +94,7 @@ pub struct Strings {
     pub repeat_one: &'static str,
     pub vol: &'static str,
     pub help: &'static str,
+    pub flow: &'static str,
 
     // --- Popup menu ---
     pub menu_manage: &'static str,
@@ -147,6 +148,7 @@ pub struct Strings {
     pub help_waiting_list: &'static str,
     pub help_context_menu: &'static str,
     pub help_playing_menu: &'static str,
+    pub help_start_flow: &'static str,
     pub help_shuffle_favorites: &'static str,
     pub help_this_help: &'static str,
     pub help_settings: &'static str,
@@ -265,6 +267,10 @@ pub struct Strings {
     pub status_no_mix_tracks: &'static str,
     pub status_mix_tracks: &'static str,
     pub status_mix_error: &'static str,
+    pub status_loading_flow: &'static str,
+    pub status_no_flow_tracks: &'static str,
+    pub status_flow_tracks: &'static str,
+    pub status_flow_error: &'static str,
     pub status_loading_artist: &'static str,
     pub status_artist_error: &'static str,
     pub status_album_error: &'static str,
@@ -479,6 +485,11 @@ impl Strings {
         format!("{} {}", self.status_mix_tracks, count)
     }
 
+    /// Format "Flow: {N} tracks"
+    pub fn fmt_flow_tracks(&self, count: usize) -> String {
+        format!("{} {}", self.status_flow_tracks, count)
+    }
+
     /// Format "Radio: {N} tracks"
     pub fn fmt_radio_tracks(&self, count: usize) -> String {
         format!("{} {}", self.status_radio_tracks, count)
@@ -546,6 +557,7 @@ static EN: Strings = Strings {
     repeat_one: "Repeat One",
     vol: "Vol",
     help: "Help",
+    flow: "Flow",
 
     menu_manage: "── Manage ──",
     menu_playback: "── Playback ──",
@@ -595,6 +607,7 @@ static EN: Strings = Strings {
     help_waiting_list: "Waiting list (queue)",
     help_context_menu: "Track context menu",
     help_playing_menu: "Playing track menu",
+    help_start_flow: "Start Deezer Flow",
     help_shuffle_favorites: "Shuffle favorites",
     help_this_help: "This help",
     help_settings: "Settings",
@@ -702,6 +715,10 @@ static EN: Strings = Strings {
     status_no_mix_tracks: "No mix tracks found",
     status_mix_tracks: "Mix:",
     status_mix_error: "Mix error",
+    status_loading_flow: "Loading Flow...",
+    status_no_flow_tracks: "No Flow tracks found",
+    status_flow_tracks: "Flow:",
+    status_flow_error: "Flow error",
     status_loading_artist: "Loading artist...",
     status_artist_error: "Artist error",
     status_album_error: "Album error",
@@ -790,6 +807,7 @@ static FR: Strings = Strings {
     repeat_one: "Répéter un",
     vol: "Vol",
     help: "Aide",
+    flow: "Flow",
 
     menu_manage: "── Gérer ──",
     menu_playback: "── Lecture ──",
@@ -839,6 +857,7 @@ static FR: Strings = Strings {
     help_waiting_list: "File d'attente",
     help_context_menu: "Menu contextuel",
     help_playing_menu: "Menu titre en cours",
+    help_start_flow: "Lancer Deezer Flow",
     help_shuffle_favorites: "Lecture aléatoire favoris",
     help_this_help: "Cette aide",
     help_settings: "Paramètres",
@@ -945,6 +964,10 @@ static FR: Strings = Strings {
     status_no_mix_tracks: "Aucun titre de mix trouvé",
     status_mix_tracks: "Mix :",
     status_mix_error: "Erreur du mix",
+    status_loading_flow: "Chargement du Flow...",
+    status_no_flow_tracks: "Aucun titre Flow trouvé",
+    status_flow_tracks: "Flow :",
+    status_flow_error: "Erreur du Flow",
     status_loading_artist: "Chargement de l'artiste...",
     status_artist_error: "Erreur de l'artiste",
     status_album_error: "Erreur de l'album",
@@ -1033,6 +1056,7 @@ static ES: Strings = Strings {
     repeat_one: "Repetir uno",
     vol: "Vol",
     help: "Ayuda",
+    flow: "Flow",
 
     menu_manage: "── Gestionar ──",
     menu_playback: "── Reproducción ──",
@@ -1082,6 +1106,7 @@ static ES: Strings = Strings {
     help_waiting_list: "Cola de reproducción",
     help_context_menu: "Menú contextual",
     help_playing_menu: "Menú canción actual",
+    help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatorios",
     help_this_help: "Esta ayuda",
     help_settings: "Ajustes",
@@ -1188,6 +1213,10 @@ static ES: Strings = Strings {
     status_no_mix_tracks: "No se encontraron canciones del mix",
     status_mix_tracks: "Mix:",
     status_mix_error: "Error del mix",
+    status_loading_flow: "Cargando Flow...",
+    status_no_flow_tracks: "No se encontraron canciones del Flow",
+    status_flow_tracks: "Flow:",
+    status_flow_error: "Error del Flow",
     status_loading_artist: "Cargando artista...",
     status_artist_error: "Error del artista",
     status_album_error: "Error del álbum",
@@ -1276,6 +1305,7 @@ static PT: Strings = Strings {
     repeat_one: "Repetir uma",
     vol: "Vol",
     help: "Ajuda",
+    flow: "Flow",
 
     menu_manage: "── Gerenciar ──",
     menu_playback: "── Reprodução ──",
@@ -1325,6 +1355,7 @@ static PT: Strings = Strings {
     help_waiting_list: "Fila de reprodução",
     help_context_menu: "Menu de contexto",
     help_playing_menu: "Menu da música atual",
+    help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatórios",
     help_this_help: "Esta ajuda",
     help_settings: "Configurações",
@@ -1431,6 +1462,10 @@ static PT: Strings = Strings {
     status_no_mix_tracks: "Nenhuma música do mix encontrada",
     status_mix_tracks: "Mix:",
     status_mix_error: "Erro do mix",
+    status_loading_flow: "Carregando Flow...",
+    status_no_flow_tracks: "Nenhuma música do Flow encontrada",
+    status_flow_tracks: "Flow:",
+    status_flow_error: "Erro do Flow",
     status_loading_artist: "Carregando artista...",
     status_artist_error: "Erro do artista",
     status_album_error: "Erro do álbum",
@@ -1519,6 +1554,7 @@ static DE: Strings = Strings {
     repeat_one: "Einen wiederholen",
     vol: "Lautst.",
     help: "Hilfe",
+    flow: "Flow",
 
     menu_manage: "── Verwalten ──",
     menu_playback: "── Wiedergabe ──",
@@ -1568,6 +1604,7 @@ static DE: Strings = Strings {
     help_waiting_list: "Warteschlange",
     help_context_menu: "Kontextmenü",
     help_playing_menu: "Menü laufender Titel",
+    help_start_flow: "Deezer Flow starten",
     help_shuffle_favorites: "Favoriten zufällig",
     help_this_help: "Diese Hilfe",
     help_settings: "Einstellungen",
@@ -1674,6 +1711,10 @@ static DE: Strings = Strings {
     status_no_mix_tracks: "Keine Mix-Titel gefunden",
     status_mix_tracks: "Mix:",
     status_mix_error: "Mix-Fehler",
+    status_loading_flow: "Flow wird geladen...",
+    status_no_flow_tracks: "Keine Flow-Titel gefunden",
+    status_flow_tracks: "Flow:",
+    status_flow_error: "Flow-Fehler",
     status_loading_artist: "Künstler wird geladen...",
     status_artist_error: "Künstler-Fehler",
     status_album_error: "Album-Fehler",

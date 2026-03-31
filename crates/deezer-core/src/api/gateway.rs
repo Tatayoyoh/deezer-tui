@@ -957,6 +957,24 @@ impl DeezerClient {
         serde_json::from_value(data.clone())
             .map_err(|e| DeezerError::Api(format!("Failed to parse smart radio: {e}")))
     }
+
+    /// Get the user's personalized Flow (Deezer Flow).
+    pub async fn get_flow(&self) -> Result<Vec<TrackData>, DeezerError> {
+        let session = self
+            .session
+            .as_ref()
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+
+        let params = json!({ "user_id": session.user_id });
+        let results = self.gw_call("radio.getUserRadio", params).await?;
+
+        let data = results
+            .get("data")
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in flow response".into()))?;
+
+        serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse flow: {e}")))
+    }
 }
 
 /// Parse a search section's "data" array into a typed vec.
