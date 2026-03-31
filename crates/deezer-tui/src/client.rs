@@ -1303,6 +1303,16 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // Ctrl+Right: seek forward 10s
+        if key.code == KeyCode::Right && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::SendCommand(Command::SeekForward { secs: 10 });
+        }
+
+        // Ctrl+Left: seek backward 10s
+        if key.code == KeyCode::Left && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return KeyAction::SendCommand(Command::SeekBackward { secs: 10 });
+        }
+
         // Ctrl+Z: detach (daemon keeps playing)
         #[cfg(unix)]
         if matches!(key.code, KeyCode::Char('z') | KeyCode::Char('Z'))
@@ -1658,7 +1668,7 @@ impl Client {
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
             Overlay::Help { scroll } => {
-                const HELP_ITEM_COUNT: usize = 31;
+                const HELP_ITEM_COUNT: usize = 33;
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.overlay = None;
