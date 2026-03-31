@@ -5,10 +5,13 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Deezer Flow support with `[f]` shortcut (personalized radio)
-- Flow button in footer bar with accent color
-- Volume display moved next to progress bar for cleaner layout
+- Deezer Flow support with `[f]` shortcut
+- Add waiting list "Enter" event
+- Track Forward `ctrl + 🠆` and backward `ctrl + 🠄`
 - Project changelog
+
+### Changed
+- Volume display moved next to progress bar for cleaner layout
 
 ## [1.7.0] - 2026-03-31
 
