@@ -12,7 +12,7 @@ use crate::theme::{Theme, ThemeId};
 pub fn draw(frame: &mut Frame, view: &ViewState) {
     // Draw toast notification (takes priority display but doesn't block popup)
     if let Some(ref toast) = view.toast {
-        draw_toast(frame, &toast.message);
+        draw_toast(frame, &toast.message, toast.is_error);
     }
 
     // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it)
@@ -45,6 +45,21 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
         }
         Some(Overlay::Info) => {
             draw_info_overlay(frame);
+            return;
+        }
+        Some(Overlay::UpdateAvailable {
+            version,
+            download_url: _,
+            selected,
+        }) => {
+            draw_update_available(frame, version, *selected);
+            return;
+        }
+        Some(Overlay::Updating {
+            version,
+            progress_msg,
+        }) => {
+            draw_updating(frame, version, progress_msg);
             return;
         }
         Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail) => {
@@ -892,7 +907,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 }
 
 /// Draw a temporary toast notification at the bottom center of the screen.
-fn draw_toast(frame: &mut Frame, message: &str) {
+fn draw_toast(frame: &mut Frame, message: &str, is_error: bool) {
     let area = frame.area();
     let width = (message.len() as u16 + 6).min(area.width.saturating_sub(4));
     let height = 3;
@@ -902,9 +917,14 @@ fn draw_toast(frame: &mut Frame, message: &str) {
     let toast_area = Rect::new(x, y, width, height);
     frame.render_widget(Clear, toast_area);
 
+    let border_color = if is_error {
+        Color::Red
+    } else {
+        Theme::success()
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Theme::success()))
+        .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(Theme::surface()));
 
     let inner = block.inner(toast_area);
@@ -932,4 +952,80 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
 
     Rect::new(x, y, popup_width, popup_height)
+}
+
+/// Draw the "Update Available" overlay with version info and 3 options.
+fn draw_update_available(frame: &mut Frame, version: &str, selected: usize) {
+    let s = t();
+    let area = frame.area();
+    let popup_area = centered_rect(50, 10, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(s.update_available_title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let current = env!("CARGO_PKG_VERSION");
+    let options = [s.update_now, s.update_later, s.update_never];
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Version info
+    lines.push(Line::from(Span::styled(
+        s.fmt_update_new_version(version),
+        Style::default()
+            .fg(Theme::success())
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(Span::styled(
+        s.fmt_update_current_version(current),
+        Theme::dim(),
+    )));
+    lines.push(Line::from("")); // separator
+
+    // Options
+    for (i, &option) in options.iter().enumerate() {
+        let prefix = if i == selected { " > " } else { "   " };
+        let style = if i == selected {
+            Theme::highlight()
+        } else {
+            Theme::text()
+        };
+        lines.push(Line::from(Span::styled(format!("{prefix}{option}"), style)));
+    }
+
+    let paragraph = Paragraph::new(lines);
+    frame.render_widget(paragraph, inner);
+}
+
+/// Draw the "Updating..." progress overlay.
+fn draw_updating(frame: &mut Frame, version: &str, progress_msg: &str) {
+    let s = t();
+    let area = frame.area();
+    let popup_area = centered_rect(50, 5, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let title = format!(" {} v{} ", s.update_available_title.trim(), version);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let text = Paragraph::new(progress_msg)
+        .style(Style::default().fg(Theme::primary()))
+        .alignment(Alignment::Center);
+    frame.render_widget(text, inner);
 }
