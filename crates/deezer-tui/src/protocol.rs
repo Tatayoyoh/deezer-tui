@@ -32,6 +32,10 @@ pub enum Command {
     PrevTrack,
     /// Set volume (0.0 - 1.0).
     SetVolume { volume: f32 },
+    /// Seek forward by a number of seconds in the current track.
+    SeekForward { secs: u64 },
+    /// Seek backward by a number of seconds in the current track.
+    SeekBackward { secs: u64 },
     /// Toggle shuffle mode.
     ToggleShuffle,
     /// Cycle repeat mode (Off -> Queue -> Track -> Off).

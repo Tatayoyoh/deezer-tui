@@ -313,6 +313,8 @@ fn draw_help_overlay(frame: &mut Frame, scroll: usize) {
         (Some("Space"), s.help_play_pause),
         (Some("n"), s.help_next_track),
         (Some("b"), s.help_prev_track),
+        (Some("C-→"), s.help_seek_forward),
+        (Some("C-←"), s.help_seek_backward),
         (Some("s"), s.help_toggle_shuffle),
         (Some("r"), s.help_cycle_repeat),
         (Some("+/-"), s.help_volume),

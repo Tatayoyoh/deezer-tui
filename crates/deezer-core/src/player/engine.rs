@@ -1,5 +1,6 @@
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use tracing::{debug, info};
@@ -121,6 +122,12 @@ impl PlayerEngine {
 
     pub fn volume(&self) -> f32 {
         self.state.lock().unwrap().volume
+    }
+
+    pub fn try_seek(&self, pos: Duration) -> Result<(), DeezerError> {
+        self.sink
+            .try_seek(pos)
+            .map_err(|e| DeezerError::Playback(format!("Seek failed: {e}")))
     }
 
     pub fn is_finished(&self) -> bool {

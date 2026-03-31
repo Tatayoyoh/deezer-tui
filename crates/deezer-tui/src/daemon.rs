@@ -505,6 +505,12 @@ impl Daemon {
                 }
                 self.config.volume = volume.clamp(0.0, 1.0);
             }
+            Command::SeekForward { secs } => {
+                self.seek_relative(secs as i64);
+            }
+            Command::SeekBackward { secs } => {
+                self.seek_relative(-(secs as i64));
+            }
             Command::ToggleShuffle => {
                 let mut state = self.player_state.lock().unwrap();
                 state.shuffle = !state.shuffle;
@@ -1768,6 +1774,30 @@ impl Daemon {
         if let Some(ref engine) = self.engine {
             engine.resume();
             self.playback_started_at = Some(Instant::now());
+        }
+    }
+
+    fn seek_relative(&mut self, delta_secs: i64) {
+        let Some(ref engine) = self.engine else {
+            return;
+        };
+        let (current_pos, duration) = {
+            let state = self.player_state.lock().unwrap();
+            if state.status != PlaybackStatus::Playing && state.status != PlaybackStatus::Paused {
+                return;
+            }
+            (state.position_secs, state.duration_secs)
+        };
+
+        let new_pos = (current_pos as i64 + delta_secs).clamp(0, duration as i64) as u64;
+        let seek_duration = std::time::Duration::from_secs(new_pos);
+
+        if engine.try_seek(seek_duration).is_ok() {
+            self.playback_offset_secs = new_pos;
+            if self.playback_started_at.is_some() {
+                self.playback_started_at = Some(Instant::now());
+            }
+            self.player_state.lock().unwrap().position_secs = new_pos;
         }
     }
 
