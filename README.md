@@ -34,6 +34,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 
 ✅ Login through deezer.com<br>
 ✅ Background player with [ctrl+z]<br>
+✅ Deezer Flow [f]<br>
 ✅ Search / favorites / radios pages<br>
 ✅ Playing track context menu [ctrl+space]<br>
 ✅ Focused element context menu [x]<br>
