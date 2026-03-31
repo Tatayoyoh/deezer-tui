@@ -328,6 +328,7 @@ fn draw_help_overlay(frame: &mut Frame, scroll: usize) {
         (Some("i"), s.help_info),
         // Actions
         (None, s.help_section_actions),
+        (Some("f"), s.help_start_flow),
         (Some("g"), s.help_shuffle_favorites),
         (Some("Ctrl+Q"), s.help_quit),
         (Some("Ctrl+Z"), s.help_detach),

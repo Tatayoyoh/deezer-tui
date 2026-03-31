@@ -1623,6 +1623,9 @@ impl Client {
                 KeyAction::Continue
             }
 
+            // Deezer Flow
+            KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
+
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
@@ -1655,7 +1658,7 @@ impl Client {
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
             Overlay::Help { scroll } => {
-                const HELP_ITEM_COUNT: usize = 30;
+                const HELP_ITEM_COUNT: usize = 31;
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.overlay = None;

@@ -20,8 +20,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Track info
-            Constraint::Length(1), // Progress bar
-            Constraint::Length(1), // Controls
+            Constraint::Length(1), // Progress bar + volume
+            Constraint::Length(1), // Controls + Flow button
         ])
         .split(inner);
 
@@ -72,10 +72,19 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         track_chunks[1],
     );
 
-    // Progress bar
+    // Progress bar + volume (right)
+    let s = t();
+    let vol_pct = (view.volume * 100.0) as u8;
+    let vol_label = format!(" [+/-] {}: {vol_pct}% ", s.vol);
+    let vol_width = vol_label.len() as u16;
+
+    let progress_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(1), Constraint::Length(vol_width)])
+        .split(chunks[1]);
+
     let ratio = view.progress_percent().min(1.0);
     let time_label = view.format_position();
-
     let progress = Gauge::default()
         .gauge_style(
             Style::default()
@@ -84,11 +93,15 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         )
         .ratio(ratio)
         .label(time_label);
+    frame.render_widget(progress, progress_chunks[0]);
 
-    frame.render_widget(progress, chunks[1]);
+    let vol_line = Line::from(Span::styled(vol_label, Theme::dim()));
+    frame.render_widget(
+        Paragraph::new(vol_line).alignment(Alignment::Right),
+        progress_chunks[1],
+    );
 
-    // Controls line
-    let vol_pct = (view.volume * 100.0) as u8;
+    // Controls line + Flow button (right)
     let shuffle_style = if view.shuffle {
         Style::default()
             .fg(Theme::primary())
@@ -96,7 +109,6 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     } else {
         Theme::dim()
     };
-    let s = t();
     let controls_left = Line::from(vec![
         Span::styled("  ", Theme::dim()),
         Span::styled("[?]", Theme::text()),
@@ -109,12 +121,17 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled(format!(" {}  ", s.prev), Theme::dim()),
         Span::styled(format!("[s] {}", s.shuffle), shuffle_style),
     ]);
-    let vol_label = format!("[+/-] {}: {vol_pct}% ", s.vol);
-    let vol_width = vol_label.len() as u16;
-    let controls_right = Line::from(Span::styled(vol_label, Theme::dim()));
+
+    let flow_style = Style::default()
+        .fg(Theme::secondary())
+        .add_modifier(Modifier::BOLD);
+    let flow_label = format!("[f] {} ", s.flow);
+    let flow_width = flow_label.len() as u16;
+    let controls_right = Line::from(Span::styled(flow_label, flow_style));
+
     let ctrl_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(1), Constraint::Length(vol_width)])
+        .constraints([Constraint::Min(1), Constraint::Length(flow_width)])
         .split(chunks[2]);
     frame.render_widget(Paragraph::new(controls_left), ctrl_chunks[0]);
     frame.render_widget(
