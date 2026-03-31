@@ -184,6 +184,7 @@ pub struct Daemon {
 impl Daemon {
     pub fn new() -> Result<Self> {
         let config = Config::load();
+        let initial_volume = config.volume;
 
         // Check network connectivity
         let is_offline = std::net::TcpStream::connect_timeout(
@@ -261,7 +262,10 @@ impl Daemon {
             nav_overlay: None,
             nav_overlay_stack: Vec::new(),
 
-            player_state: Arc::new(Mutex::new(PlayerState::default())),
+            player_state: Arc::new(Mutex::new(PlayerState {
+                volume: initial_volume,
+                ..PlayerState::default()
+            })),
 
             client: Arc::new(tokio::sync::Mutex::new(client)),
             cdn_http,
@@ -504,6 +508,7 @@ impl Daemon {
                     engine.set_volume(volume);
                 }
                 self.config.volume = volume.clamp(0.0, 1.0);
+                let _ = self.config.save();
             }
             Command::SeekForward { secs } => {
                 self.seek_relative(secs as i64);
