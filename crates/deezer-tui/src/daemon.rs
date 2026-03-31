@@ -686,6 +686,20 @@ impl Daemon {
                 }
                 self.status_msg = Some(t().status_added_to_queue.into());
             }
+            Command::PlayFromQueue { index } => {
+                let track = {
+                    let mut state = self.player_state.lock().unwrap();
+                    if let Some(track) = state.queue.get(index).cloned() {
+                        state.queue_index = index;
+                        Some(track)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(track) = track {
+                    self.start_play_track(track);
+                }
+            }
             Command::RemoveFromQueue { index } => {
                 if let Ok(mut state) = self.player_state.lock() {
                     if index < state.queue.len() && index != state.queue_index {
