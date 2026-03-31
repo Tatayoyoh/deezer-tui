@@ -1668,15 +1668,12 @@ impl Client {
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
             Overlay::Help { scroll } => {
-                const HELP_ITEM_COUNT: usize = 33;
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.overlay = None;
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        if *scroll + 1 < HELP_ITEM_COUNT {
-                            *scroll += 1;
-                        }
+                        *scroll += 1;
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *scroll = scroll.saturating_sub(1);
