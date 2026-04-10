@@ -28,10 +28,11 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
         return;
     };
 
-    // Two columns: 40% info | 60% track list
+    // Two columns: 40% info (max 90) | rest track list
+    let left_w = (area.width * 40 / 100).min(52);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Length(left_w), Constraint::Min(0)])
         .split(area);
 
     let detail = detail.clone();
@@ -60,12 +61,15 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Image grows with available height but is capped to avoid pushing metadata too far down
+    let image_h = inner.height.saturating_sub(5).clamp(8, 24);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Album art
-            Constraint::Length(1),  // Spacer
-            Constraint::Min(6),     // Metadata
+            Constraint::Length(image_h), // Album art (adaptive)
+            Constraint::Length(1),       // Spacer
+            Constraint::Min(4),          // Metadata
         ])
         .split(inner);
 
@@ -132,8 +136,8 @@ fn album_metadata_line_count(detail: &AlbumDetail) -> u16 {
 
 /// Draw a placeholder album cover using Unicode block characters.
 fn draw_album_art(frame: &mut Frame, area: Rect) {
-    let width = area.width.min(24);
-    let height = area.height.min(12);
+    let width = area.width;
+    let height = area.height;
 
     // Align art to the left
     let art_area = Rect::new(area.x, area.y, width, height);

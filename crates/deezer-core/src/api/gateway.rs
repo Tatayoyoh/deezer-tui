@@ -644,8 +644,9 @@ impl DeezerClient {
             .unwrap_or("")
             .to_string();
         let cover_url = resp
-            .get("cover_medium")
-            .or_else(|| resp.get("cover_small"))
+            .get("cover_xl")
+            .or_else(|| resp.get("cover_big"))
+            .or_else(|| resp.get("cover_medium"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
