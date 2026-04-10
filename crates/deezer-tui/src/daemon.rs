@@ -18,8 +18,8 @@ use deezer_core::Config;
 
 use crate::i18n::t;
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, OfflineCategory,
-    RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
+    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -296,6 +296,10 @@ impl Daemon {
         let listener = UnixListener::bind(&sock_path)?;
         info!(?sock_path, "Daemon listening");
 
+        // Write PID file so the client can kill us during updates
+        let pid_file = pid_path();
+        let _ = std::fs::write(&pid_file, std::process::id().to_string());
+
         if self.is_offline {
             // In offline mode, create the audio engine immediately (no master key needed for local playback)
             match PlayerEngine::new([0u8; 16]) {
@@ -414,6 +418,7 @@ impl Daemon {
 
         // Cleanup
         let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&pid_file);
         info!("Daemon stopped");
         Ok(())
     }

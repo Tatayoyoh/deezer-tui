@@ -31,8 +31,8 @@ use crate::i18n::{self, t, Locale};
 use deezer_core::offline::OfflineTrack;
 
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, NavOverlay,
-    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
+    NavOverlay, OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -1129,9 +1129,9 @@ impl Client {
                                 disable_raw_mode()?;
                                 io::stdout().execute(LeaveAlternateScreen)?;
 
-                                // Shut down the daemon before restarting
+                                // Shut down the daemon and wait for it to actually exit
                                 let _ = self.send_cmd(&Command::Shutdown).await;
-                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                wait_for_daemon_exit().await;
 
                                 // Try to exec into the new binary (replaces this process)
                                 #[cfg(unix)]
@@ -2748,6 +2748,41 @@ fn version_is_newer(remote: &str, current: &str) -> bool {
         )
     };
     parse(remote) > parse(current)
+}
+
+/// Wait for the daemon to fully exit before launching the new binary.
+/// Sends SIGTERM if the daemon is still alive after a grace period.
+async fn wait_for_daemon_exit() {
+    let sock = socket_path();
+    let pid_file = pid_path();
+
+    // Read daemon PID for fallback kill
+    let daemon_pid: Option<u32> = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|s| s.trim().parse().ok());
+
+    // Poll until socket disappears (daemon cleaned up) — up to 3 seconds
+    for i in 0..30 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !sock.exists() {
+            return; // daemon exited cleanly
+        }
+        // After 1s with no clean exit, send SIGTERM to be sure
+        #[cfg(unix)]
+        if i == 10 {
+            if let Some(pid) = daemon_pid {
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            }
+        }
+    }
+
+    // Last resort: SIGKILL and remove stale files manually
+    #[cfg(unix)]
+    if let Some(pid) = daemon_pid {
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+    let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_file(&pid_file);
 }
 
 /// Check GitHub for a newer release. Returns (version, download_url) if newer.
