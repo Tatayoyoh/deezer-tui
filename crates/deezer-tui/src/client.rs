@@ -786,7 +786,19 @@ impl ViewState {
         // Restore navigation overlay from daemon state.
         // Only apply if the current overlay is a nav type or None (don't clobber UI overlays).
         if self.is_nav_or_none_overlay() {
-            self.overlay = snap.nav_overlay.map(|n| n.to_overlay());
+            let new_overlay = snap.nav_overlay.map(|n| n.to_overlay());
+            // Preserve client-side `selected` for PlaylistDetail: the daemon only
+            // tracks that the overlay *exists*, not the cursor position within it.
+            // Without this, every 250ms tick would reset selected to 0.
+            self.overlay = match (new_overlay, &self.overlay) {
+                (
+                    Some(Overlay::PlaylistDetail { .. }),
+                    Some(Overlay::PlaylistDetail { selected }),
+                ) => Some(Overlay::PlaylistDetail {
+                    selected: *selected,
+                }),
+                (new, _) => new,
+            };
             self.overlay_stack = snap
                 .nav_overlay_stack
                 .into_iter()
