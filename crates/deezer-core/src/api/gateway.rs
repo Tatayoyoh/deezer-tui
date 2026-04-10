@@ -54,6 +54,40 @@ impl DeezerClient {
             .ok_or_else(|| DeezerError::Api("Missing 'results' in response".into()))
     }
 
+    /// Gateway call for write operations that don't return a meaningful `results` field.
+    async fn gw_call_void(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<(), DeezerError> {
+        let api_token = self.api_token()?;
+        let url =
+            format!("{GW_LIGHT_URL}?method={method}&input=3&api_version=1.0&api_token={api_token}");
+
+        debug!(method, "Gateway API call (void)");
+
+        let resp = self
+            .http
+            .post(&url)
+            .json(&params)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        if let Some(error) = body.get("error") {
+            if !error.as_object().map_or(true, |o| o.is_empty()) {
+                return Err(DeezerError::Api(error.to_string()));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get full track data by song ID (includes TRACK_TOKEN and MD5_ORIGIN).
     pub async fn get_track(&self, song_id: &str) -> Result<TrackData, DeezerError> {
         let params = json!({ "sng_id": song_id });
@@ -521,43 +555,41 @@ impl DeezerClient {
     /// Add a track to the user's favorites.
     pub async fn add_favorite(&self, song_id: &str) -> Result<(), DeezerError> {
         let params = json!({ "SNG_ID": song_id });
-        self.gw_call("favorite_song.add", params).await?;
-        Ok(())
+        self.gw_call_void("favorite_song.add", params).await
     }
 
     /// Remove a track from the user's favorites.
     pub async fn remove_favorite(&self, song_id: &str) -> Result<(), DeezerError> {
         let params = json!({ "SNG_ID": song_id });
-        self.gw_call("favorite_song.remove", params).await?;
-        Ok(())
+        self.gw_call_void("favorite_song.remove", params).await
     }
 
     /// Add an artist to the user's favorites.
     pub async fn add_favorite_artist(&self, artist_id: &str) -> Result<(), DeezerError> {
-        let params = json!({ "ART_ID": artist_id });
-        self.gw_call("favorite_artist.add", params).await?;
-        Ok(())
+        let id = parse_id(artist_id);
+        let params = json!({ "ART_ID": id });
+        self.gw_call_void("artist.addFavorite", params).await
     }
 
     /// Remove an artist from the user's favorites.
     pub async fn remove_favorite_artist(&self, artist_id: &str) -> Result<(), DeezerError> {
-        let params = json!({ "ART_ID": artist_id });
-        self.gw_call("favorite_artist.remove", params).await?;
-        Ok(())
+        let id = parse_id(artist_id);
+        let params = json!({ "ART_ID": id });
+        self.gw_call_void("artist.deleteFavorite", params).await
     }
 
     /// Add an album to the user's favorites.
     pub async fn add_favorite_album(&self, album_id: &str) -> Result<(), DeezerError> {
-        let params = json!({ "ALB_ID": album_id });
-        self.gw_call("favorite_album.add", params).await?;
-        Ok(())
+        let id = parse_id(album_id);
+        let params = json!({ "ALB_ID": id });
+        self.gw_call_void("favorite_album.add", params).await
     }
 
     /// Remove an album from the user's favorites.
     pub async fn remove_favorite_album(&self, album_id: &str) -> Result<(), DeezerError> {
-        let params = json!({ "ALB_ID": album_id });
-        self.gw_call("favorite_album.remove", params).await?;
-        Ok(())
+        let id = parse_id(album_id);
+        let params = json!({ "ALB_ID": id });
+        self.gw_call_void("favorite_album.remove", params).await
     }
 
     /// Add tracks to a playlist.
@@ -571,15 +603,13 @@ impl DeezerClient {
             "playlist_id": playlist_id,
             "songs": songs,
         });
-        self.gw_call("playlist.addSongs", params).await?;
-        Ok(())
+        self.gw_call_void("playlist.addSongs", params).await
     }
 
     /// Mark a track as disliked (don't recommend).
     pub async fn dislike_track(&self, song_id: &str) -> Result<(), DeezerError> {
         let params = json!({ "SNG_ID": song_id });
-        self.gw_call("song.dislike", params).await?;
-        Ok(())
+        self.gw_call_void("song.dislike", params).await
     }
 
     /// Get user playlists as raw PlaylistData (for playlist picker).
@@ -989,6 +1019,16 @@ fn parse_search_section<T: serde::de::DeserializeOwned>(
         .ok_or_else(|| DeezerError::Api("Missing 'data' in search section".into()))?;
     serde_json::from_value(data.clone())
         .map_err(|e| DeezerError::Api(format!("Failed to parse search section: {e}")))
+}
+
+/// Parse a string ID as a JSON integer if possible, otherwise keep it as a string.
+/// Deezer's private gateway requires numeric IDs as integers, not strings.
+fn parse_id(id: &str) -> serde_json::Value {
+    if let Ok(n) = id.parse::<u64>() {
+        serde_json::Value::Number(n.into())
+    } else {
+        serde_json::Value::String(id.to_string())
+    }
 }
 
 fn format_fans(n: u64) -> String {
