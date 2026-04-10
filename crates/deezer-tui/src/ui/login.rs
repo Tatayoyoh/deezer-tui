@@ -61,7 +61,7 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
         .split(area);
 
     // Logo
-    frame.render_widget(common::deezer_logo(), chunks[0]);
+    common::render_logo(frame, chunks[0]);
 
     // Login button
     let s = t();
@@ -124,7 +124,7 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
         .split(area);
 
     // Logo
-    frame.render_widget(common::deezer_logo(), chunks[0]);
+    common::render_logo(frame, chunks[0]);
 
     // ARL Input field
     let s = t();
