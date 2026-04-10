@@ -487,10 +487,14 @@ pub struct ViewState {
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
     pub album_detail_loading: bool,
+    pub album_detail_left_scroll: u16,
+    pub album_detail_left_focused: bool,
     pub artist_detail: Option<ArtistDetail>,
     pub artist_detail_selected: usize,
     pub artist_detail_loading: bool,
     pub artist_detail_sub_tab: ArtistSubTab,
+    pub artist_detail_left_scroll: u16,
+    pub artist_detail_left_focused: bool,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -601,10 +605,14 @@ impl ViewState {
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
             album_detail_loading: snap.album_detail_loading,
+            album_detail_left_scroll: 0,
+            album_detail_left_focused: false,
             artist_detail: snap.artist_detail.clone(),
             artist_detail_selected: snap.artist_detail_selected,
             artist_detail_loading: snap.artist_detail_loading,
             artist_detail_sub_tab: snap.artist_detail_sub_tab,
+            artist_detail_left_scroll: 0,
+            artist_detail_left_focused: false,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -1572,12 +1580,16 @@ impl Client {
                         if let Some(artist_id) = item.artist_id.clone() {
                             self.view.set_nav_overlay(Overlay::ArtistDetail);
                             self.view.artist_detail_selected = 0;
+                            self.view.artist_detail_left_scroll = 0;
+                            self.view.artist_detail_left_focused = false;
                             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
                         }
                         if let Some(album_id) = item.album_id.clone() {
                             self.view
                                 .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
                             self.view.album_detail_selected = 0;
+                            self.view.album_detail_left_scroll = 0;
+                            self.view.album_detail_left_focused = false;
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
                         if let Some(playlist_id) = item.playlist_id.clone() {
@@ -1998,12 +2010,29 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.view.album_detail_left_focused = true;
+                KeyAction::Continue
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.view.album_detail_left_focused = false;
+                KeyAction::Continue
+            }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.view.album_detail_selected = self.view.album_detail_selected.saturating_sub(1);
+                if self.view.album_detail_left_focused {
+                    self.view.album_detail_left_scroll =
+                        self.view.album_detail_left_scroll.saturating_sub(1);
+                } else {
+                    self.view.album_detail_selected =
+                        self.view.album_detail_selected.saturating_sub(1);
+                }
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(ref detail) = self.view.album_detail {
+                if self.view.album_detail_left_focused {
+                    self.view.album_detail_left_scroll =
+                        self.view.album_detail_left_scroll.saturating_add(1);
+                } else if let Some(ref detail) = self.view.album_detail {
                     if !detail.tracks.is_empty() {
                         self.view.album_detail_selected =
                             (self.view.album_detail_selected + 1).min(detail.tracks.len() - 1);
@@ -2012,8 +2041,12 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Enter => {
-                let index = self.view.album_detail_selected;
-                KeyAction::SendCommand(Command::PlayFromAlbum { index })
+                if self.view.album_detail_left_focused {
+                    KeyAction::Continue
+                } else {
+                    let index = self.view.album_detail_selected;
+                    KeyAction::SendCommand(Command::PlayFromAlbum { index })
+                }
             }
             KeyCode::Char('t') => {
                 if let Some(ref detail) = self.view.album_detail {
@@ -2075,27 +2108,51 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            // Switch sub-tab with h/l
+            // Switch sub-tab with h/l; left panel is a virtual tab before TopTracks
             KeyCode::Char('h') | KeyCode::Left => {
-                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
-                self.view.artist_detail_selected = 0;
+                if self.view.artist_detail_left_focused {
+                    // Already on left panel, nothing to do
+                } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                    // Step into left panel
+                    self.view.artist_detail_left_focused = true;
+                } else {
+                    self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
+                    self.view.artist_detail_selected = 0;
+                }
                 KeyAction::Continue
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.next();
-                self.view.artist_detail_selected = 0;
+                if self.view.artist_detail_left_focused {
+                    // Step out of left panel into TopTracks
+                    self.view.artist_detail_left_focused = false;
+                    self.view.artist_detail_sub_tab = ArtistSubTab::TopTracks;
+                    self.view.artist_detail_selected = 0;
+                } else {
+                    self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.next();
+                    self.view.artist_detail_selected = 0;
+                }
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.view.artist_detail_selected =
-                    self.view.artist_detail_selected.saturating_sub(1);
+                if self.view.artist_detail_left_focused {
+                    self.view.artist_detail_left_scroll =
+                        self.view.artist_detail_left_scroll.saturating_sub(1);
+                } else {
+                    self.view.artist_detail_selected =
+                        self.view.artist_detail_selected.saturating_sub(1);
+                }
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.artist_detail_list_len();
-                if count > 0 {
-                    self.view.artist_detail_selected =
-                        (self.view.artist_detail_selected + 1).min(count - 1);
+                if self.view.artist_detail_left_focused {
+                    self.view.artist_detail_left_scroll =
+                        self.view.artist_detail_left_scroll.saturating_add(1);
+                } else {
+                    let count = self.artist_detail_list_len();
+                    if count > 0 {
+                        self.view.artist_detail_selected =
+                            (self.view.artist_detail_selected + 1).min(count - 1);
+                    }
                 }
                 KeyAction::Continue
             }
