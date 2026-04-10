@@ -82,6 +82,9 @@ pub struct Strings {
     pub loading: &'static str,
     pub no_favorites: &'static str,
     pub favorites: &'static str,
+    pub favorites_filter_typing: &'static str,
+    pub favorites_filter_normal: &'static str,
+    pub favorites_filter_placeholder: &'static str,
 
     // --- Player ---
     pub no_track_loaded: &'static str,
@@ -548,6 +551,9 @@ static EN: Strings = Strings {
     loading: "Loading...",
     no_favorites: "No favorites yet \u{2014} add some on Deezer!",
     favorites: "Favorites",
+    favorites_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
+    favorites_filter_normal: " Filter - [Ctrl+F] or [/] ",
+    favorites_filter_placeholder: " filter favorites...",
 
     no_track_loaded: "No track loaded",
     play_pause: "Play/Pause",
@@ -668,9 +674,9 @@ static EN: Strings = Strings {
 
     radios_loading: "Loading radios...",
     radios_no_results: "No radios found",
-    radios_filter_typing: " Filter (Enter to confirm, Esc to cancel) ",
-    radios_filter_normal: " Filter (Ctrl+F or / to type) ",
-    radios_filter_placeholder: "Press Ctrl+F or / to filter radios...",
+    radios_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
+    radios_filter_normal: " Filter - [Ctrl+F] or [/] ",
+    radios_filter_placeholder: " filter radios...",
     radios_title: "Radios",
     header_radio: "Radio",
 
@@ -800,6 +806,9 @@ static FR: Strings = Strings {
     loading: "Chargement...",
     no_favorites: "Pas encore de favoris \u{2014} ajoutez-en sur Deezer !",
     favorites: "Favoris",
+    favorites_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
+    favorites_filter_normal: " Filtre - [Ctrl+F] ou [/] ",
+    favorites_filter_placeholder: " filtrer les favoris...",
 
     no_track_loaded: "Aucun titre chargé",
     play_pause: "Lecture/Pause",
@@ -920,9 +929,9 @@ static FR: Strings = Strings {
 
     radios_loading: "Chargement des radios...",
     radios_no_results: "Aucune radio trouvée",
-    radios_filter_typing: " Filtre (Entrée pour valider, Esc pour annuler) ",
-    radios_filter_normal: " Filtre (Ctrl+F ou / pour écrire) ",
-    radios_filter_placeholder: "Appuyez sur Ctrl+F ou / pour filtrer les radios...",
+    radios_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
+    radios_filter_normal: " Filtre - [Ctrl+F] ou [/] ",
+    radios_filter_placeholder: " filtrer les radios...",
     radios_title: "Radios",
     header_radio: "Radio",
 
@@ -1051,6 +1060,9 @@ static ES: Strings = Strings {
     loading: "Cargando...",
     no_favorites: "Aún no hay favoritos \u{2014} ¡agrega algunos en Deezer!",
     favorites: "Favoritos",
+    favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    favorites_filter_normal: " Filtro - [Ctrl+F] o [/] ",
+    favorites_filter_placeholder: " filtrar favoritos...",
 
     no_track_loaded: "Sin canción cargada",
     play_pause: "Reproducir/Pausa",
@@ -1171,9 +1183,9 @@ static ES: Strings = Strings {
 
     radios_loading: "Cargando radios...",
     radios_no_results: "No se encontraron radios",
-    radios_filter_typing: " Filtro (Enter para confirmar, Esc para cancelar) ",
-    radios_filter_normal: " Filtro (Ctrl+F o / para escribir) ",
-    radios_filter_placeholder: "Presiona Ctrl+F o / para filtrar radios...",
+    radios_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    radios_filter_normal: " Filtro - [Ctrl+F] o [/] ",
+    radios_filter_placeholder: " filtrar radios...",
     radios_title: "Radios",
     header_radio: "Radio",
 
@@ -1302,6 +1314,9 @@ static PT: Strings = Strings {
     loading: "Carregando...",
     no_favorites: "Nenhum favorito ainda \u{2014} adicione alguns no Deezer!",
     favorites: "Favoritos",
+    favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    favorites_filter_normal: " Filtro - [Ctrl+F] ou [/] ",
+    favorites_filter_placeholder: " filtrar favoritos...",
 
     no_track_loaded: "Nenhuma música carregada",
     play_pause: "Play/Pausa",
@@ -1422,9 +1437,9 @@ static PT: Strings = Strings {
 
     radios_loading: "Carregando rádios...",
     radios_no_results: "Nenhuma rádio encontrada",
-    radios_filter_typing: " Filtro (Enter para confirmar, Esc para cancelar) ",
-    radios_filter_normal: " Filtro (Ctrl+F ou / para digitar) ",
-    radios_filter_placeholder: "Pressione Ctrl+F ou / para filtrar rádios...",
+    radios_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    radios_filter_normal: " Filtro - [Ctrl+F] ou [/] ",
+    radios_filter_placeholder: " filtrar rádios...",
     radios_title: "Rádios",
     header_radio: "Rádio",
 
@@ -1553,6 +1568,9 @@ static DE: Strings = Strings {
     loading: "Laden...",
     no_favorites: "Noch keine Favoriten \u{2014} füge welche auf Deezer hinzu!",
     favorites: "Favoriten",
+    favorites_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
+    favorites_filter_normal: " Filter - [Ctrl+F] oder [/] ",
+    favorites_filter_placeholder: " Favoriten filtern...",
 
     no_track_loaded: "Kein Titel geladen",
     play_pause: "Play/Pause",
@@ -1673,9 +1691,9 @@ static DE: Strings = Strings {
 
     radios_loading: "Radios werden geladen...",
     radios_no_results: "Keine Radios gefunden",
-    radios_filter_typing: " Filter (Enter zum Bestätigen, Esc zum Abbrechen) ",
-    radios_filter_normal: " Filter (Ctrl+F oder / zum Tippen) ",
-    radios_filter_placeholder: "Ctrl+F oder / drücken um Radios zu filtern...",
+    radios_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
+    radios_filter_normal: " Filter - [Ctrl+F] oder [/] ",
+    radios_filter_placeholder: " Radios filtern...",
     radios_title: "Radios",
     header_radio: "Radio",
 
