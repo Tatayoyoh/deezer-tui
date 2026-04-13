@@ -12,6 +12,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([
             Constraint::Length(1), // Category menu
             Constraint::Length(2), // Shuffle button
+            Constraint::Length(3), // Filter input
             Constraint::Min(3),    // Favorites table
         ])
         .split(area);
@@ -22,8 +23,11 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     // Shuffle button
     draw_shuffle_button(frame, chunks[1]);
 
+    // Filter input
+    draw_filter_input(frame, view, chunks[2]);
+
     // Favorites table
-    draw_favorites_table(frame, view, chunks[2]);
+    draw_favorites_table(frame, view, chunks[3]);
 }
 
 fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect) {
@@ -68,6 +72,39 @@ fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
     frame.render_widget(button, area);
 }
 
+fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
+    let is_typing = view.favorites_filter_typing;
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if is_typing {
+            Theme::border_focused()
+        } else {
+            Theme::border()
+        })
+        .title(if is_typing {
+            s.favorites_filter_typing
+        } else {
+            s.favorites_filter_normal
+        })
+        .title_style(Theme::title());
+
+    let input_text = if view.favorites_filter_input.is_empty() && !is_typing {
+        Span::styled(s.favorites_filter_placeholder, Theme::dim())
+    } else {
+        Span::styled(&view.favorites_filter_input, Theme::text())
+    };
+
+    let input = Paragraph::new(input_text).block(input_block);
+    frame.render_widget(input, area);
+
+    if is_typing {
+        let cursor_x = area.x + 1 + view.favorites_filter_input.len() as u16;
+        let cursor_y = area.y + 1;
+        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
+    }
+}
+
 fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
     if view.favorites_loading {
@@ -77,9 +114,26 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         return;
     }
 
-    if view.favorites_display.is_empty() {
-        let empty =
-            Paragraph::new(Span::styled(s.no_favorites, Theme::dim())).alignment(Alignment::Center);
+    // Use filtered list when filter is active, otherwise full list
+    let (items, selected): (Vec<_>, usize) = if view.favorites_filter_active() {
+        let items: Vec<_> = view
+            .favorites_filtered
+            .iter()
+            .map(|(_, item)| item)
+            .collect();
+        (items, view.favorites_filter_selected)
+    } else {
+        let items: Vec<_> = view.favorites_display.iter().collect();
+        (items, view.favorites_selected)
+    };
+
+    if items.is_empty() {
+        let msg = if view.favorites_filter_active() && !view.favorites_display.is_empty() {
+            Span::styled(s.radios_no_results, Theme::dim())
+        } else {
+            Span::styled(s.no_favorites, Theme::dim())
+        };
+        let empty = Paragraph::new(msg).alignment(Alignment::Center);
         frame.render_widget(empty, area);
         return;
     }
@@ -94,8 +148,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     ])
     .height(1);
 
-    let rows: Vec<Row> = view
-        .favorites_display
+    let rows: Vec<Row> = items
         .iter()
         .enumerate()
         .map(|(i, item)| {
@@ -112,7 +165,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         })
         .collect();
 
-    let title = s.favorites_title(view.favorites_display.len());
+    let title = s.favorites_title(items.len());
     let table = Table::new(
         rows,
         [
@@ -133,6 +186,6 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     .row_highlight_style(Theme::highlight())
     .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(view.favorites_selected));
+    let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
 }
