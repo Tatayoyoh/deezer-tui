@@ -1,5 +1,6 @@
 mod client;
 mod daemon;
+mod favorites_cache;
 mod i18n;
 mod protocol;
 mod theme;

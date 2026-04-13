@@ -519,6 +519,13 @@ pub fn socket_path() -> PathBuf {
         .join("daemon.sock")
 }
 
+/// Get the PID file path for the daemon process.
+pub fn pid_path() -> PathBuf {
+    deezer_core::Config::dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("daemon.pid")
+}
+
 /// Send a line-delimited JSON message over a Unix stream.
 pub async fn send_line<T: Serialize>(stream: &mut UnixStream, msg: &T) -> std::io::Result<()> {
     let mut json = serde_json::to_string(msg)

@@ -31,8 +31,8 @@ use crate::i18n::{self, t, Locale};
 use deezer_core::offline::OfflineTrack;
 
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, NavOverlay,
-    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
+    NavOverlay, OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
@@ -469,6 +469,10 @@ pub struct ViewState {
     pub favorites_loading: bool,
     pub favorites_category: FavoritesCategory,
     pub favorites_display: Vec<DisplayItem>,
+    pub favorites_filter_input: String,
+    pub favorites_filter_typing: bool,
+    pub favorites_filtered: Vec<(usize, DisplayItem)>,
+    pub favorites_filter_selected: usize,
     pub favorite_artist_ids: Vec<String>,
     pub favorite_album_ids: Vec<String>,
     pub offline_category: OfflineCategory,
@@ -487,10 +491,14 @@ pub struct ViewState {
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
     pub album_detail_loading: bool,
+    pub album_detail_left_scroll: u16,
+    pub album_detail_left_focused: bool,
     pub artist_detail: Option<ArtistDetail>,
     pub artist_detail_selected: usize,
     pub artist_detail_loading: bool,
     pub artist_detail_sub_tab: ArtistSubTab,
+    pub artist_detail_left_scroll: u16,
+    pub artist_detail_left_focused: bool,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -558,6 +566,23 @@ impl Toast {
     }
 }
 
+/// Fuzzy match: returns true if every character of `query` appears in `target`
+/// as a subsequence (in order, not necessarily contiguous). Both inputs should
+/// already be lowercased by the caller.
+fn fuzzy_match(query: &str, target: &str) -> bool {
+    let mut target_chars = target.chars();
+    'outer: for qc in query.chars() {
+        loop {
+            match target_chars.next() {
+                Some(tc) if tc == qc => continue 'outer,
+                Some(_) => continue,
+                None => return false,
+            }
+        }
+    }
+    true
+}
+
 impl ViewState {
     fn from_snapshot(snap: &DaemonSnapshot) -> Self {
         Self {
@@ -583,6 +608,15 @@ impl ViewState {
             favorites_loading: snap.favorites_loading,
             favorites_category: snap.favorites_category,
             favorites_display: snap.favorites_display.clone(),
+            favorites_filter_input: String::new(),
+            favorites_filter_typing: false,
+            favorites_filtered: snap
+                .favorites_display
+                .iter()
+                .enumerate()
+                .map(|(i, item)| (i, item.clone()))
+                .collect(),
+            favorites_filter_selected: 0,
             favorite_artist_ids: snap.favorite_artist_ids.clone(),
             favorite_album_ids: snap.favorite_album_ids.clone(),
             offline_category: snap.offline_category,
@@ -601,10 +635,14 @@ impl ViewState {
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
             album_detail_loading: snap.album_detail_loading,
+            album_detail_left_scroll: 0,
+            album_detail_left_focused: false,
             artist_detail: snap.artist_detail.clone(),
             artist_detail_selected: snap.artist_detail_selected,
             artist_detail_loading: snap.artist_detail_loading,
             artist_detail_sub_tab: snap.artist_detail_sub_tab,
+            artist_detail_left_scroll: 0,
+            artist_detail_left_focused: false,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -712,8 +750,14 @@ impl ViewState {
         self.favorites = snap.favorites;
         self.favorites_selected = snap.favorites_selected;
         self.favorites_loading = snap.favorites_loading;
+        // Reset filter when category changes
+        if self.favorites_category != snap.favorites_category {
+            self.favorites_filter_input.clear();
+            self.favorites_filter_typing = false;
+        }
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
+        self.apply_favorites_filter();
         self.favorite_artist_ids = snap.favorite_artist_ids;
         self.favorite_album_ids = snap.favorite_album_ids;
         self.offline_category = snap.offline_category;
@@ -742,7 +786,19 @@ impl ViewState {
         // Restore navigation overlay from daemon state.
         // Only apply if the current overlay is a nav type or None (don't clobber UI overlays).
         if self.is_nav_or_none_overlay() {
-            self.overlay = snap.nav_overlay.map(|n| n.to_overlay());
+            let new_overlay = snap.nav_overlay.map(|n| n.to_overlay());
+            // Preserve client-side `selected` for PlaylistDetail: the daemon only
+            // tracks that the overlay *exists*, not the cursor position within it.
+            // Without this, every 250ms tick would reset selected to 0.
+            self.overlay = match (new_overlay, &self.overlay) {
+                (
+                    Some(Overlay::PlaylistDetail { .. }),
+                    Some(Overlay::PlaylistDetail { selected }),
+                ) => Some(Overlay::PlaylistDetail {
+                    selected: *selected,
+                }),
+                (new, _) => new,
+            };
             self.overlay_stack = snap
                 .nav_overlay_stack
                 .into_iter()
@@ -789,6 +845,8 @@ impl ViewState {
             self.popup = None;
             self.radio_filter_input.clear();
             self.radio_filter_typing = false;
+            self.favorites_filter_input.clear();
+            self.favorites_filter_typing = false;
         }
     }
 
@@ -816,11 +874,58 @@ impl ViewState {
             self.radios_filtered = self
                 .radios
                 .iter()
-                .filter(|r| r.title.to_lowercase().contains(&query))
+                .filter(|r| fuzzy_match(&query, &r.title.to_lowercase()))
                 .cloned()
                 .collect();
         }
         self.radios_selected = 0;
+    }
+
+    /// Apply the current filter text to the full favorites list.
+    fn apply_favorites_filter(&mut self) {
+        let query = self.favorites_filter_input.to_lowercase();
+        self.favorites_filtered = self
+            .favorites_display
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| {
+                query.is_empty()
+                    || fuzzy_match(&query, &item.col1.to_lowercase())
+                    || fuzzy_match(&query, &item.col2.to_lowercase())
+            })
+            .map(|(i, item)| (i, item.clone()))
+            .collect();
+        self.favorites_filter_selected = self
+            .favorites_filter_selected
+            .min(self.favorites_filtered.len().saturating_sub(1));
+    }
+
+    /// Whether the favorites filter is active (has content or is being typed).
+    pub fn favorites_filter_active(&self) -> bool {
+        self.favorites_filter_typing || !self.favorites_filter_input.is_empty()
+    }
+
+    /// Get the currently selected DisplayItem in the favorites tab, respecting filter state.
+    pub fn favorites_selected_item(&self) -> Option<&DisplayItem> {
+        if self.favorites_filter_active() {
+            self.favorites_filtered
+                .get(self.favorites_filter_selected)
+                .map(|(_, item)| item)
+        } else {
+            self.favorites_display.get(self.favorites_selected)
+        }
+    }
+
+    /// Get the original (daemon-side) index of the currently selected favorites item.
+    pub fn favorites_selected_original_index(&self) -> usize {
+        if self.favorites_filter_active() {
+            self.favorites_filtered
+                .get(self.favorites_filter_selected)
+                .map(|(i, _)| *i)
+                .unwrap_or(0)
+        } else {
+            self.favorites_selected
+        }
     }
 
     /// Build the flattened tree items for the offline albums view.
@@ -1121,9 +1226,9 @@ impl Client {
                                 disable_raw_mode()?;
                                 io::stdout().execute(LeaveAlternateScreen)?;
 
-                                // Shut down the daemon before restarting
+                                // Shut down the daemon and wait for it to actually exit
                                 let _ = self.send_cmd(&Command::Shutdown).await;
-                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                wait_for_daemon_exit().await;
 
                                 // Try to exec into the new binary (replaces this process)
                                 #[cfg(unix)]
@@ -1254,6 +1359,7 @@ impl Client {
             && self.view.screen == Screen::Main
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
+            && !self.view.favorites_filter_typing
         {
             self.view.overlay = match self.view.overlay {
                 Some(Overlay::Help { .. }) => None,
@@ -1267,6 +1373,7 @@ impl Client {
             && self.view.screen == Screen::Main
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
+            && !self.view.favorites_filter_typing
         {
             self.view.overlay = match self.view.overlay {
                 Some(Overlay::Info) => None,
@@ -1296,6 +1403,11 @@ impl Client {
                         self.view.radio_filter_typing = true;
                         self.view.radio_filter_input.clear();
                         self.view.apply_radio_filter();
+                    }
+                    ActiveTab::Favorites => {
+                        self.view.favorites_filter_typing = true;
+                        self.view.favorites_filter_input.clear();
+                        self.view.apply_favorites_filter();
                     }
                     _ => {}
                 }
@@ -1440,6 +1552,31 @@ impl Client {
             }
         }
 
+        // Favorites filter typing mode
+        if self.view.favorites_filter_typing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.view.favorites_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Enter => {
+                    self.view.favorites_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Char(c) => {
+                    self.view.favorites_filter_input.push(c);
+                    self.view.apply_favorites_filter();
+                    return KeyAction::Continue;
+                }
+                KeyCode::Backspace => {
+                    self.view.favorites_filter_input.pop();
+                    self.view.apply_favorites_filter();
+                    return KeyAction::Continue;
+                }
+                _ => return KeyAction::Continue,
+            }
+        }
+
         // Radio filter typing mode
         if self.view.radio_filter_typing {
             match key.code {
@@ -1483,6 +1620,11 @@ impl Client {
                         self.view.radio_filter_typing = true;
                         self.view.radio_filter_input.clear();
                         self.view.apply_radio_filter();
+                    }
+                    ActiveTab::Favorites => {
+                        self.view.favorites_filter_typing = true;
+                        self.view.favorites_filter_input.clear();
+                        self.view.apply_favorites_filter();
                     }
                     _ => {}
                 }
@@ -1533,6 +1675,13 @@ impl Client {
                         self.view.offline_tree_selected.saturating_sub(1);
                     return KeyAction::Continue;
                 }
+                if self.view.active_tab == ActiveTab::Favorites
+                    && self.view.favorites_filter_active()
+                {
+                    self.view.favorites_filter_selected =
+                        self.view.favorites_filter_selected.saturating_sub(1);
+                    return KeyAction::Continue;
+                }
                 KeyAction::SendCommand(Command::SelectUp)
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -1553,6 +1702,16 @@ impl Client {
                     }
                     return KeyAction::Continue;
                 }
+                if self.view.active_tab == ActiveTab::Favorites
+                    && self.view.favorites_filter_active()
+                {
+                    if !self.view.favorites_filtered.is_empty() {
+                        self.view.favorites_filter_selected = (self.view.favorites_filter_selected
+                            + 1)
+                        .min(self.view.favorites_filtered.len() - 1);
+                    }
+                    return KeyAction::Continue;
+                }
                 KeyAction::SendCommand(Command::SelectDown)
             }
 
@@ -1561,10 +1720,7 @@ impl Client {
                 // Check if the selected item is an album (has album_id but no track)
                 let item = match self.view.active_tab {
                     ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
-                    ActiveTab::Favorites => self
-                        .view
-                        .favorites_display
-                        .get(self.view.favorites_selected),
+                    ActiveTab::Favorites => self.view.favorites_selected_item(),
                     _ => None,
                 };
                 if let Some(item) = item {
@@ -1572,12 +1728,16 @@ impl Client {
                         if let Some(artist_id) = item.artist_id.clone() {
                             self.view.set_nav_overlay(Overlay::ArtistDetail);
                             self.view.artist_detail_selected = 0;
+                            self.view.artist_detail_left_scroll = 0;
+                            self.view.artist_detail_left_focused = false;
                             return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
                         }
                         if let Some(album_id) = item.album_id.clone() {
                             self.view
                                 .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
                             self.view.album_detail_selected = 0;
+                            self.view.album_detail_left_scroll = 0;
+                            self.view.album_detail_left_focused = false;
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
                         if let Some(playlist_id) = item.playlist_id.clone() {
@@ -1594,7 +1754,7 @@ impl Client {
                         index: self.view.search_selected,
                     }),
                     ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
-                        index: self.view.favorites_selected,
+                        index: self.view.favorites_selected_original_index(),
                     }),
                     ActiveTab::Radio => {
                         // Find the original index of the filtered radio in the full list
@@ -1913,11 +2073,7 @@ impl Client {
                 .search_display
                 .get(self.view.search_selected)
                 .cloned(),
-            ActiveTab::Favorites => self
-                .view
-                .favorites_display
-                .get(self.view.favorites_selected)
-                .cloned(),
+            ActiveTab::Favorites => self.view.favorites_selected_item().cloned(),
             _ => None,
         };
 
@@ -1995,12 +2151,29 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.view.album_detail_left_focused = true;
+                KeyAction::Continue
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.view.album_detail_left_focused = false;
+                KeyAction::Continue
+            }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.view.album_detail_selected = self.view.album_detail_selected.saturating_sub(1);
+                if self.view.album_detail_left_focused {
+                    self.view.album_detail_left_scroll =
+                        self.view.album_detail_left_scroll.saturating_sub(1);
+                } else {
+                    self.view.album_detail_selected =
+                        self.view.album_detail_selected.saturating_sub(1);
+                }
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if let Some(ref detail) = self.view.album_detail {
+                if self.view.album_detail_left_focused {
+                    self.view.album_detail_left_scroll =
+                        self.view.album_detail_left_scroll.saturating_add(1);
+                } else if let Some(ref detail) = self.view.album_detail {
                     if !detail.tracks.is_empty() {
                         self.view.album_detail_selected =
                             (self.view.album_detail_selected + 1).min(detail.tracks.len() - 1);
@@ -2009,8 +2182,12 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Enter => {
-                let index = self.view.album_detail_selected;
-                KeyAction::SendCommand(Command::PlayFromAlbum { index })
+                if self.view.album_detail_left_focused {
+                    KeyAction::Continue
+                } else {
+                    let index = self.view.album_detail_selected;
+                    KeyAction::SendCommand(Command::PlayFromAlbum { index })
+                }
             }
             KeyCode::Char('t') => {
                 if let Some(ref detail) = self.view.album_detail {
@@ -2072,27 +2249,51 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            // Switch sub-tab with h/l
+            // Switch sub-tab with h/l; left panel is a virtual tab before TopTracks
             KeyCode::Char('h') | KeyCode::Left => {
-                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
-                self.view.artist_detail_selected = 0;
+                if self.view.artist_detail_left_focused {
+                    // Already on left panel, nothing to do
+                } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                    // Step into left panel
+                    self.view.artist_detail_left_focused = true;
+                } else {
+                    self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
+                    self.view.artist_detail_selected = 0;
+                }
                 KeyAction::Continue
             }
             KeyCode::Char('l') | KeyCode::Right => {
-                self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.next();
-                self.view.artist_detail_selected = 0;
+                if self.view.artist_detail_left_focused {
+                    // Step out of left panel into TopTracks
+                    self.view.artist_detail_left_focused = false;
+                    self.view.artist_detail_sub_tab = ArtistSubTab::TopTracks;
+                    self.view.artist_detail_selected = 0;
+                } else {
+                    self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.next();
+                    self.view.artist_detail_selected = 0;
+                }
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.view.artist_detail_selected =
-                    self.view.artist_detail_selected.saturating_sub(1);
+                if self.view.artist_detail_left_focused {
+                    self.view.artist_detail_left_scroll =
+                        self.view.artist_detail_left_scroll.saturating_sub(1);
+                } else {
+                    self.view.artist_detail_selected =
+                        self.view.artist_detail_selected.saturating_sub(1);
+                }
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let count = self.artist_detail_list_len();
-                if count > 0 {
-                    self.view.artist_detail_selected =
-                        (self.view.artist_detail_selected + 1).min(count - 1);
+                if self.view.artist_detail_left_focused {
+                    self.view.artist_detail_left_scroll =
+                        self.view.artist_detail_left_scroll.saturating_add(1);
+                } else {
+                    let count = self.artist_detail_list_len();
+                    if count > 0 {
+                        self.view.artist_detail_selected =
+                            (self.view.artist_detail_selected + 1).min(count - 1);
+                    }
                 }
                 KeyAction::Continue
             }
@@ -2148,10 +2349,7 @@ impl Client {
     fn open_album_detail(&mut self) -> KeyAction {
         let item = match self.view.active_tab {
             ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
-            ActiveTab::Favorites => self
-                .view
-                .favorites_display
-                .get(self.view.favorites_selected),
+            ActiveTab::Favorites => self.view.favorites_selected_item(),
             _ => None,
         };
 
@@ -2181,10 +2379,7 @@ impl Client {
     fn open_artist_detail(&mut self) -> KeyAction {
         let item = match self.view.active_tab {
             ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
-            ActiveTab::Favorites => self
-                .view
-                .favorites_display
-                .get(self.view.favorites_selected),
+            ActiveTab::Favorites => self.view.favorites_selected_item(),
             _ => None,
         };
 
@@ -2688,6 +2883,41 @@ fn version_is_newer(remote: &str, current: &str) -> bool {
         )
     };
     parse(remote) > parse(current)
+}
+
+/// Wait for the daemon to fully exit before launching the new binary.
+/// Sends SIGTERM if the daemon is still alive after a grace period.
+async fn wait_for_daemon_exit() {
+    let sock = socket_path();
+    let pid_file = pid_path();
+
+    // Read daemon PID for fallback kill
+    let daemon_pid: Option<u32> = std::fs::read_to_string(&pid_file)
+        .ok()
+        .and_then(|s| s.trim().parse().ok());
+
+    // Poll until socket disappears (daemon cleaned up) — up to 3 seconds
+    for i in 0..30 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !sock.exists() {
+            return; // daemon exited cleanly
+        }
+        // After 1s with no clean exit, send SIGTERM to be sure
+        #[cfg(unix)]
+        if i == 10 {
+            if let Some(pid) = daemon_pid {
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            }
+        }
+    }
+
+    // Last resort: SIGKILL and remove stale files manually
+    #[cfg(unix)]
+    if let Some(pid) = daemon_pid {
+        unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+    }
+    let _ = std::fs::remove_file(&sock);
+    let _ = std::fs::remove_file(&pid_file);
 }
 
 /// Check GitHub for a newer release. Returns (version, download_url) if newer.

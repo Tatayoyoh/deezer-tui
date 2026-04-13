@@ -1,5 +1,8 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
+    TableState, Wrap,
+};
 use ratatui_image::StatefulImage;
 
 use deezer_core::api::models::AlbumDetail;
@@ -25,33 +28,48 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
         return;
     };
 
-    // Two columns: 40% info | 60% track list
+    // Two columns: 40% info (max 90) | rest track list
+    let left_w = (area.width * 40 / 100).min(52);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Length(left_w), Constraint::Min(0)])
         .split(area);
 
     let detail = detail.clone();
     draw_album_info(frame, &detail, view, columns[0]);
-    draw_track_list(frame, &detail, view.album_detail_selected, columns[1]);
+    draw_track_list(
+        frame,
+        &detail,
+        view.album_detail_selected,
+        view.album_detail_left_focused,
+        columns[1],
+    );
 }
 
 /// Draw the left column: album cover + metadata.
 fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState, area: Rect) {
+    let focused = view.album_detail_left_focused;
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Theme::border())
+        .border_style(if focused {
+            Theme::border_focused()
+        } else {
+            Theme::border()
+        })
         .padding(ratatui::widgets::Padding::new(2, 2, 1, 1));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Image grows with available height but is capped to avoid pushing metadata too far down
+    let image_h = inner.height.saturating_sub(5).clamp(8, 24);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Album art
-            Constraint::Length(1),  // Spacer
-            Constraint::Min(6),     // Metadata
+            Constraint::Length(image_h), // Album art (adaptive)
+            Constraint::Length(1),       // Spacer
+            Constraint::Min(4),          // Metadata
         ])
         .split(inner);
 
@@ -63,14 +81,63 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState
         draw_album_art(frame, chunks[0]);
     }
 
-    // Album metadata
-    draw_album_metadata(frame, detail, chunks[2]);
+    // Album metadata with scrollbar
+    let meta_area = chunks[2];
+    let scroll = view.album_detail_left_scroll;
+    let content_lines = album_metadata_line_count(detail);
+    let visible_lines = meta_area.height;
+
+    if content_lines > visible_lines {
+        // Clamp scroll
+        let max_scroll = content_lines.saturating_sub(visible_lines);
+        view.album_detail_left_scroll = scroll.min(max_scroll);
+        let scroll = view.album_detail_left_scroll;
+
+        // Reserve 1 col for scrollbar
+        let text_area = Rect {
+            width: meta_area.width.saturating_sub(1),
+            ..meta_area
+        };
+        draw_album_metadata(frame, detail, text_area, scroll);
+
+        // thumb = 1/4 of track: content_length=4, viewport=1 → ratio 1/4
+        let thumb_pos = if max_scroll > 0 {
+            (scroll as usize * 3) / max_scroll as usize
+        } else {
+            0
+        };
+        let mut sb_state = ScrollbarState::new(4)
+            .viewport_content_length(1)
+            .position(thumb_pos);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).thumb_style(Theme::dim()),
+            meta_area,
+            &mut sb_state,
+        );
+    } else {
+        view.album_detail_left_scroll = 0;
+        draw_album_metadata(frame, detail, meta_area, 0);
+    }
+}
+
+/// Estimate number of lines rendered by album metadata (without wrapping).
+fn album_metadata_line_count(detail: &AlbumDetail) -> u16 {
+    let mut n: u16 = 3; // title + artist + blank
+    if !detail.release_date.is_empty() {
+        n += 1;
+    }
+    n += 1; // tracks
+    if !detail.label.is_empty() {
+        n += 1;
+    }
+    n += 4; // blank + esc_back + enter_play + download_hint
+    n
 }
 
 /// Draw a placeholder album cover using Unicode block characters.
 fn draw_album_art(frame: &mut Frame, area: Rect) {
-    let width = area.width.min(24);
-    let height = area.height.min(12);
+    let width = area.width;
+    let height = area.height;
 
     // Align art to the left
     let art_area = Rect::new(area.x, area.y, width, height);
@@ -124,7 +191,7 @@ fn draw_album_art(frame: &mut Frame, area: Rect) {
 }
 
 /// Draw album metadata (title, artist, date, tracks, label).
-fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
+fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect, scroll: u16) {
     let s = t();
     let label_style = Style::default().fg(Theme::text_dim_color());
     let value_style = Theme::text();
@@ -165,12 +232,20 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect) {
         Span::styled(s.hint_download_album, Theme::dim()),
     ]));
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+    let paragraph = Paragraph::new(lines)
+        .wrap(Wrap { trim: true })
+        .scroll((scroll, 0));
     frame.render_widget(paragraph, area);
 }
 
 /// Draw the right column: track list.
-fn draw_track_list(frame: &mut Frame, detail: &AlbumDetail, selected: usize, area: Rect) {
+fn draw_track_list(
+    frame: &mut Frame,
+    detail: &AlbumDetail,
+    selected: usize,
+    left_focused: bool,
+    area: Rect,
+) {
     let s = t();
     if detail.tracks.is_empty() {
         let msg =
@@ -225,8 +300,12 @@ fn draw_track_list(frame: &mut Frame, detail: &AlbumDetail, selected: usize, are
                 .title_style(Theme::title())
                 .padding(ratatui::widgets::Padding::new(1, 1, 0, 0)),
         )
-        .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .row_highlight_style(if left_focused {
+            Style::default()
+        } else {
+            Theme::highlight()
+        })
+        .highlight_symbol(if left_focused { "  " } else { "> " });
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);

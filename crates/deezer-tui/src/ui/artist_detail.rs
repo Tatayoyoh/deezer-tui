@@ -1,5 +1,8 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState, Tabs, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
+    TableState, Tabs, Wrap,
+};
 use ratatui_image::StatefulImage;
 
 use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab};
@@ -25,10 +28,11 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
         return;
     };
 
-    // Two columns: 40% info | 60% content
+    // Two columns: 40% info (max 90) | rest content
+    let left_w = (area.width * 40 / 100).min(52);
     let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .constraints([Constraint::Length(left_w), Constraint::Min(0)])
         .split(area);
 
     let detail = detail.clone();
@@ -39,20 +43,28 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 /// Draw the left column: artist art + metadata.
 fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewState, area: Rect) {
     let s = t();
+    let focused = view.artist_detail_left_focused;
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(Theme::border())
+        .border_style(if focused {
+            Theme::border_focused()
+        } else {
+            Theme::border()
+        })
         .padding(ratatui::widgets::Padding::new(2, 2, 1, 1));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    // Image grows with available height but is capped to avoid pushing metadata too far down
+    let image_h = inner.height.saturating_sub(5).clamp(8, 24);
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // Art
-            Constraint::Length(1),  // Spacer
-            Constraint::Min(4),     // Metadata
+            Constraint::Length(image_h), // Artist art (adaptive)
+            Constraint::Length(1),       // Spacer
+            Constraint::Min(4),          // Metadata
         ])
         .split(inner);
 
@@ -64,7 +76,12 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
         draw_artist_art(frame, chunks[0]);
     }
 
-    // Artist metadata
+    // Artist metadata with scrollbar
+    let meta_area = chunks[2];
+    let scroll = view.artist_detail_left_scroll;
+    let content_lines = artist_metadata_line_count();
+    let visible_lines = meta_area.height;
+
     let label_style = Style::default().fg(Theme::text_dim_color());
     let value_style = Theme::text();
     let title_style = Style::default()
@@ -75,25 +92,59 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
         Line::from(Span::styled(&detail.name, title_style)),
         Line::from(""),
     ];
-
     lines.push(Line::from(vec![
         Span::styled(s.fans_label, label_style),
         Span::styled(format_fans(detail.nb_fan), value_style),
     ]));
-
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
     lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
     lines.push(Line::from(Span::styled("←/→  Switch tab", Theme::dim())));
 
-    let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, chunks[2]);
+    if content_lines > visible_lines {
+        let max_scroll = content_lines.saturating_sub(visible_lines);
+        view.artist_detail_left_scroll = scroll.min(max_scroll);
+        let scroll = view.artist_detail_left_scroll;
+
+        let text_area = Rect {
+            width: meta_area.width.saturating_sub(1),
+            ..meta_area
+        };
+        let paragraph = Paragraph::new(lines)
+            .wrap(Wrap { trim: true })
+            .scroll((scroll, 0));
+        frame.render_widget(paragraph, text_area);
+
+        // thumb = 1/4 of track: content_length=4, viewport=1 → ratio 1/4
+        let thumb_pos = if max_scroll > 0 {
+            (scroll as usize * 3) / max_scroll as usize
+        } else {
+            0
+        };
+        let mut sb_state = ScrollbarState::new(4)
+            .viewport_content_length(1)
+            .position(thumb_pos);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight).thumb_style(Theme::dim()),
+            meta_area,
+            &mut sb_state,
+        );
+    } else {
+        view.artist_detail_left_scroll = 0;
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, meta_area);
+    }
+}
+
+/// Estimate number of lines rendered by artist metadata.
+fn artist_metadata_line_count() -> u16 {
+    7 // name + blank + fans + blank + esc_back + enter_play + switch_tab
 }
 
 /// Draw a placeholder artist image using Unicode block characters.
 fn draw_artist_art(frame: &mut Frame, area: Rect) {
-    let width = area.width.min(24);
-    let height = area.height.min(12);
+    let width = area.width;
+    let height = area.height;
 
     // Align art to the left
     let art_area = Rect::new(area.x, area.y, width, height);
@@ -172,6 +223,12 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
         ArtistSubTab::Other => 3,
     };
 
+    let tab_active_style = if view.artist_detail_left_focused {
+        Theme::tab_inactive()
+    } else {
+        Theme::tab_active()
+    };
+
     let tabs = Tabs::new(tab_titles)
         .block(
             Block::default()
@@ -180,7 +237,7 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
         )
         .select(selected_tab)
         .style(Theme::tab_inactive())
-        .highlight_style(Theme::tab_active())
+        .highlight_style(tab_active_style)
         .divider("|");
 
     frame.render_widget(tabs, chunks[0]);

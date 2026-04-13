@@ -16,10 +16,11 @@ use deezer_core::player::engine::PlayerEngine;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
+use crate::favorites_cache::FavoritesCache;
 use crate::i18n::t;
 use crate::protocol::{
-    read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory, OfflineCategory,
-    RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
+    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
 };
 
 const TICK_RATE: Duration = Duration::from_millis(250);
@@ -117,6 +118,7 @@ pub struct Daemon {
     favorites_display: Vec<DisplayItem>,
     favorite_artist_ids: Vec<String>,
     favorite_album_ids: Vec<String>,
+    favorites_cache: FavoritesCache,
 
     // Radios
     radios: Vec<RadioItem>,
@@ -234,6 +236,7 @@ impl Daemon {
             favorites_display: Vec::new(),
             favorite_artist_ids: Vec::new(),
             favorite_album_ids: Vec::new(),
+            favorites_cache: FavoritesCache::load(),
 
             offline_index: OfflineIndex::load(),
             offline_category: OfflineCategory::default(),
@@ -299,6 +302,10 @@ impl Daemon {
 
         let listener = UnixListener::bind(&sock_path)?;
         info!(?sock_path, "Daemon listening");
+
+        // Write PID file so the client can kill us during updates
+        let pid_file = pid_path();
+        let _ = std::fs::write(&pid_file, std::process::id().to_string());
 
         if self.is_offline {
             // In offline mode, create the audio engine immediately (no master key needed for local playback)
@@ -418,6 +425,7 @@ impl Daemon {
 
         // Cleanup
         let _ = std::fs::remove_file(&sock_path);
+        let _ = std::fs::remove_file(&pid_file);
         info!("Daemon stopped");
         Ok(())
     }
@@ -1067,14 +1075,67 @@ impl Daemon {
             self.status_msg = Some(t().no_internet.into());
             return;
         }
+
+        let category = self.favorites_category;
+
+        // ── Cache hit: serve immediately without a network call ──────────
+        match category {
+            FavoritesCategory::Tracks => {
+                if let Some(tracks) = self.favorites_cache.tracks.clone() {
+                    self.favorites_display = tracks.iter().map(DisplayItem::from_track).collect();
+                    self.favorites = tracks;
+                    self.favorites_selected = 0;
+                    self.favorites_loading = false;
+                    return;
+                }
+            }
+            FavoritesCategory::Artists => {
+                if let Some(items) = self.favorites_cache.artists.clone() {
+                    self.favorites.clear();
+                    self.favorites_display = items;
+                    self.favorites_selected = 0;
+                    self.favorites_loading = false;
+                    return;
+                }
+            }
+            FavoritesCategory::Albums => {
+                if let Some(items) = self.favorites_cache.albums.clone() {
+                    self.favorites.clear();
+                    self.favorites_display = items;
+                    self.favorites_selected = 0;
+                    self.favorites_loading = false;
+                    return;
+                }
+            }
+            FavoritesCategory::Playlists => {
+                if let Some(items) = self.favorites_cache.playlists.clone() {
+                    self.favorites.clear();
+                    self.favorites_display = items;
+                    self.favorites_selected = 0;
+                    self.favorites_loading = false;
+                    return;
+                }
+            }
+            FavoritesCategory::Following => {
+                if let Some(items) = self.favorites_cache.following.clone() {
+                    self.favorites.clear();
+                    self.favorites_display = items;
+                    self.favorites_selected = 0;
+                    self.favorites_loading = false;
+                    return;
+                }
+            }
+            // RecentlyPlayed is never cached (changes after every play)
+            FavoritesCategory::RecentlyPlayed => {}
+        }
+
+        // ── Cache miss: fetch from API ───────────────────────────────────
         self.favorites_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
-        let category = self.favorites_category;
 
         match category {
             FavoritesCategory::Tracks => {
-                // Load favorite tracks (same as default)
                 tokio::spawn(async move {
                     let client = client.lock().await;
                     match client.get_favorites().await {
@@ -1419,6 +1480,23 @@ impl Daemon {
             self.status_msg = Some(t().no_internet.into());
             return;
         }
+
+        // Cache hit: serve immediately without a network call
+        if let Some(cached) = self
+            .favorites_cache
+            .playlist_details
+            .get(&playlist_id)
+            .cloned()
+        {
+            self.status_msg =
+                Some(t().fmt_playlist_tracks_status(&cached.title, cached.tracks.len()));
+            self.playlist_detail = Some(cached);
+            self.playlist_detail_selected = 0;
+            self.playlist_detail_loading = false;
+            return;
+        }
+
+        // Cache miss: fetch from API
         self.playlist_detail_loading = true;
         self.playlist_detail = None;
         self.playlist_detail_selected = 0;
@@ -1864,6 +1942,11 @@ impl Daemon {
                     self.favorites_loading = false;
                     self.status_msg = Some(t().fmt_loaded(tracks.len()));
                     self.favorites_display = tracks.iter().map(DisplayItem::from_track).collect();
+                    // Populate cache for the current category (not RecentlyPlayed)
+                    if self.favorites_category == FavoritesCategory::Tracks {
+                        self.favorites_cache.tracks = Some(tracks.clone());
+                        self.favorites_cache.save();
+                    }
                     self.favorites = tracks;
                     self.favorites_selected = 0;
                 }
@@ -1871,6 +1954,23 @@ impl Daemon {
                     self.favorites_loading = false;
                     self.status_msg = Some(t().fmt_loaded(items.len()));
                     self.favorites.clear();
+                    // Populate cache for the current category
+                    match self.favorites_category {
+                        FavoritesCategory::Artists => {
+                            self.favorites_cache.artists = Some(items.clone());
+                        }
+                        FavoritesCategory::Albums => {
+                            self.favorites_cache.albums = Some(items.clone());
+                        }
+                        FavoritesCategory::Playlists => {
+                            self.favorites_cache.playlists = Some(items.clone());
+                        }
+                        FavoritesCategory::Following => {
+                            self.favorites_cache.following = Some(items.clone());
+                        }
+                        _ => {}
+                    }
+                    self.favorites_cache.save();
                     self.favorites_display = items;
                     self.favorites_selected = 0;
                 }
@@ -1883,11 +1983,14 @@ impl Daemon {
                 }
                 AsyncResult::FavoriteAdded(_track_id) => {
                     self.status_msg = Some(t().status_added_to_favorites.into());
-                    // Reload favorites to reflect the change
+                    self.favorites_cache.invalidate_tracks();
+                    self.favorites_cache.save();
                     self.start_load_favorites();
                 }
                 AsyncResult::FavoriteRemoved(_track_id) => {
                     self.status_msg = Some(t().status_removed_from_favorites.into());
+                    self.favorites_cache.invalidate_tracks();
+                    self.favorites_cache.save();
                     self.start_load_favorites();
                 }
                 AsyncResult::FavoriteError(err) => {
@@ -1898,11 +2001,15 @@ impl Daemon {
                     if !self.favorite_artist_ids.contains(&artist_id) {
                         self.favorite_artist_ids.push(artist_id);
                     }
+                    self.favorites_cache.invalidate_artists();
+                    self.favorites_cache.save();
                     self.start_load_favorites_category();
                 }
                 AsyncResult::FavoriteArtistRemoved(artist_id) => {
                     self.status_msg = Some(t().status_removed_from_favorites.into());
                     self.favorite_artist_ids.retain(|id| id != &artist_id);
+                    self.favorites_cache.invalidate_artists();
+                    self.favorites_cache.save();
                     self.start_load_favorites_category();
                 }
                 AsyncResult::FavoriteArtistError(err) => {
@@ -1913,11 +2020,15 @@ impl Daemon {
                     if !self.favorite_album_ids.contains(&album_id) {
                         self.favorite_album_ids.push(album_id);
                     }
+                    self.favorites_cache.invalidate_albums();
+                    self.favorites_cache.save();
                     self.start_load_favorites_category();
                 }
                 AsyncResult::FavoriteAlbumRemoved(album_id) => {
                     self.status_msg = Some(t().status_removed_from_favorites.into());
                     self.favorite_album_ids.retain(|id| id != &album_id);
+                    self.favorites_cache.invalidate_albums();
+                    self.favorites_cache.save();
                     self.start_load_favorites_category();
                 }
                 AsyncResult::FavoriteAlbumError(err) => {
@@ -1937,8 +2048,12 @@ impl Daemon {
                 AsyncResult::PlaylistsError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_playlists_error, &err));
                 }
-                AsyncResult::AddedToPlaylist(_playlist_id) => {
+                AsyncResult::AddedToPlaylist(playlist_id) => {
                     self.status_msg = Some(t().status_added_to_playlist.into());
+                    // Invalidate the playlists list and this specific playlist's detail
+                    self.favorites_cache
+                        .invalidate_playlists(Some(&playlist_id));
+                    self.favorites_cache.save();
                 }
                 AsyncResult::AddToPlaylistError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_add_to_playlist_error, &err));
@@ -2025,6 +2140,11 @@ impl Daemon {
                     self.playlist_detail_loading = false;
                     self.status_msg =
                         Some(t().fmt_playlist_tracks_status(&detail.title, detail.tracks.len()));
+                    // Persist in cache for instant re-open
+                    self.favorites_cache
+                        .playlist_details
+                        .insert(detail.playlist_id.clone(), detail.clone());
+                    self.favorites_cache.save();
                     self.playlist_detail = Some(detail);
                     self.playlist_detail_selected = 0;
                 }

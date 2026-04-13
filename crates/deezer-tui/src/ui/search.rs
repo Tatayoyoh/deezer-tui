@@ -5,25 +5,36 @@ use crate::client::{InputMode, ViewState};
 use crate::i18n::t;
 use crate::protocol::SearchCategory;
 use crate::theme::Theme;
+use crate::ui::common;
 
-pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Search input
-            Constraint::Length(1), // Category menu
-            Constraint::Min(3),    // Results table
-        ])
-        .split(area);
+pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
+    let has_results = !view.search_display.is_empty() || view.search_loading;
 
-    // Search input
-    draw_search_input(frame, view, chunks[0]);
+    if has_results {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Search input
+                Constraint::Length(1), // Category menu
+                Constraint::Min(3),    // Results table
+            ])
+            .split(area);
 
-    // Category menu
-    draw_category_menu(frame, view.search_category, chunks[1]);
+        draw_search_input(frame, view, chunks[0]);
+        draw_category_menu(frame, view.search_category, chunks[1]);
+        draw_results_table(frame, view, chunks[2]);
+    } else {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Search input
+                Constraint::Min(3),    // Results table (logo or empty msg)
+            ])
+            .split(area);
 
-    // Results table
-    draw_results_table(frame, view, chunks[2]);
+        draw_search_input(frame, view, chunks[0]);
+        draw_results_table(frame, view, chunks[1]);
+    }
 }
 
 fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
@@ -88,7 +99,7 @@ fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
     frame.render_widget(menu, area);
 }
 
-fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
+fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     let s = t();
     if view.search_loading {
         let loading =
@@ -98,9 +109,14 @@ fn draw_results_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     }
 
     if view.search_display.is_empty() {
-        let empty_msg =
-            Paragraph::new(Span::styled(s.no_results, Theme::dim())).alignment(Alignment::Center);
-        frame.render_widget(empty_msg, area);
+        if view.search_input.is_empty() {
+            // No search performed yet — show text logo
+            common::render_logo(frame, area);
+        } else {
+            let empty_msg = Paragraph::new(Span::styled(s.no_results, Theme::dim()))
+                .alignment(Alignment::Center);
+            frame.render_widget(empty_msg, area);
+        }
         return;
     }
 
