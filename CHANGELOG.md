@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Volume persisted across restarts
+- Help modal scroll
+
+## [1.9.0] - 2026-04-11
+
+### Added
+- Favorites cache : speed up navigation
+- Fuzzy filter for favorites and radios
+
+## [1.8.1] - 2026-04-10
+
+### Added
+- album and artist page left column scroll
+
+### Changed
+- improve album and artsit miniatures responsiveness
+
+### Fixed
+- deezer-tui core behavior on update
+- API error : remove an artist from favorites
+
 ## [1.8.0] - 2026-03-31
 
 ### Added
