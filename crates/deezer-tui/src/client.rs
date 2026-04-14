@@ -493,12 +493,14 @@ pub struct ViewState {
     pub album_detail_loading: bool,
     pub album_detail_left_scroll: u16,
     pub album_detail_left_focused: bool,
+    pub album_detail_left_scrollable: bool,
     pub artist_detail: Option<ArtistDetail>,
     pub artist_detail_selected: usize,
     pub artist_detail_loading: bool,
     pub artist_detail_sub_tab: ArtistSubTab,
     pub artist_detail_left_scroll: u16,
     pub artist_detail_left_focused: bool,
+    pub artist_detail_left_scrollable: bool,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -637,12 +639,14 @@ impl ViewState {
             album_detail_loading: snap.album_detail_loading,
             album_detail_left_scroll: 0,
             album_detail_left_focused: false,
+            album_detail_left_scrollable: false,
             artist_detail: snap.artist_detail.clone(),
             artist_detail_selected: snap.artist_detail_selected,
             artist_detail_loading: snap.artist_detail_loading,
             artist_detail_sub_tab: snap.artist_detail_sub_tab,
             artist_detail_left_scroll: 0,
             artist_detail_left_focused: false,
+            artist_detail_left_scrollable: false,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -2152,7 +2156,9 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Left | KeyCode::Char('h') => {
-                self.view.album_detail_left_focused = true;
+                if self.view.album_detail_left_scrollable {
+                    self.view.album_detail_left_focused = true;
+                }
                 KeyAction::Continue
             }
             KeyCode::Right | KeyCode::Char('l') => {
@@ -2253,8 +2259,10 @@ impl Client {
             KeyCode::Char('h') | KeyCode::Left => {
                 if self.view.artist_detail_left_focused {
                     // Already on left panel, nothing to do
-                } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
-                    // Step into left panel
+                } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks
+                    && self.view.artist_detail_left_scrollable
+                {
+                    // Step into left panel only if it has scrollable content
                     self.view.artist_detail_left_focused = true;
                 } else {
                     self.view.artist_detail_sub_tab = self.view.artist_detail_sub_tab.prev();
