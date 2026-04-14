@@ -50,13 +50,26 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     draw_tabs(frame, view, chunks[0]);
 
     // Content area: detail overlays replace tab content.
-    // Also handle WaitingList stacked on top of a detail view — render the detail as background.
-    let wl_over_stack = matches!(view.overlay, Some(Overlay::WaitingList { .. }));
-    let show_album = matches!(view.overlay, Some(Overlay::AlbumDetail { .. }))
-        || (wl_over_stack
-            && matches!(view.overlay_stack.last(), Some(Overlay::AlbumDetail { .. })));
-    let show_artist = view.overlay == Some(Overlay::ArtistDetail)
-        || (wl_over_stack && view.overlay_stack.last() == Some(&Overlay::ArtistDetail));
+    // Show album/artist detail as background whenever it appears anywhere in the overlay chain
+    // (current overlay or any stacked overlay). This handles cases where Help/Settings/Info
+    // are pushed on top of a detail view.
+    let all_overlays =
+        std::iter::once(view.overlay.as_ref()).chain(view.overlay_stack.iter().rev().map(Some));
+    let mut show_album = false;
+    let mut show_artist = false;
+    for o in all_overlays {
+        match o {
+            Some(Overlay::AlbumDetail { .. }) => {
+                show_album = true;
+                break;
+            }
+            Some(Overlay::ArtistDetail) => {
+                show_artist = true;
+                break;
+            }
+            _ => {}
+        }
+    }
 
     if show_album {
         album_detail::draw(frame, view, chunks[1]);

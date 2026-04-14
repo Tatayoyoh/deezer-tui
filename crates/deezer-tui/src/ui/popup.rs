@@ -17,10 +17,14 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
 
     // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it).
     // WaitingList manages its own backdrop after rendering any stacked background overlay.
+    // Also skip when a detail view is in the overlay stack (modal stacked on top of detail).
     let is_detail_overlay = matches!(
         view.overlay,
         Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
-    );
+    ) || view
+        .overlay_stack
+        .iter()
+        .any(|o| matches!(o, Overlay::AlbumDetail { .. } | Overlay::ArtistDetail));
     let is_waiting_list = matches!(view.overlay, Some(Overlay::WaitingList { .. }));
     let has_modal = view.overlay.is_some() || view.popup.is_some();
     if has_modal && !is_detail_overlay && !is_waiting_list {
@@ -84,9 +88,15 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             if let Some(ps) = bg_ps {
                 draw_playlist_detail(frame, view, ps);
             }
-            // Dim whatever is behind (tabs, album/artist detail rendered in content area,
-            // or playlist detail just drawn above)
-            draw_backdrop(frame);
+            // Dim whatever is behind, but skip when album/artist detail is in the stack —
+            // the backdrop overwrites image cells and causes pixelation.
+            let detail_in_stack = view
+                .overlay_stack
+                .iter()
+                .any(|o| matches!(o, Overlay::AlbumDetail { .. } | Overlay::ArtistDetail));
+            if !detail_in_stack {
+                draw_backdrop(frame);
+            }
             draw_waiting_list(frame, view, sel);
             // Don't return — let the popup (context menu) render on top if open
         }
@@ -98,8 +108,13 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         return;
     };
 
-    // When a popup opens on top of an overlay, add a second backdrop
-    if view.overlay.is_some() {
+    // When a popup opens on top of an overlay, add a second backdrop.
+    // Skip for detail views (album/artist) — backdrop over the image area causes pixelation.
+    let is_content_overlay = matches!(
+        view.overlay,
+        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
+    );
+    if view.overlay.is_some() && !is_content_overlay {
         draw_backdrop(frame);
     }
 
