@@ -49,10 +49,18 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     // Tab bar
     draw_tabs(frame, view, chunks[0]);
 
-    // Content area: detail overlays replace tab content
-    if matches!(view.overlay, Some(Overlay::AlbumDetail { .. })) {
+    // Content area: detail overlays replace tab content.
+    // Also handle WaitingList stacked on top of a detail view — render the detail as background.
+    let wl_over_stack = matches!(view.overlay, Some(Overlay::WaitingList { .. }));
+    let show_album = matches!(view.overlay, Some(Overlay::AlbumDetail { .. }))
+        || (wl_over_stack
+            && matches!(view.overlay_stack.last(), Some(Overlay::AlbumDetail { .. })));
+    let show_artist = view.overlay == Some(Overlay::ArtistDetail)
+        || (wl_over_stack && view.overlay_stack.last() == Some(&Overlay::ArtistDetail));
+
+    if show_album {
         album_detail::draw(frame, view, chunks[1]);
-    } else if view.overlay == Some(Overlay::ArtistDetail) {
+    } else if show_artist {
         artist_detail::draw(frame, view, chunks[1]);
     } else {
         match view.active_tab {

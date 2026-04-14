@@ -1650,9 +1650,7 @@ impl Client {
 
             // Open waiting list
             KeyCode::Char('w') => {
-                if !self.view.queue.is_empty() {
-                    self.view.overlay = Some(Overlay::WaitingList { selected: 0 });
-                }
+                self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
             }
 
@@ -2229,6 +2227,11 @@ impl Client {
                     KeyAction::Continue
                 }
             }
+            // Open waiting list on top of album detail
+            KeyCode::Char('w') => {
+                self.view.push_overlay(Overlay::WaitingList { selected: 0 });
+                KeyAction::Continue
+            }
             // Player controls still work in album detail
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
@@ -2337,6 +2340,11 @@ impl Client {
                     }
                     KeyAction::Continue
                 }
+            }
+            // Open waiting list on top of artist detail
+            KeyCode::Char('w') => {
+                self.view.push_overlay(Overlay::WaitingList { selected: 0 });
+                KeyAction::Continue
             }
             // Player controls still work
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
@@ -2470,6 +2478,11 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
+            // Open waiting list on top of playlist detail
+            KeyCode::Char('w') => {
+                self.view.push_overlay(Overlay::WaitingList { selected: 0 });
+                KeyAction::Continue
+            }
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
