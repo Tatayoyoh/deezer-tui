@@ -81,7 +81,7 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
 fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
     let (tab_titles, selected) = if view.is_offline {
-        (vec![Line::from(s.tab_offline)], 0)
+        (vec![Line::from(s.tab_offline_downloads)], 0)
     } else {
         (
             vec![
@@ -99,11 +99,7 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
         )
     };
 
-    let header_title = if view.is_offline {
-        format!(" deezer-tui [{}] ", s.offline_mode)
-    } else {
-        " deezer-tui ".to_string()
-    };
+    let header_title = " Deezer-TUI ";
 
     let mut block = Block::default()
         .borders(Borders::BOTTOM)
@@ -128,19 +124,42 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     frame.render_widget(tabs, area);
 
-    // Draw [Tab] hint on the same line as the tabs, aligned right
-    let hint_text = format!("[Tab] {} ", s.help_switch_tabs);
-    let hint_len = hint_text.len() as u16;
-    if area.width > hint_len {
-        let hint_area = Rect {
-            x: area.x + area.width - hint_len,
-            y: area.y + 1, // inner line where tabs are rendered
-            width: hint_len,
-            height: 1,
-        };
-        frame.render_widget(
-            Paragraph::new(Span::styled(hint_text, Theme::dim())),
-            hint_area,
-        );
+    // Draw hint on the same line as the tabs, aligned right.
+    // In offline mode: show offline indicator instead of tab-switch hint.
+    if view.is_offline {
+        let text = s.offline_indicator;
+        let text_len = text.chars().count() as u16;
+        if area.width > text_len {
+            let indicator_area = Rect {
+                x: area.x + area.width - text_len,
+                y: area.y + 1,
+                width: text_len,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    text,
+                    Style::default()
+                        .fg(Theme::secondary())
+                        .add_modifier(Modifier::BOLD),
+                )),
+                indicator_area,
+            );
+        }
+    } else {
+        let hint_text = format!("[Tab] {} ", s.help_switch_tabs);
+        let hint_len = hint_text.len() as u16;
+        if area.width > hint_len {
+            let hint_area = Rect {
+                x: area.x + area.width - hint_len,
+                y: area.y + 1,
+                width: hint_len,
+                height: 1,
+            };
+            frame.render_widget(
+                Paragraph::new(Span::styled(hint_text, Theme::dim())),
+                hint_area,
+            );
+        }
     }
 }

@@ -60,6 +60,8 @@ pub struct Strings {
     pub tab_favorites: &'static str,
     pub tab_radios: &'static str,
     pub tab_offline: &'static str,
+    /// Tab label shown in offline mode (replaces all tabs with a single "Downloaded tracks" tab)
+    pub tab_offline_downloads: &'static str,
 
     // --- Login ---
     pub login_connecting: &'static str,
@@ -244,6 +246,7 @@ pub struct Strings {
     pub hint_download_album: &'static str,
     pub hint_expand_collapse: &'static str,
     pub offline_mode: &'static str,
+    pub offline_indicator: &'static str,
     pub no_internet: &'static str,
 
     // --- Toasts / status ---
@@ -539,6 +542,7 @@ static EN: Strings = Strings {
     tab_favorites: " Favorites ",
     tab_radios: " Radios ",
     tab_offline: " Offline ",
+    tab_offline_downloads: " Downloaded tracks ",
 
     login_connecting: "Connecting...",
     login_button: "Login with Deezer",
@@ -705,6 +709,7 @@ static EN: Strings = Strings {
     hint_download_album: " download  ",
     hint_expand_collapse: "→ expand/collapse",
     offline_mode: "offline mode",
+    offline_indicator: "● Offline mode ",
     no_internet: "No internet connection",
 
     link_copied: "Link copied to clipboard!",
@@ -801,6 +806,7 @@ static FR: Strings = Strings {
     tab_favorites: " Favoris ",
     tab_radios: " Radios ",
     tab_offline: " Hors-ligne ",
+    tab_offline_downloads: " Pistes téléchargées ",
 
     login_connecting: "Connexion...",
     login_button: "Se connecter avec Deezer",
@@ -967,6 +973,7 @@ static FR: Strings = Strings {
     hint_download_album: " télécharger  ",
     hint_expand_collapse: "→ déplier/replier",
     offline_mode: "mode hors-ligne",
+    offline_indicator: "● Mode hors-ligne ",
     no_internet: "Pas de connexion internet",
 
     link_copied: "Lien copié dans le presse-papiers !",
@@ -1062,6 +1069,7 @@ static ES: Strings = Strings {
     tab_favorites: " Favoritos ",
     tab_radios: " Radios ",
     tab_offline: " Sin conexión ",
+    tab_offline_downloads: " Pistas descargadas ",
 
     login_connecting: "Conectando...",
     login_button: "Iniciar sesión con Deezer",
@@ -1228,6 +1236,7 @@ static ES: Strings = Strings {
     hint_download_album: " descargar  ",
     hint_expand_collapse: "→ expandir/contraer",
     offline_mode: "modo sin conexión",
+    offline_indicator: "● Modo sin conexión ",
     no_internet: "Sin conexión a internet",
 
     link_copied: "¡Enlace copiado al portapapeles!",
@@ -1323,6 +1332,7 @@ static PT: Strings = Strings {
     tab_favorites: " Favoritos ",
     tab_radios: " Rádios ",
     tab_offline: " Offline ",
+    tab_offline_downloads: " Faixas baixadas ",
 
     login_connecting: "Conectando...",
     login_button: "Entrar com Deezer",
@@ -1489,6 +1499,7 @@ static PT: Strings = Strings {
     hint_download_album: " baixar  ",
     hint_expand_collapse: "→ expandir/recolher",
     offline_mode: "modo offline",
+    offline_indicator: "● Modo offline ",
     no_internet: "Sem conexão com a internet",
 
     link_copied: "Link copiado para a área de transferência!",
@@ -1584,6 +1595,7 @@ static DE: Strings = Strings {
     tab_favorites: " Favoriten ",
     tab_radios: " Radios ",
     tab_offline: " Offline ",
+    tab_offline_downloads: " Heruntergeladene Titel ",
 
     login_connecting: "Verbindung...",
     login_button: "Mit Deezer anmelden",
@@ -1750,6 +1762,7 @@ static DE: Strings = Strings {
     hint_download_album: " herunterladen  ",
     hint_expand_collapse: "→ auf-/zuklappen",
     offline_mode: "Offline-Modus",
+    offline_indicator: "● Offline-Modus ",
     no_internet: "Keine Internetverbindung",
 
     link_copied: "Link in die Zwischenablage kopiert!",
