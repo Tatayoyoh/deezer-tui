@@ -181,6 +181,11 @@ pub struct Strings {
     // --- Themes ---
     pub themes: &'static str,
     pub official_deezer_themes: &'static str,
+    pub transparency_label: &'static str,
+    pub theme_picker_hint_transparency: &'static str,
+    pub theme_picker_hint_navigate: &'static str,
+    pub theme_picker_hint_confirm: &'static str,
+    pub theme_picker_hint_back: &'static str,
 
     // --- Album detail ---
     pub loading_album: &'static str,
@@ -642,6 +647,11 @@ static EN: Strings = Strings {
 
     themes: " Themes ",
     official_deezer_themes: "  Official Deezer themes",
+    transparency_label: "Transparency",
+    theme_picker_hint_transparency: "[←/→] Transparency",
+    theme_picker_hint_navigate: "[↑/↓] Theme",
+    theme_picker_hint_confirm: "[Enter] Confirm",
+    theme_picker_hint_back: "[Esc] Back",
 
     loading_album: "Loading album...",
     no_album_loaded: "No album loaded",
@@ -897,6 +907,11 @@ static FR: Strings = Strings {
 
     themes: " Thèmes ",
     official_deezer_themes: "  Thèmes officiels Deezer",
+    transparency_label: "Transparence",
+    theme_picker_hint_transparency: "[←/→] Transparence",
+    theme_picker_hint_navigate: "[↑/↓] Thème",
+    theme_picker_hint_confirm: "[Entrée] Confirmer",
+    theme_picker_hint_back: "[Échap] Retour",
 
     loading_album: "Chargement de l'album...",
     no_album_loaded: "Aucun album chargé",
@@ -1151,6 +1166,11 @@ static ES: Strings = Strings {
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiales de Deezer",
+    transparency_label: "Transparencia",
+    theme_picker_hint_transparency: "[←/→] Transparencia",
+    theme_picker_hint_navigate: "[↑/↓] Tema",
+    theme_picker_hint_confirm: "[Enter] Confirmar",
+    theme_picker_hint_back: "[Esc] Volver",
 
     loading_album: "Cargando álbum...",
     no_album_loaded: "Ningún álbum cargado",
@@ -1405,6 +1425,11 @@ static PT: Strings = Strings {
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiais do Deezer",
+    transparency_label: "Transparência",
+    theme_picker_hint_transparency: "[←/→] Transparência",
+    theme_picker_hint_navigate: "[↑/↓] Tema",
+    theme_picker_hint_confirm: "[Enter] Confirmar",
+    theme_picker_hint_back: "[Esc] Voltar",
 
     loading_album: "Carregando álbum...",
     no_album_loaded: "Nenhum álbum carregado",
@@ -1659,6 +1684,11 @@ static DE: Strings = Strings {
 
     themes: " Themen ",
     official_deezer_themes: "  Offizielle Deezer-Themen",
+    transparency_label: "Transparenz",
+    theme_picker_hint_transparency: "[←/→] Transparenz",
+    theme_picker_hint_navigate: "[↑/↓] Thema",
+    theme_picker_hint_confirm: "[Enter] Bestätigen",
+    theme_picker_hint_back: "[Esc] Zurück",
 
     loading_album: "Album wird geladen...",
     no_album_loaded: "Kein Album geladen",

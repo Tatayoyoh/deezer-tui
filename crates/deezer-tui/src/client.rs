@@ -1065,13 +1065,14 @@ impl Client {
     }
 
     pub async fn run(&mut self, show_updated: bool) -> Result<()> {
-        // Load saved theme from config
+        // Load saved theme and opacity from config
         let config = Config::load();
         if let Some(ref theme_str) = config.theme {
             if let Some(id) = ThemeId::from_str(theme_str) {
                 Theme::set(id);
             }
         }
+        Theme::set_transparency(config.bg_transparency);
 
         // Setup terminal
         enable_raw_mode()?;
@@ -1946,7 +1947,10 @@ impl Client {
                 let count = ThemeId::ALL.len();
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
-                        // Back to settings
+                        // Save transparency then go back to settings
+                        let mut config = Config::load();
+                        config.bg_transparency = Theme::transparency();
+                        let _ = config.save();
                         self.view.overlay = Some(Overlay::Settings { selected: 1 });
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
@@ -1957,11 +1961,20 @@ impl Client {
                         *selected = (*selected + 1).min(count - 1);
                         Theme::set(ThemeId::ALL[*selected]);
                     }
+                    KeyCode::Left => {
+                        let t = Theme::transparency().saturating_sub(10);
+                        Theme::set_transparency(t);
+                    }
+                    KeyCode::Right => {
+                        let t = (Theme::transparency() + 10).min(100);
+                        Theme::set_transparency(t);
+                    }
                     KeyCode::Enter => {
-                        // Confirm selection, save to config, back to settings
+                        // Confirm selection, save theme + transparency to config, back to settings
                         let theme_id = ThemeId::ALL[*selected];
                         let mut config = Config::load();
                         config.theme = Some(theme_id.as_str().to_string());
+                        config.bg_transparency = Theme::transparency();
                         let _ = config.save();
                         self.view.overlay = Some(Overlay::Settings { selected: 1 });
                     }

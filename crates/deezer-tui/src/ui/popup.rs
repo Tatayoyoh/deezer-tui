@@ -516,12 +516,14 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
 
 /// Draw the theme picker overlay.
 fn draw_theme_picker(frame: &mut Frame, selected: usize) {
+    let s = t();
     let themes = ThemeId::ALL;
     let current = Theme::current();
+    let opacity = Theme::transparency();
 
     let area = frame.area();
-    // +1 for the header line, +1 blank line after header
-    let height = themes.len() as u16 + 6;
+    // transparency (1) + blank (1) + header (1) + blank (1) + themes + blank (1) + hints (1) + borders (2)
+    let height = themes.len() as u16 + 8;
     let popup_area = centered_rect(45, height, area);
 
     frame.render_widget(Clear, popup_area);
@@ -530,24 +532,49 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
         .borders(Borders::ALL)
         .border_style(Theme::border_focused())
         .style(Style::default().bg(Theme::surface()))
-        .title(t().themes)
+        .title(s.themes)
         .title_style(Theme::title());
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
+    // Split inner: slider (1) | blank (1) | theme list (fill) | blank (1) | hints (1)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // transparency slider row
+            Constraint::Length(1), // blank separator
+            Constraint::Min(0),    // theme list
+            Constraint::Length(1), // blank before hints
+            Constraint::Length(1), // shortcut hints
+        ])
+        .split(inner);
+
+    // ── Transparency slider ──────────────────────────────────────
+    let filled = (opacity / 10) as usize;
+    let empty = 10usize.saturating_sub(filled);
+    let bar: String = "█".repeat(filled) + &"░".repeat(empty);
+    let pct = format!("{opacity:>3}%");
+    let slider_line = Line::from(vec![
+        Span::styled(format!(" {} ", s.transparency_label), Theme::text()),
+        Span::styled("◀ ", Theme::dim()),
+        Span::styled(bar, Style::default().fg(Theme::primary())),
+        Span::styled(" ▶ ", Theme::dim()),
+        Span::styled(pct, Theme::text()),
+    ]);
+    frame.render_widget(Paragraph::new(slider_line), chunks[0]);
+
+    // ── Theme list ───────────────────────────────────────────────
     let mut items: Vec<ListItem> = Vec::with_capacity(themes.len() + 2);
 
-    // Header
     items.push(ListItem::new(Line::from(Span::styled(
-        t().official_deezer_themes,
+        s.official_deezer_themes,
         Style::default()
             .fg(Theme::primary())
             .add_modifier(Modifier::BOLD),
     ))));
     items.push(ListItem::new(Line::from("")));
 
-    // Theme entries
     for (i, &theme) in themes.iter().enumerate() {
         let prefix = if i == selected { " > " } else { "   " };
         let suffix = if theme == current { "  ●" } else { "" };
@@ -564,8 +591,15 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
         items.push(ListItem::new(Line::from(Span::styled(label, style))));
     }
 
-    let list = List::new(items);
-    frame.render_widget(list, inner);
+    frame.render_widget(List::new(items), chunks[2]);
+
+    // ── Shortcut hints ───────────────────────────────────────────
+    let hint_line = Line::from(vec![
+        Span::styled(s.theme_picker_hint_transparency, Theme::dim()),
+        Span::styled("  ", Theme::dim()),
+        Span::styled(s.theme_picker_hint_navigate, Theme::dim()),
+    ]);
+    frame.render_widget(Paragraph::new(hint_line), chunks[4]);
 }
 
 /// Draw the language picker overlay.

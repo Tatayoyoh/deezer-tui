@@ -87,6 +87,8 @@ impl ThemeId {
 
 thread_local! {
     static CURRENT_THEME: Cell<ThemeId> = const { Cell::new(ThemeId::DarkPurple) };
+    /// Background transparency: 0 = fully opaque, 100 = fully transparent (terminal default bg).
+    static BG_TRANSPARENCY: Cell<u8> = const { Cell::new(0) };
 }
 
 /// Deezer-inspired color palette with dynamic theme support.
@@ -101,6 +103,38 @@ impl Theme {
     /// Get the active theme id.
     pub fn current() -> ThemeId {
         CURRENT_THEME.with(|c| c.get())
+    }
+
+    /// Set background transparency (0–100, steps of 10). 0 = opaque, 100 = fully transparent.
+    pub fn set_transparency(transparency: u8) {
+        BG_TRANSPARENCY.with(|c| c.set(transparency.min(100)));
+    }
+
+    /// Get background transparency (0–100).
+    pub fn transparency() -> u8 {
+        BG_TRANSPARENCY.with(|c| c.get())
+    }
+
+    /// Effective background color given the current transparency setting.
+    /// At 0%: full `bg()`. At 100%: `Color::Reset` (terminal transparent background).
+    /// Intermediate values blend `bg()` RGB channels toward zero.
+    pub fn bg_with_opacity() -> Color {
+        let t = Self::transparency();
+        if t == 0 {
+            return Self::bg();
+        }
+        if t >= 100 {
+            return Color::Reset;
+        }
+        let opacity = (100 - t) as u32;
+        match Self::bg() {
+            Color::Rgb(r, g, b) => Color::Rgb(
+                (r as u32 * opacity / 100) as u8,
+                (g as u32 * opacity / 100) as u8,
+                (b as u32 * opacity / 100) as u8,
+            ),
+            other => other,
+        }
     }
 
     // ── Color accessors ──────────────────────────────────────────
