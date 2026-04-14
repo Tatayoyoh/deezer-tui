@@ -37,6 +37,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 
     let detail = detail.clone();
     draw_album_info(frame, &detail, view, columns[0]);
+    // Auto-switch focus to right if left column lost its scrollbar (e.g. on resize)
+    if !view.album_detail_left_scrollable && view.album_detail_left_focused {
+        view.album_detail_left_focused = false;
+    }
     draw_track_list(
         frame,
         &detail,
@@ -86,6 +90,8 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState
     let scroll = view.album_detail_left_scroll;
     let content_lines = album_metadata_line_count(detail);
     let visible_lines = meta_area.height;
+
+    view.album_detail_left_scrollable = content_lines > visible_lines;
 
     if content_lines > visible_lines {
         // Clamp scroll

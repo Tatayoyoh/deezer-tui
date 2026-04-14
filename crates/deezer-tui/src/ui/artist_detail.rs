@@ -37,6 +37,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 
     let detail = detail.clone();
     draw_artist_info(frame, &detail, view, columns[0]);
+    // Auto-switch focus to right if left column lost its scrollbar (e.g. on resize)
+    if !view.artist_detail_left_scrollable && view.artist_detail_left_focused {
+        view.artist_detail_left_focused = false;
+    }
     draw_right_panel(frame, &detail, view, columns[1]);
 }
 
@@ -100,6 +104,8 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
     lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
     lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
     lines.push(Line::from(Span::styled("←/→  Switch tab", Theme::dim())));
+
+    view.artist_detail_left_scrollable = content_lines > visible_lines;
 
     if content_lines > visible_lines {
         let max_scroll = content_lines.saturating_sub(visible_lines);
