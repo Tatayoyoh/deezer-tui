@@ -999,20 +999,29 @@ impl Client {
 
     /// Get the current cover art URL from album/artist detail overlay.
     fn current_cover_url(&self) -> Option<&str> {
-        if matches!(self.view.overlay, Some(Overlay::AlbumDetail { .. })) {
-            self.view
+        // Search overlay chain (current + stack) for an active album/artist detail.
+        let active = std::iter::once(self.view.overlay.as_ref())
+            .chain(self.view.overlay_stack.iter().rev().map(Some))
+            .find(|o| {
+                matches!(
+                    o,
+                    Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
+                )
+            });
+        match active {
+            Some(Some(Overlay::AlbumDetail { .. })) => self
+                .view
                 .album_detail
                 .as_ref()
                 .map(|d| d.cover_url.as_str())
-                .filter(|u| !u.is_empty())
-        } else if self.view.overlay == Some(Overlay::ArtistDetail) {
-            self.view
+                .filter(|u| !u.is_empty()),
+            Some(Some(Overlay::ArtistDetail)) => self
+                .view
                 .artist_detail
                 .as_ref()
                 .map(|d| d.picture_url.as_str())
-                .filter(|u| !u.is_empty())
-        } else {
-            None
+                .filter(|u| !u.is_empty()),
+            _ => None,
         }
     }
 
@@ -1366,10 +1375,11 @@ impl Client {
             && !self.view.radio_filter_typing
             && !self.view.favorites_filter_typing
         {
-            self.view.overlay = match self.view.overlay {
-                Some(Overlay::Help { .. }) => None,
-                _ => Some(Overlay::Help { scroll: 0 }),
-            };
+            if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
+                self.view.pop_overlay();
+            } else {
+                self.view.push_overlay(Overlay::Help { scroll: 0 });
+            }
             return KeyAction::Continue;
         }
 
@@ -1380,19 +1390,21 @@ impl Client {
             && !self.view.radio_filter_typing
             && !self.view.favorites_filter_typing
         {
-            self.view.overlay = match self.view.overlay {
-                Some(Overlay::Info) => None,
-                _ => Some(Overlay::Info),
-            };
+            if matches!(self.view.overlay, Some(Overlay::Info)) {
+                self.view.pop_overlay();
+            } else {
+                self.view.push_overlay(Overlay::Info);
+            }
             return KeyAction::Continue;
         }
 
         // Ctrl+O : toggle settings overlay
         if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.view.overlay = match self.view.overlay {
-                Some(Overlay::Settings { .. }) => None,
-                _ => Some(Overlay::Settings { selected: 0 }),
-            };
+            if matches!(self.view.overlay, Some(Overlay::Settings { .. })) {
+                self.view.pop_overlay();
+            } else {
+                self.view.push_overlay(Overlay::Settings { selected: 0 });
+            }
             return KeyAction::Continue;
         }
 
@@ -1833,7 +1845,7 @@ impl Client {
             Overlay::Help { scroll } => {
                 match key.code {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
-                        self.view.overlay = None;
+                        self.view.pop_overlay();
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
                         *scroll += 1;
@@ -1848,7 +1860,7 @@ impl Client {
             Overlay::Info => {
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('i') => {
-                        self.view.overlay = None;
+                        self.view.pop_overlay();
                     }
                     _ => {}
                 }
@@ -1858,7 +1870,7 @@ impl Client {
                 const SETTINGS_COUNT: usize = 6;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
-                        self.view.overlay = None;
+                        self.view.pop_overlay();
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = selected.saturating_sub(1);
@@ -1870,7 +1882,7 @@ impl Client {
                         match *selected {
                             0 => {
                                 // Keyboard shortcuts
-                                self.view.overlay = Some(Overlay::Help { scroll: 0 });
+                                self.view.push_overlay(Overlay::Help { scroll: 0 });
                                 return KeyAction::Continue;
                             }
                             1 => {
@@ -1878,7 +1890,8 @@ impl Client {
                                 let current = Theme::current();
                                 let idx =
                                     ThemeId::ALL.iter().position(|&t| t == current).unwrap_or(0);
-                                self.view.overlay = Some(Overlay::ThemePicker { selected: idx });
+                                self.view
+                                    .push_overlay(Overlay::ThemePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
                             2 => {
@@ -1886,12 +1899,13 @@ impl Client {
                                 let current = i18n::current_locale();
                                 let idx =
                                     Locale::ALL.iter().position(|&l| l == current).unwrap_or(0);
-                                self.view.overlay = Some(Overlay::LanguagePicker { selected: idx });
+                                self.view
+                                    .push_overlay(Overlay::LanguagePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
                             3 => {
                                 // Logout
-                                self.view.overlay = None;
+                                self.view.pop_overlay();
                                 return KeyAction::SendCommand(Command::Logout);
                             }
                             4 => {
@@ -1909,7 +1923,7 @@ impl Client {
                 }
                 // Also close on Ctrl+O
                 if key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.view.overlay = None;
+                    self.view.pop_overlay();
                 }
                 KeyAction::Continue
             }
@@ -1917,7 +1931,7 @@ impl Client {
                 let count = Locale::ALL.len();
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
-                        self.view.overlay = Some(Overlay::Settings { selected: 2 });
+                        self.view.pop_overlay();
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = selected.saturating_sub(1);
@@ -1931,7 +1945,7 @@ impl Client {
                         let mut config = Config::load();
                         config.language = Some(locale.as_str().to_string());
                         let _ = config.save();
-                        self.view.overlay = Some(Overlay::Settings { selected: 2 });
+                        self.view.pop_overlay();
                     }
                     _ => {}
                 }
@@ -1949,7 +1963,7 @@ impl Client {
                         let mut config = Config::load();
                         config.bg_transparency = Theme::transparency();
                         let _ = config.save();
-                        self.view.overlay = Some(Overlay::Settings { selected: 1 });
+                        self.view.pop_overlay();
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = selected.saturating_sub(1);
@@ -1974,7 +1988,7 @@ impl Client {
                         config.theme = Some(theme_id.as_str().to_string());
                         config.bg_transparency = Theme::transparency();
                         let _ = config.save();
-                        self.view.overlay = Some(Overlay::Settings { selected: 1 });
+                        self.view.pop_overlay();
                     }
                     _ => {}
                 }
@@ -1988,7 +2002,7 @@ impl Client {
                 const UPDATE_OPTIONS: usize = 3;
                 match key.code {
                     KeyCode::Esc => {
-                        self.view.overlay = None;
+                        self.view.pop_overlay();
                     }
                     KeyCode::Up | KeyCode::Char('k') => {
                         *selected = selected.saturating_sub(1);
@@ -2007,14 +2021,14 @@ impl Client {
                         }
                         1 => {
                             // "Later" — dismiss for this session
-                            self.view.overlay = None;
+                            self.view.pop_overlay();
                         }
                         2 => {
                             // "Never ask again" — persist to config
                             let mut config = Config::load();
                             config.skip_update_check = true;
                             let _ = config.save();
-                            self.view.overlay = None;
+                            self.view.pop_overlay();
                         }
                         _ => {}
                     },
