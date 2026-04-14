@@ -213,6 +213,8 @@ pub struct Strings {
     // --- Waiting list ---
     pub waiting_list: &'static str,
     pub queue_empty: &'static str,
+    pub queue_empty_title: &'static str,
+    pub queue_empty_subtitle: &'static str,
 
     // --- Footer hints ---
     pub hint_play: &'static str,
@@ -675,6 +677,8 @@ static EN: Strings = Strings {
 
     waiting_list: "Waiting List",
     queue_empty: "Queue is empty",
+    queue_empty_title: "Waiting list",
+    queue_empty_subtitle: "No music playing",
 
     hint_play: " play  ",
     hint_menu: " menu  ",
@@ -935,6 +939,8 @@ static FR: Strings = Strings {
 
     waiting_list: "File d'attente",
     queue_empty: "La file d'attente est vide",
+    queue_empty_title: "File d'attente",
+    queue_empty_subtitle: "Aucune musique jouée",
 
     hint_play: " lire  ",
     hint_menu: " menu  ",
@@ -1194,6 +1200,8 @@ static ES: Strings = Strings {
 
     waiting_list: "Cola de reproducción",
     queue_empty: "La cola está vacía",
+    queue_empty_title: "Lista de espera",
+    queue_empty_subtitle: "Sin música en reproducción",
 
     hint_play: " reproducir  ",
     hint_menu: " menú  ",
@@ -1453,6 +1461,8 @@ static PT: Strings = Strings {
 
     waiting_list: "Fila de reprodução",
     queue_empty: "A fila está vazia",
+    queue_empty_title: "Fila de reprodução",
+    queue_empty_subtitle: "Nenhuma música tocando",
 
     hint_play: " reproduzir  ",
     hint_menu: " menu  ",
@@ -1712,6 +1722,8 @@ static DE: Strings = Strings {
 
     waiting_list: "Warteschlange",
     queue_empty: "Die Warteschlange ist leer",
+    queue_empty_title: "Warteschlange",
+    queue_empty_subtitle: "Keine Musik wird abgespielt",
 
     hint_play: " abspielen  ",
     hint_menu: " Menü  ",

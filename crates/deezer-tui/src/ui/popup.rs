@@ -15,13 +15,15 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         draw_toast(frame, &toast.message, toast.is_error);
     }
 
-    // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it)
+    // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it).
+    // WaitingList manages its own backdrop after rendering any stacked background overlay.
     let is_detail_overlay = matches!(
         view.overlay,
         Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
     );
+    let is_waiting_list = matches!(view.overlay, Some(Overlay::WaitingList { .. }));
     let has_modal = view.overlay.is_some() || view.popup.is_some();
-    if has_modal && !is_detail_overlay {
+    if has_modal && !is_detail_overlay && !is_waiting_list {
         draw_backdrop(frame);
     }
 
@@ -73,7 +75,19 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             // Don't return — let the popup (context menu) render on top if open
         }
         Some(Overlay::WaitingList { selected }) => {
-            draw_waiting_list(frame, view, *selected);
+            // If a playlist detail is stacked underneath, render it as background first
+            let sel = *selected;
+            let bg_ps = match view.overlay_stack.last() {
+                Some(Overlay::PlaylistDetail { selected: ps }) => Some(*ps),
+                _ => None,
+            };
+            if let Some(ps) = bg_ps {
+                draw_playlist_detail(frame, view, ps);
+            }
+            // Dim whatever is behind (tabs, album/artist detail rendered in content area,
+            // or playlist detail just drawn above)
+            draw_backdrop(frame);
+            draw_waiting_list(frame, view, sel);
             // Don't return — let the popup (context menu) render on top if open
         }
         Some(Overlay::Help { .. }) => unreachable!(),
@@ -821,7 +835,11 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let queue = &view.queue;
 
     let visible_count = (queue.len() as u16).min(area.height.saturating_sub(8));
-    let height = visible_count + 6; // header row + footer + borders
+    let height = if queue.is_empty() {
+        8
+    } else {
+        visible_count + 6
+    }; // min height for empty msg
     let popup_area = centered_rect(80, height, area);
 
     frame.render_widget(Clear, popup_area);
@@ -838,9 +856,25 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     frame.render_widget(block, popup_area);
 
     if queue.is_empty() {
-        let empty =
-            Paragraph::new(Span::styled(s.queue_empty, Theme::dim())).alignment(Alignment::Center);
-        frame.render_widget(empty, inner);
+        let empty = Paragraph::new(vec![
+            Line::from(Span::styled(
+                s.queue_empty_title,
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(s.queue_empty_subtitle, Theme::dim())),
+        ])
+        .alignment(Alignment::Center);
+        // Vertically center the 3 lines within inner
+        let top_pad = inner.height.saturating_sub(3) / 2;
+        let centered = Rect {
+            y: inner.y + top_pad,
+            height: inner.height.saturating_sub(top_pad),
+            ..inner
+        };
+        frame.render_widget(empty, centered);
         return;
     }
 
