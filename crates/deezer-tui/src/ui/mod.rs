@@ -32,7 +32,7 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     // Full-screen themed background
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Block::default().style(Style::default().bg(Theme::bg())),
+        Block::default().style(Style::default().bg(Theme::bg_with_opacity())),
         area,
     );
 

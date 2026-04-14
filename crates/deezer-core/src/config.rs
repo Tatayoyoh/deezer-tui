@@ -24,6 +24,9 @@ pub struct Config {
     pub language: Option<String>,
     #[serde(default)]
     pub skip_update_check: bool,
+    /// Background transparency in percent (0–100, steps of 10). 0 = opaque, 100 = fully transparent.
+    #[serde(default)]
+    pub bg_transparency: u8,
 }
 
 fn default_quality() -> AudioQuality {
@@ -43,6 +46,7 @@ impl Default for Config {
             theme: None,
             language: None,
             skip_update_check: false,
+            bg_transparency: 0,
         }
     }
 }
