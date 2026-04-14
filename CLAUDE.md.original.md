@@ -2,13 +2,15 @@
 
 ## Project Overview
 
-Lightweight, self-contained Deezer music player in terminal. Rust, ~5-8 MB RAM, single static binary ~5 MB. No external media player (no mpv, vlc, ffmpeg).
+A lightweight, self-contained Deezer music player running entirely in the terminal.
+Built with Rust for minimal memory footprint (~5-8 MB RAM) and a single static binary (~5 MB).
+No external media player required (no mpv, vlc, ffmpeg).
 
 ## Architecture Principles
 
 ### Strict Separation: Core Library vs TUI Frontend
 
-Two crates in Cargo workspace:
+The codebase is split into two crates within a Cargo workspace:
 
 ```
 deezer-tui/
@@ -57,31 +59,33 @@ deezer-tui/
 │               └── common.rs     # Shared widgets, Deezer logo pixel art
 ```
 
-**Rule: `deezer-core` must NEVER depend on any TUI/UI crate.** Exposes clean async API any frontend (TUI, GUI, web, CLI) can consume.
+**Rule: `deezer-core` must NEVER depend on any TUI/UI crate.**
+It exposes a clean async API that any frontend (TUI, GUI, web, CLI) can consume.
 
-**Rule: `deezer-tui` depends on `deezer-core`, handles rendering + input only.**
+**Rule: `deezer-tui` depends on `deezer-core` and only handles rendering + input.**
 
 ### Why This Separation Matters
 
-- Swap TUI for native GUI (egui, iced, tauri) without touching audio/API logic
+- Swap the TUI for a native GUI (egui, iced, tauri) without touching audio/API logic
 - Unit-test business logic independently from UI
-- Potentially expose `deezer-core` as reusable crate
+- Potentially expose `deezer-core` as a reusable crate
 
 ## Deezer API — How It Works
 
 ### Authentication
 
-Deezer does NOT provide full-track streaming via public API (only 30s previews). Uses **private/undocumented API** (same as web player).
+Deezer does NOT provide full-track streaming via its public API (only 30s previews).
+We use the **private/undocumented API** (same as the web player).
 
-Three auth methods:
-1. **ARL token** — 192-char cookie from logged-in browser session (easiest)
+Three auth methods supported:
+1. **ARL token** — a 192-char cookie from a logged-in browser session (easiest)
 2. **Email/password** — MD5 hash + auth hash → obtain ARL programmatically
-3. **Web browser login** — opens deezer.com in browser, intercepts ARL via URI handler (`web_login.rs`)
+3. **Web browser login** — opens deezer.com in the user's browser, intercepts ARL via URI handler (`web_login.rs`)
 
 Auth flow:
 1. Set ARL as cookie on `.deezer.com`
 2. Call `deezer.getUserData` → get `api_token` (checkForm) + `license_token`
-3. Tokens needed for all subsequent API calls
+3. These tokens are needed for all subsequent API calls
 
 ### Track Streaming Pipeline
 
@@ -97,11 +101,11 @@ Auth flow:
 
 ### Audio Encryption (Blowfish CBC Stripe)
 
-Custom (weak) encryption, NOT standard DRM:
+Deezer uses a custom (weak) encryption, NOT standard DRM:
 - Algorithm: **Blowfish CBC** with fixed IV `\x00\x01\x02\x03\x04\x05\x06\x07`
-- **Only every 3rd 2048-byte block** encrypted (blocks 0, 3, 6, 9…)
-- Per-track key: `MD5(track_id)` XOR'd with master secret (16 bytes)
-- Master secret extracted dynamically at runtime from Deezer's public web resources (NOT hardcoded)
+- **Only every 3rd 2048-byte block** is encrypted (blocks 0, 3, 6, 9…)
+- Per-track key derived from: `MD5(track_id)` XOR'd with a master secret (16 bytes)
+- The master secret should be extracted dynamically at runtime from Deezer's public web resources (NOT hardcoded)
 
 Rust crates: `blowfish`, `cbc`, `md-5`
 
@@ -117,7 +121,7 @@ Quality fallback: FLAC → MP3_320 → MP3_128 → MP3_64
 
 ## Cross-Platform Audio Output (No External Player)
 
-Binary fully self-contained:
+The binary is fully self-contained on all platforms:
 
 | Platform | Audio Backend | System Dependency          |
 |----------|---------------|----------------------------|
@@ -126,9 +130,11 @@ Binary fully self-contained:
 
 Stack: `rodio` (high-level) → `cpal` (low-level, platform backends) → OS audio API
 
-Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
+Audio decoding is pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 
-**Windows:** Not natively supported (Unix sockets, `fork()`, `libc` used for IPC). Windows users use **WSL2** (Windows 11) with Linux binary — audio works via WSLg/PulseAudio. Install `libasound2` in WSL.
+**Windows:** Not natively supported (Unix sockets, `fork()`, `libc` used for IPC).
+Windows users should use **WSL2** (Windows 11) with the Linux binary — audio works
+out of the box via WSLg/PulseAudio. Install `libasound2` in WSL.
 
 ## Key Dependencies
 
@@ -150,7 +156,7 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 ## UI Design
 
 ### Login Screen
-- Shown when no ARL/credentials configured
+- Shown when no ARL/credentials are configured
 - Deezer logo in pixel art (Unicode block characters)
 - ARL token input or email/password fields
 - Web browser login option (`w` key)
@@ -172,9 +178,9 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 
 ### Overlays & Modals
 - **Context menu** (`m`): Play next, Add to queue, Add to playlist, Start mix, Dislike
-- **Queue / Waiting list** (`w`): View/manage play queue (delete, reorder, favorite)
-- **Album detail** (`a`): Full track listing for album
-- **Playlist detail** (`Enter` on playlist): Track listing for playlist
+- **Queue / Waiting list** (`w`): View and manage the play queue (delete, reorder, favorite)
+- **Album detail** (`a`): Full track listing for an album
+- **Playlist detail** (`Enter` on playlist): Track listing for a playlist
 - **Shortcuts help** (`?`): Keyboard shortcuts reference
 - **Settings** (`Ctrl+O`): Theme selection (official Deezer dark themes)
 
@@ -185,18 +191,18 @@ Both tabs support multi-category browsing (`h`/`l` to switch):
 
 ## Reference Projects
 
-- **[pleezer](https://github.com/roderickvd/pleezer)** — Rust headless Deezer Connect player. Proof full stack works. Study `decrypt`, `track`, `player` modules.
+- **[pleezer](https://github.com/roderickvd/pleezer)** — Rust headless Deezer Connect player. Proof that this full stack works. Study its `decrypt`, `track`, and `player` modules.
 - **[deezer_downloader](https://github.com/zggff/deezer_downloader)** — Simpler Rust crate for download + decrypt.
 - **[deemix](https://gitlab.com/deemix)** — Python, well-documented private API usage.
 - **[dzr](https://github.com/yne/dzr)** — Shell/JS CLI player, good API reference.
 
 ## Master Key Extraction
 
-Blowfish master secret extracted at runtime from Deezer's web player JavaScript:
+The Blowfish master secret is extracted at runtime from Deezer's web player JavaScript:
 
 1. Fetch `https://www.deezer.com/en/channels/explore/`
-2. Regex-extract `app-web*.js` bundle URL
-3. In JS, find two 8-byte URL-encoded hex arrays:
+2. Regex-extract the `app-web*.js` bundle URL
+3. In the JS, find two 8-byte URL-encoded hex arrays:
    - First half: starts `0x61`, ends `0x67` (regex: `0x61%2C(0x[0-9a-f]{2}%2C){6}0x67`)
    - Second half: starts `0x31`, ends `0x34` (regex: `0x31%2C(0x[0-9a-f]{2}%2C){6}0x34`)
 4. Parse each half, reverse byte order, interleave: `a[0],b[0],a[1],b[1],...`
@@ -206,7 +212,7 @@ Implemented in `deezer-core/src/decrypt.rs::fetch_master_key()`.
 
 ## Daemon / Client Architecture
 
-**Daemon + client** model over Unix domain sockets:
+The application uses a **daemon + client** model over Unix domain sockets:
 
 ```
 ┌─────────────────────────┐       Unix socket        ┌─────────────────────────┐
@@ -230,17 +236,18 @@ Implemented in `deezer-core/src/decrypt.rs::fetch_master_key()`.
 - **Format**: Line-delimited JSON (newline-separated)
 - **Client → Daemon**: `Command` enum (GetSnapshot, Search, PlayFromSearch, TogglePause, etc.)
 - **Daemon → Client**: `ServerMessage::Snapshot(DaemonSnapshot)` — full state sent after every command + periodic ticks
-- All snapshot fields use `#[serde(default)]` for forward/backward compatibility
+- All snapshot fields use `#[serde(default)]` for forward/backward compatibility between versions
 
 ### Async Architecture (inside Daemon)
-Background tasks use `tokio::spawn`, results sent back via `mpsc::unbounded_channel`.
-Daemon event loop uses `tokio::select!` to multiplex:
+Background tasks use `tokio::spawn` with results sent back via `mpsc::unbounded_channel`.
+The daemon event loop uses `tokio::select!` to multiplex:
 - Accepting new client connections
 - Reading commands from client
 - Processing async results (login, search, track ready, etc.)
 - Periodic tick (position update, auto-advance)
 
-PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetched+decrypted in background, played on main thread.
+PlayerEngine stays on the daemon's main thread (rodio/cpal are `!Send`).
+Audio data is fetched+decrypted in background, then played on main thread.
 
 ## Keyboard Shortcuts
 
@@ -294,33 +301,39 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 - Tests: unit tests in `deezer-core`, integration tests for API (behind feature flag)
 - CI: **CircleCI** — Linux x86_64, Linux aarch64, macOS universal (no Windows native build)
 - Linting: `clippy` with pedantic warnings
-- Formatting: `rustfmt` default — pre-commit hook in `.githooks/` auto-formats staged `.rs` files
+- Formatting: `rustfmt` with default settings — a pre-commit hook in `.githooks/` auto-formats staged `.rs` files
 - Config stored as JSON in XDG config dir (`~/.config/deezer-tui/config.json` on Linux)
 - **Platform support**: Linux, macOS (native); Windows via WSL2 only (Unix sockets + fork required)
 
 ## Build & Verify Routine
 
-After code changes, **always** run:
+After making code changes, **always** run:
 
 ```bash
 cargo fmt && cargo build --release
 ```
 
-Ensures formatting correct (CI rejects unformatted code) and project compiles.
-Run `cargo clippy -- -D warnings` for lint checks when relevant.
+This ensures formatting is correct (CI will reject unformatted code) and the project compiles.
+Run `cargo clippy -- -D warnings` for additional lint checks when relevant.
 
 ## Release Routine
 
+When preparing a version release:
+
 1. Update `CHANGELOG.md`:
-   - Move items from `[Unreleased]` into new version section `[X.Y.Z] - YYYY-MM-DD`
-   - Categorize under `### Added`, `### Changed`, `### Fixed`, `### Removed`
-   - Add fresh empty `[Unreleased]` section at top
+   - Move items from `[Unreleased]` into a new version section `[X.Y.Z] - YYYY-MM-DD`
+   - Categorize changes under `### Added`, `### Changed`, `### Fixed`, `### Removed` as appropriate
+   - Add a fresh empty `[Unreleased]` section at the top
 2. Update version in `Cargo.toml` files (workspace root + both crates)
 3. Run `cargo fmt && cargo build --release`
 4. Commit and tag: `git tag vX.Y.Z`
 
-When adding features or fixes (not during release), add brief entry under `[Unreleased]` in `CHANGELOG.md`.
+When adding new features or fixes (not during a release), add a brief entry under
+`[Unreleased]` in `CHANGELOG.md` so nothing is forgotten at release time.
 
 ## Legal Notice
 
-Uses Deezer's undocumented private API for personal use. Users must have valid Deezer account. Master decryption secret NOT hardcoded — extracted at runtime from Deezer's public web resources, same as browser. Does not facilitate piracy — audio streamed, not saved.
+This project uses Deezer's undocumented private API for personal use.
+Users must have a valid Deezer account. The master decryption secret is NOT hardcoded;
+it is extracted at runtime from Deezer's public web resources, same as a browser would.
+This project does not facilitate piracy — audio is streamed, not downloaded/saved.

@@ -72,6 +72,8 @@ And drived by human goods ideas.
 
 To be honest, I am not a Rust developer :p. Rust was a good match for this project 👍.
 
+[Caveman](https://github.com/juliusbrussee/caveman) is used to compress CLAUDE.md prompt, saving some session tokens.
+
 ## Other goods projects
 
 Deezer players
