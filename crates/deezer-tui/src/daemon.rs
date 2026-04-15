@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -324,9 +325,18 @@ impl Daemon {
             self.start_login(arl);
         }
 
-        // Main daemon loop
-        let mut client_reader: Option<BufReader<tokio::net::unix::OwnedReadHalf>> = None;
-        let mut client_writer: Option<tokio::net::unix::OwnedWriteHalf> = None;
+        // Main daemon loop — supports multiple concurrent clients.
+        // Each client has a spawned reader task that pushes commands into a channel.
+        // Writers are kept in a shared map; snapshots are broadcast to all clients.
+        type ClientWriters = Arc<
+            tokio::sync::Mutex<
+                HashMap<u64, Arc<tokio::sync::Mutex<tokio::net::unix::OwnedWriteHalf>>>,
+            >,
+        >;
+        let clients: ClientWriters = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+        let mut next_client_id: u64 = 0;
+        let (client_cmd_tx, mut client_cmd_rx) =
+            tokio::sync::mpsc::unbounded_channel::<(u64, Option<Command>)>();
 
         loop {
             // Build tick interval
@@ -337,20 +347,44 @@ impl Daemon {
                 accept_result = listener.accept() => {
                     match accept_result {
                         Ok((stream, _addr)) => {
-                            info!("Client connected");
+                            let id = next_client_id;
+                            next_client_id += 1;
+                            info!(client_id = id, "Client connected");
+
                             let (read_half, write_half) = stream.into_split();
-                            client_reader = Some(BufReader::new(read_half));
-                            client_writer = Some(write_half);
-                            // Send initial snapshot
-                            if let Some(ref mut writer) = client_writer {
-                                let snap = self.snapshot();
-                                let msg = ServerMessage::Snapshot(snap);
-                                let mut tmp_stream = writer as &mut tokio::net::unix::OwnedWriteHalf;
-                                if let Err(e) = send_line_writer(&mut tmp_stream, &msg).await {
-                                    warn!("Failed to send initial snapshot: {e}");
-                                    client_reader = None;
-                                    client_writer = None;
+                            let writer = Arc::new(tokio::sync::Mutex::new(write_half));
+
+                            // Register the client BEFORE any I/O so one-shot commands
+                            // (which disconnect immediately after writing) are always read.
+                            clients.lock().await.insert(id, writer.clone());
+
+                            // Spawn reader task for this client
+                            let cmd_tx = client_cmd_tx.clone();
+                            tokio::spawn(async move {
+                                let mut reader = BufReader::new(read_half);
+                                loop {
+                                    match read_line::<Command, _>(&mut reader).await {
+                                        Ok(Some(cmd)) => {
+                                            if cmd_tx.send((id, Some(cmd))).is_err() {
+                                                break;
+                                            }
+                                        }
+                                        Ok(None) | Err(_) => {
+                                            let _ = cmd_tx.send((id, None));
+                                            break;
+                                        }
+                                    }
                                 }
+                            });
+
+                            // Best-effort initial snapshot. One-shot clients (`-n`/`-b`/`-p`)
+                            // may have already disconnected — that's fine, the reader task
+                            // will still deliver their command from the kernel buffer.
+                            let snap = self.snapshot();
+                            let msg = ServerMessage::Snapshot(snap);
+                            let mut w = writer.lock().await;
+                            if let Err(e) = send_line_writer(&mut *w, &msg).await {
+                                debug!(client_id = id, "Initial snapshot failed (likely one-shot client): {e}");
                             }
                         }
                         Err(e) => {
@@ -359,47 +393,26 @@ impl Daemon {
                     }
                 }
 
-                // Read command from connected client
-                cmd = async {
-                    if let Some(ref mut reader) = client_reader {
-                        read_line::<Command, _>(reader).await
-                    } else {
-                        // No client connected — sleep forever (other branches will fire)
-                        std::future::pending().await
-                    }
-                } => {
-                    match cmd {
-                        Ok(Some(command)) => {
-                            debug!(?command, "Received command");
+                // Command received from any connected client (or disconnect notification)
+                Some((id, maybe_cmd)) = client_cmd_rx.recv() => {
+                    match maybe_cmd {
+                        Some(command) => {
+                            debug!(client_id = id, ?command, "Received command");
                             let should_shutdown = matches!(command, Command::Shutdown);
                             self.handle_command(command);
 
-                            // Send snapshot back
-                            if let Some(ref mut writer) = client_writer {
-                                let snap = self.snapshot();
-                                let msg = ServerMessage::Snapshot(snap);
-                                if let Err(e) = send_line_writer(writer, &msg).await {
-                                    warn!("Failed to send snapshot: {e}");
-                                    client_reader = None;
-                                    client_writer = None;
-                                }
-                            }
+                            // Broadcast snapshot to all clients
+                            let snap = self.snapshot();
+                            broadcast_snapshot(&clients, snap).await;
 
                             if should_shutdown {
                                 info!("Shutdown requested, exiting daemon");
                                 break;
                             }
                         }
-                        Ok(None) => {
-                            // Client disconnected
-                            info!("Client disconnected");
-                            client_reader = None;
-                            client_writer = None;
-                        }
-                        Err(e) => {
-                            warn!("Error reading from client: {e}");
-                            client_reader = None;
-                            client_writer = None;
+                        None => {
+                            info!(client_id = id, "Client disconnected");
+                            clients.lock().await.remove(&id);
                         }
                     }
                 }
@@ -409,16 +422,9 @@ impl Daemon {
                     self.process_async_results();
                     self.on_tick();
 
-                    // Send periodic snapshot to connected client
-                    if let Some(ref mut writer) = client_writer {
-                        let snap = self.snapshot();
-                        let msg = ServerMessage::Snapshot(snap);
-                        if let Err(e) = send_line_writer(writer, &msg).await {
-                            warn!("Failed to send tick snapshot: {e}");
-                            client_reader = None;
-                            client_writer = None;
-                        }
-                    }
+                    // Broadcast periodic snapshot to all clients
+                    let snap = self.snapshot();
+                    broadcast_snapshot(&clients, snap).await;
                 }
             }
         }
@@ -2508,4 +2514,46 @@ async fn send_line_writer<T: serde::Serialize>(
     json.push('\n');
     writer.write_all(json.as_bytes()).await?;
     writer.flush().await
+}
+
+/// Broadcast a snapshot to every connected client. Serializes once, writes to all.
+/// Dead clients (write errors) are removed from the map.
+async fn broadcast_snapshot(
+    clients: &Arc<
+        tokio::sync::Mutex<HashMap<u64, Arc<tokio::sync::Mutex<tokio::net::unix::OwnedWriteHalf>>>>,
+    >,
+    snap: DaemonSnapshot,
+) {
+    let msg = ServerMessage::Snapshot(snap);
+    let mut json = match serde_json::to_string(&msg) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    json.push('\n');
+    let bytes = json.into_bytes();
+
+    // Collect writers outside the map lock to avoid holding it during I/O.
+    let writers: Vec<(
+        u64,
+        Arc<tokio::sync::Mutex<tokio::net::unix::OwnedWriteHalf>>,
+    )> = {
+        let g = clients.lock().await;
+        g.iter().map(|(k, v)| (*k, v.clone())).collect()
+    };
+
+    let mut dead = Vec::new();
+    for (id, w) in writers {
+        use tokio::io::AsyncWriteExt;
+        let mut guard = w.lock().await;
+        if guard.write_all(&bytes).await.is_err() || guard.flush().await.is_err() {
+            dead.push(id);
+        }
+    }
+
+    if !dead.is_empty() {
+        let mut g = clients.lock().await;
+        for id in dead {
+            g.remove(&id);
+        }
+    }
 }
