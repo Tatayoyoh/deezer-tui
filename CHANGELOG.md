@@ -2,17 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.10.0]
+
+### Added
+- Similar artists section on the artist detail page
+- Theme background transparency (#4)
+
+### Changed
+- "<< Back" navigation hint on artist/album pages (replaces tab bar)
+- Reduced RAM footprint
+- Improved artist/album page headers
+- Improved offline display
+- Improved playlist `[w]` shortcut
 
 ### Fixed
+- Command line `-n`/`-b`/`-p` no longer crash (#5)
+- Artist/album pages behaviors when a modal is displayed on top
+- Album/artist left column focus on large windows
 - Volume persisted across restarts
 - Help modal scroll
 
 ## [1.9.0] - 2026-04-11
 
 ### Added
-- Favorites cache : speed up navigation
-- Fuzzy filter for favorites and radios
+- Fuzzy filter for favorites and radios (#3)
+- Favorites cache : speed up navigation (#2)
 
 ## [1.8.1] - 2026-04-10
 
