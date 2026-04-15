@@ -207,6 +207,7 @@ pub struct Strings {
     pub artist_albums: &'static str,
     pub artist_lives: &'static str,
     pub artist_other: &'static str,
+    pub artist_similar: &'static str,
     pub no_albums: &'static str,
 
     // --- Playlist detail ---
@@ -675,6 +676,7 @@ static EN: Strings = Strings {
     artist_albums: "Albums",
     artist_lives: "Lives",
     artist_other: "Other",
+    artist_similar: "Similar",
     no_albums: "No albums",
 
     playlist: " Playlist ",
@@ -939,6 +941,7 @@ static FR: Strings = Strings {
     artist_albums: "Albums",
     artist_lives: "Lives",
     artist_other: "Autres",
+    artist_similar: "Similaires",
     no_albums: "Aucun album",
 
     playlist: " Playlist ",
@@ -1202,6 +1205,7 @@ static ES: Strings = Strings {
     artist_albums: "Álbumes",
     artist_lives: "En vivo",
     artist_other: "Otros",
+    artist_similar: "Similares",
     no_albums: "Sin álbumes",
 
     playlist: " Playlist ",
@@ -1465,6 +1469,7 @@ static PT: Strings = Strings {
     artist_albums: "Álbuns",
     artist_lives: "Ao vivo",
     artist_other: "Outros",
+    artist_similar: "Similares",
     no_albums: "Sem álbuns",
 
     playlist: " Playlist ",
@@ -1728,6 +1733,7 @@ static DE: Strings = Strings {
     artist_albums: "Alben",
     artist_lives: "Live",
     artist_other: "Andere",
+    artist_similar: "Ähnliche",
     no_albums: "Keine Alben",
 
     playlist: " Playlist ",
