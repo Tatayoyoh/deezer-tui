@@ -8,9 +8,16 @@ edition = "2021"
 rust-version = "1.90"
 license = "WTFPL"
 
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+
 [workspace.dependencies]
 # Async
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 
 # HTTP
 reqwest = { version = "0.12", features = ["json", "cookies", "stream"] }

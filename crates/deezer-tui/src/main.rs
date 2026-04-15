@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     if try_connect_sync(&sock_path) {
         // Daemon is running — launch as client
         init_logging("/tmp/deezer-tui.log");
-        let rt = tokio::runtime::Runtime::new()?;
+        let rt = build_client_runtime()?;
         rt.block_on(async {
             let mut client = client::Client::connect().await?;
             client.run(show_updated).await
@@ -106,13 +106,30 @@ fn main() -> Result<()> {
         #[cfg(not(unix))]
         {
             // On non-Unix, just run daemon in-process (no background support)
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = build_daemon_runtime()?;
             rt.block_on(async {
                 let mut d = daemon::Daemon::new()?;
                 d.run().await
             })
         }
     }
+}
+
+/// Build a current-thread runtime for the TUI client and one-shot commands.
+/// No worker thread pool — the client only does IPC + rendering.
+fn build_client_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?)
+}
+
+/// Build a multi-thread runtime for the daemon with a limited worker pool.
+/// 2 workers is enough for concurrent API calls + background tasks.
+fn build_daemon_runtime() -> Result<tokio::runtime::Runtime> {
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()?)
 }
 
 /// Send a single command to the daemon and exit.
@@ -123,7 +140,7 @@ fn send_command_to_daemon(cmd: Command) -> Result<()> {
         return Ok(());
     }
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = build_client_runtime()?;
     rt.block_on(async {
         match tokio::net::UnixStream::connect(&sock_path).await {
             Ok(mut stream) => {
@@ -147,7 +164,7 @@ fn handle_quit() -> Result<()> {
         return Ok(());
     }
 
-    let rt = tokio::runtime::Runtime::new()?;
+    let rt = build_client_runtime()?;
     rt.block_on(async {
         use tokio::io::AsyncReadExt;
         match tokio::net::UnixStream::connect(&sock_path).await {
@@ -224,7 +241,7 @@ fn start_with_fork(show_updated: bool) -> Result<()> {
             init_logging("/tmp/deezer-daemon.log");
 
             // Build tokio runtime AFTER fork (no inherited threads)
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = build_daemon_runtime()?;
             rt.block_on(async {
                 match daemon::Daemon::new() {
                     Ok(mut d) => {
@@ -257,7 +274,7 @@ fn start_with_fork(show_updated: bool) -> Result<()> {
             }
 
             // Run as client
-            let rt = tokio::runtime::Runtime::new()?;
+            let rt = build_client_runtime()?;
             rt.block_on(async {
                 let mut client = client::Client::connect().await?;
                 client.run(show_updated).await
