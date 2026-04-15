@@ -5,7 +5,7 @@ use ratatui::widgets::{
 };
 use ratatui_image::StatefulImage;
 
-use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab};
+use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab, SimilarArtistEntry};
 
 use crate::client::ViewState;
 use crate::i18n::t;
@@ -220,6 +220,7 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
         Line::from(s.artist_albums),
         Line::from(s.artist_lives),
         Line::from(s.artist_other),
+        Line::from(s.artist_similar),
     ];
 
     let selected_tab = match view.artist_detail_sub_tab {
@@ -227,6 +228,7 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
         ArtistSubTab::Albums => 1,
         ArtistSubTab::Lives => 2,
         ArtistSubTab::Other => 3,
+        ArtistSubTab::Similar => 4,
     };
 
     let tab_active_style = if view.artist_detail_left_focused {
@@ -252,6 +254,14 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
     match view.artist_detail_sub_tab {
         ArtistSubTab::TopTracks => {
             draw_top_tracks(frame, detail, view.artist_detail_selected, chunks[1]);
+        }
+        ArtistSubTab::Similar => {
+            draw_similar_artists(
+                frame,
+                &detail.similar_artists,
+                view.artist_detail_selected,
+                chunks[1],
+            );
         }
         other => {
             let albums = detail.albums_for_tab(other);
@@ -394,6 +404,60 @@ fn draw_album_list(
             Constraint::Length(8),
         ]
     };
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .padding(ratatui::widgets::Padding::new(1, 1, 0, 0)),
+        )
+        .row_highlight_style(Theme::highlight())
+        .highlight_symbol("> ");
+
+    let mut table_state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, area, &mut table_state);
+}
+
+/// Draw the similar artists list for the Similar sub-tab.
+fn draw_similar_artists(
+    frame: &mut Frame,
+    artists: &[SimilarArtistEntry],
+    selected: usize,
+    area: Rect,
+) {
+    let s = t();
+    if artists.is_empty() {
+        let msg =
+            Paragraph::new(Span::styled(s.no_tracks, Theme::dim())).alignment(Alignment::Center);
+        frame.render_widget(msg, area);
+        return;
+    }
+
+    let header = Row::new(vec![
+        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::styled(s.header_title, Theme::dim())),
+        Cell::from(Span::styled(s.fans_label.trim(), Theme::dim())),
+    ])
+    .height(1);
+
+    let rows: Vec<Row> = artists
+        .iter()
+        .enumerate()
+        .map(|(i, artist)| {
+            Row::new(vec![
+                Cell::from(Span::styled(format!("{:>3}", i + 1), Theme::dim())),
+                Cell::from(Span::styled(&artist.name, Theme::text())),
+                Cell::from(Span::styled(format_fans(artist.nb_fan), Theme::dim())),
+            ])
+        })
+        .collect();
+
+    let widths = [
+        Constraint::Length(4),
+        Constraint::Min(20),
+        Constraint::Length(10),
+    ];
 
     let table = Table::new(rows, widths)
         .header(header)

@@ -321,6 +321,14 @@ pub struct ArtistAlbumEntry {
     pub record_type: String,
 }
 
+/// A similar artist entry within an artist detail page.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarArtistEntry {
+    pub artist_id: String,
+    pub name: String,
+    pub nb_fan: u64,
+}
+
 /// Sub-tab category for the artist detail right panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ArtistSubTab {
@@ -329,10 +337,17 @@ pub enum ArtistSubTab {
     Albums,
     Lives,
     Other,
+    Similar,
 }
 
 impl ArtistSubTab {
-    pub const ALL: [Self; 4] = [Self::TopTracks, Self::Albums, Self::Lives, Self::Other];
+    pub const ALL: [Self; 5] = [
+        Self::TopTracks,
+        Self::Albums,
+        Self::Lives,
+        Self::Other,
+        Self::Similar,
+    ];
 
     pub fn next(&self) -> Self {
         let all = Self::ALL;
@@ -356,6 +371,8 @@ pub struct ArtistDetail {
     pub picture_url: String,
     pub top_tracks: Vec<TrackData>,
     pub albums: Vec<ArtistAlbumEntry>,
+    #[serde(default)]
+    pub similar_artists: Vec<SimilarArtistEntry>,
 }
 
 impl ArtistDetail {
@@ -368,7 +385,7 @@ impl ArtistDetail {
                 ArtistSubTab::Albums => a.record_type == "album" && !a.is_live(),
                 ArtistSubTab::Lives => a.is_live(),
                 ArtistSubTab::Other => a.record_type != "album" && !a.is_live(),
-                ArtistSubTab::TopTracks => false,
+                ArtistSubTab::TopTracks | ArtistSubTab::Similar => false,
             })
             .collect()
     }

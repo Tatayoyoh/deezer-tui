@@ -3,7 +3,8 @@ use tracing::debug;
 
 use super::models::{
     AlbumDetail, ArtistAlbumEntry, ArtistData, ArtistDetail, DeezerError, DisplayItem, EpisodeData,
-    PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults, TrackData,
+    PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults, SimilarArtistEntry,
+    TrackData,
 };
 use super::DeezerClient;
 
@@ -841,6 +842,48 @@ impl DeezerClient {
         // Sort by release date descending (newest first)
         albums.sort_by(|a, b| b.release_date.cmp(&a.release_date));
 
+        // 4. Fetch similar artists
+        let related_url = format!(
+            "https://api.deezer.com/artist/{}/related?limit=50",
+            artist_id
+        );
+        let related_resp: serde_json::Value = self
+            .http
+            .get(&related_url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let similar_artists: Vec<SimilarArtistEntry> = related_resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .map(|entry| {
+                        let artist_id = entry
+                            .get("id")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        let name = entry
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let nb_fan = entry.get("nb_fan").and_then(|v| v.as_u64()).unwrap_or(0);
+                        SimilarArtistEntry {
+                            artist_id,
+                            name,
+                            nb_fan,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Ok(ArtistDetail {
             artist_id: artist_id.to_string(),
             name,
@@ -848,6 +891,7 @@ impl DeezerClient {
             picture_url,
             top_tracks,
             albums,
+            similar_artists,
         })
     }
 

@@ -2340,6 +2340,20 @@ impl Client {
                 let index = self.view.artist_detail_selected;
                 if sub_tab == ArtistSubTab::TopTracks {
                     KeyAction::SendCommand(Command::PlayFromArtist { index })
+                } else if sub_tab == ArtistSubTab::Similar {
+                    // Open the artist detail for the selected similar artist
+                    if let Some(ref detail) = self.view.artist_detail {
+                        if let Some(artist) = detail.similar_artists.get(index) {
+                            let artist_id = artist.artist_id.clone();
+                            self.view.set_nav_overlay(Overlay::ArtistDetail);
+                            self.view.artist_detail_selected = 0;
+                            self.view.artist_detail_sub_tab = ArtistSubTab::TopTracks;
+                            self.view.artist_detail_left_scroll = 0;
+                            self.view.artist_detail_left_focused = false;
+                            return KeyAction::SendCommand(Command::GetArtistDetail { artist_id });
+                        }
+                    }
+                    KeyAction::Continue
                 } else {
                     // Open the album detail for the selected album entry
                     if let Some(ref detail) = self.view.artist_detail {
@@ -2381,6 +2395,7 @@ impl Client {
         if let Some(ref detail) = self.view.artist_detail {
             match self.view.artist_detail_sub_tab {
                 ArtistSubTab::TopTracks => detail.top_tracks.len(),
+                ArtistSubTab::Similar => detail.similar_artists.len(),
                 other => detail.albums_for_tab(other).len(),
             }
         } else {
