@@ -46,9 +46,6 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
         ])
         .split(area);
 
-    // Tab bar
-    draw_tabs(frame, view, chunks[0]);
-
     // Content area: detail overlays replace tab content.
     // Show album/artist detail as background whenever it appears anywhere in the overlay chain
     // (current overlay or any stacked overlay). This handles cases where Help/Settings/Info
@@ -71,6 +68,9 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
         }
     }
 
+    // Tab bar (computed after show_album/show_artist)
+    draw_tabs(frame, view, chunks[0], show_album || show_artist);
+
     if show_album {
         album_detail::draw(frame, view, chunks[1]);
     } else if show_artist {
@@ -91,8 +91,34 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     popup::draw(frame, view);
 }
 
-fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
+fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
     let s = t();
+
+    let header_title = " Deezer-TUI ";
+
+    let mut block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Theme::border())
+        .title(header_title)
+        .title_style(Theme::dim());
+
+    if let Some(ref msg) = view.status_msg {
+        let status_line = Line::from(vec![Span::styled(
+            format!(" {msg} "),
+            Style::default().fg(Color::Cyan),
+        )]);
+        block = block.title_top(status_line.alignment(Alignment::Right));
+    }
+
+    if show_back {
+        // Replace tabs with a "<< [Esc] Back" navigation hint
+        let back_label = format!(" {} ", s.esc_back);
+        let back_line = Line::from(vec![Span::styled(back_label, Theme::text())]);
+        let paragraph = Paragraph::new(back_line).block(block);
+        frame.render_widget(paragraph, area);
+        return;
+    }
+
     let (tab_titles, selected) = if view.is_offline {
         (vec![Line::from(s.tab_offline_downloads)], 0)
     } else {
@@ -111,22 +137,6 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect) {
             },
         )
     };
-
-    let header_title = " Deezer-TUI ";
-
-    let mut block = Block::default()
-        .borders(Borders::BOTTOM)
-        .border_style(Theme::border())
-        .title(header_title)
-        .title_style(Theme::dim());
-
-    if let Some(ref msg) = view.status_msg {
-        let status_line = Line::from(vec![Span::styled(
-            format!(" {msg} "),
-            Style::default().fg(Color::Cyan),
-        )]);
-        block = block.title_top(status_line.alignment(Alignment::Right));
-    }
 
     let tabs = Tabs::new(tab_titles)
         .block(block)
