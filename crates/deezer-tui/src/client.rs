@@ -1,4 +1,5 @@
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -974,6 +975,8 @@ pub struct Client {
     picker: Picker,
     image_tx: mpsc::UnboundedSender<(String, image::DynamicImage)>,
     image_rx: mpsc::UnboundedReceiver<(String, image::DynamicImage)>,
+    /// Cache of downloaded images by URL, cleared when leaving overlay pages.
+    image_cache: HashMap<String, image::DynamicImage>,
 }
 
 impl Client {
@@ -994,6 +997,7 @@ impl Client {
             picker,
             image_tx,
             image_rx,
+            image_cache: HashMap::new(),
         })
     }
 
@@ -1015,26 +1019,44 @@ impl Client {
                 .as_ref()
                 .map(|d| d.cover_url.as_str())
                 .filter(|u| !u.is_empty()),
-            Some(Some(Overlay::ArtistDetail)) => self
-                .view
-                .artist_detail
-                .as_ref()
-                .map(|d| d.picture_url.as_str())
-                .filter(|u| !u.is_empty()),
+            Some(Some(Overlay::ArtistDetail)) => {
+                // When browsing Albums/Lives/Other, show selected album cover if available
+                let album_cover = match self.view.artist_detail_sub_tab {
+                    ArtistSubTab::Albums | ArtistSubTab::Lives | ArtistSubTab::Other => {
+                        self.view.artist_detail.as_ref().and_then(|d| {
+                            let filtered = d.albums_for_tab(self.view.artist_detail_sub_tab);
+                            filtered
+                                .get(self.view.artist_detail_selected)
+                                .map(|a| a.cover_url.as_str())
+                                .filter(|u| !u.is_empty())
+                        })
+                    }
+                    _ => None,
+                };
+                album_cover.or_else(|| {
+                    self.view
+                        .artist_detail
+                        .as_ref()
+                        .map(|d| d.picture_url.as_str())
+                        .filter(|u| !u.is_empty())
+                })
+            }
             _ => None,
         }
     }
 
     /// Trigger async image fetch if the cover URL changed.
+    /// Uses in-memory cache to avoid re-downloading images already seen on this page.
     fn maybe_fetch_cover_image(&mut self) {
         let url = match self.current_cover_url() {
             Some(u) => u.to_string(),
             None => {
-                // No overlay or no URL — clear image
+                // No overlay or no URL — clear image and cache
                 if self.view.cover_image.is_some() {
                     self.view.cover_image = None;
                     self.view.cover_image_url.clear();
                 }
+                self.image_cache.clear();
                 return;
             }
         };
@@ -1046,6 +1068,13 @@ impl Client {
         // Mark as loading this URL (prevents re-triggering)
         self.view.cover_image_url = url.clone();
         self.view.cover_image = None;
+
+        // Check cache first — instant display without HTTP fetch
+        if let Some(img) = self.image_cache.get(&url) {
+            let proto = self.picker.new_resize_protocol(img.clone());
+            self.view.cover_image = Some(proto);
+            return;
+        }
 
         let tx = self.image_tx.clone();
         tokio::spawn(async move {
@@ -1325,6 +1354,7 @@ impl Client {
 
             // Check for completed image fetches
             while let Ok((url, img)) = self.image_rx.try_recv() {
+                self.image_cache.insert(url.clone(), img.clone());
                 if url == self.view.cover_image_url {
                     let proto = self.picker.new_resize_protocol(img);
                     self.view.cover_image = Some(proto);
