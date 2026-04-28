@@ -319,6 +319,8 @@ pub struct ArtistAlbumEntry {
     pub release_date: String,
     pub fans: u64,
     pub record_type: String,
+    #[serde(default)]
+    pub cover_url: String,
 }
 
 /// A similar artist entry within an artist detail page.

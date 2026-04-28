@@ -827,12 +827,20 @@ impl DeezerClient {
                             .and_then(|v| v.as_str())
                             .unwrap_or("album")
                             .to_string();
+                        let cover_url = entry
+                            .get("cover_xl")
+                            .or_else(|| entry.get("cover_big"))
+                            .or_else(|| entry.get("cover_medium"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         ArtistAlbumEntry {
                             album_id,
                             title,
                             release_date,
                             fans,
                             record_type,
+                            cover_url,
                         }
                     })
                     .collect()
