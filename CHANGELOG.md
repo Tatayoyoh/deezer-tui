@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.11.0] - 2026-05-06
 
 ### Added
 - Context menu on a playlist (`x` shortcut), with "Rename" and "Delete" actions
