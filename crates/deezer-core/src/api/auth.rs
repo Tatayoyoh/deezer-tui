@@ -88,6 +88,7 @@ mod tests {
     const TEST_ARL: &str = "eec5474088bcafa3e16be4492de9abf53472bda2d15527838cd685384c7c82b7daa0f5d745b9cd6756dfe83d65aaa8d6fd91aba6798c714c16a7dfbbe1235730ca72e7f3db0f58c8d9d1f84c29c2236a8ceaae6e639b275ac438379891e998f4";
 
     #[tokio::test]
+    #[ignore = "live API: requires valid ARL token + network"]
     async fn test_arl_login() {
         let mut client = DeezerClient::new().unwrap();
         let session = client.login_arl(TEST_ARL).await.expect("login_arl failed");
@@ -107,6 +108,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live API: requires valid ARL token + network"]
     async fn test_search() {
         let mut client = DeezerClient::new().unwrap();
         client.login_arl(TEST_ARL).await.expect("login failed");
@@ -127,6 +129,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live API: requires valid ARL token + network"]
     async fn test_favorites() {
         let mut client = DeezerClient::new().unwrap();
         client.login_arl(TEST_ARL).await.expect("login failed");
@@ -145,6 +148,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live API: requires valid ARL token + network"]
     async fn test_get_track_with_token() {
         let mut client = DeezerClient::new().unwrap();
         client.login_arl(TEST_ARL).await.expect("login failed");
@@ -165,6 +169,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "live API: requires network access to deezer.com"]
     async fn test_master_key() {
         let client = DeezerClient::new().unwrap();
         let key = crate::decrypt::fetch_master_key(client.http())

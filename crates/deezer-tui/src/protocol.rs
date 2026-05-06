@@ -75,6 +75,20 @@ pub enum Command {
         playlist_id: String,
         track_id: String,
     },
+    /// Remove a track from a playlist (requires user to own the playlist).
+    RemoveFromPlaylist {
+        playlist_id: String,
+        track_id: String,
+    },
+    /// Create a new playlist and add a track to it.
+    CreatePlaylistAndAdd { title: String, track_id: String },
+    /// Rename an existing playlist.
+    RenamePlaylist {
+        playlist_id: String,
+        new_title: String,
+    },
+    /// Delete a playlist (owner only).
+    DeletePlaylist { playlist_id: String },
     /// Mark a track as disliked (don't recommend).
     DislikeTrack { track_id: String },
     /// Insert a track to play next in the queue.

@@ -130,6 +130,21 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         Some(SubMenu::TrackInfo) => {
             draw_track_info(frame, popup);
         }
+        Some(SubMenu::CreatePlaylistInput { name, cursor }) => {
+            draw_text_input_modal(frame, t().create_playlist_prompt, name, *cursor);
+        }
+        Some(SubMenu::RenamePlaylistInput { name, cursor }) => {
+            draw_text_input_modal(frame, t().rename_playlist_prompt, name, *cursor);
+        }
+        Some(SubMenu::ConfirmDeletePlaylist { confirm_yes }) => {
+            let (title, nb_songs) = match &popup.target {
+                crate::client::PopupTarget::Playlist {
+                    title, nb_songs, ..
+                } => (title.as_str(), *nb_songs),
+                _ => ("", 0),
+            };
+            draw_confirm_delete_playlist(frame, title, nb_songs, *confirm_yes);
+        }
         None => {
             draw_main_menu(frame, popup);
         }
@@ -156,6 +171,9 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
             }
             crate::client::PopupTarget::Album { title, artist, .. } => {
                 format!(" {} — {} ", title, artist)
+            }
+            crate::client::PopupTarget::Playlist { title, .. } => {
+                format!(" {} ", title)
             }
         }
     };
@@ -213,12 +231,15 @@ fn draw_playlist_picker(
     track_title: &str,
 ) {
     let area = frame.area();
+    let max_height = area.height.saturating_sub(4).max(10);
+    let total_rows = (playlists.len() as u16) + 1; // +1 for "create" entry
     let height = if loading {
         5
     } else {
-        (playlists.len() as u16).min(20) + 4
+        (total_rows + 4).min(max_height)
     };
-    let popup_area = centered_rect(45, height, area);
+    let width = 70u16.min(area.width.saturating_sub(4));
+    let popup_area = centered_rect_abs(width, height, area);
 
     frame.render_widget(Clear, popup_area);
 
@@ -240,34 +261,122 @@ fn draw_playlist_picker(
         return;
     }
 
-    if playlists.is_empty() {
-        let empty_text = Paragraph::new(t().no_playlists)
-            .style(Theme::dim())
-            .alignment(Alignment::Center);
-        frame.render_widget(empty_text, inner);
-        return;
-    }
-
     let s = t();
-    let items: Vec<ListItem> = playlists
-        .iter()
-        .enumerate()
-        .map(|(i, pl)| {
-            let prefix = if i == selected { " > " } else { "   " };
-            let text = format!("{}{}", prefix, s.playlist_item(&pl.title, pl.nb_songs));
-            ListItem::new(Line::from(Span::styled(
-                text,
-                if i == selected {
-                    Theme::highlight()
-                } else {
-                    Theme::text()
-                },
-            )))
-        })
-        .collect();
+    let mut rows: Vec<Row> = Vec::with_capacity(playlists.len() + 1);
+    // First row: "+ Create new playlist..." entry.
+    rows.push(Row::new(vec![
+        Cell::from(Span::styled(
+            s.create_new_playlist,
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )),
+        Cell::from(Span::raw("")),
+    ]));
+    rows.extend(playlists.iter().map(|pl| {
+        let kind = if pl.collaborative {
+            s.playlist_kind_collaborative
+        } else {
+            s.playlist_kind_personal
+        };
+        Row::new(vec![
+            Cell::from(Span::styled(
+                s.playlist_item(&pl.title, pl.nb_songs),
+                Theme::text(),
+            )),
+            Cell::from(Span::styled(kind, Theme::dim())),
+        ])
+    }));
 
-    let list = List::new(items);
-    frame.render_widget(list, inner);
+    let widths = [Constraint::Min(20), Constraint::Length(16)];
+    let table = Table::new(rows, widths)
+        .row_highlight_style(Theme::highlight())
+        .highlight_symbol(" > ");
+
+    let mut table_state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, inner, &mut table_state);
+
+    let total = playlists.len() + 1;
+    if total as u16 > inner.height {
+        let max_scroll = total.saturating_sub(inner.height as usize);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll).position(selected);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .style(Style::default().fg(Theme::primary()));
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
+}
+
+/// Render a yes/no confirmation modal for deleting a non-empty playlist.
+fn draw_confirm_delete_playlist(frame: &mut Frame, title: &str, nb_songs: u64, confirm_yes: bool) {
+    let s = t();
+    let area = frame.area();
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let popup_area = centered_rect_abs(width, 8, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(s.confirm_delete_playlist_title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    let prompt = s.confirm_delete_playlist_body(title, nb_songs);
+    let para = Paragraph::new(prompt)
+        .style(Theme::text())
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .alignment(Alignment::Center);
+    frame.render_widget(para, chunks[0]);
+
+    let yes_style = if confirm_yes {
+        Theme::highlight()
+    } else {
+        Theme::dim()
+    };
+    let no_style = if !confirm_yes {
+        Theme::highlight()
+    } else {
+        Theme::dim()
+    };
+    let buttons = Line::from(vec![
+        Span::styled(format!("  [ {} ]  ", s.yes), yes_style),
+        Span::styled(format!("  [ {} ]  ", s.no), no_style),
+    ]);
+    let para = Paragraph::new(buttons).alignment(Alignment::Center);
+    frame.render_widget(para, chunks[1]);
+}
+
+/// Render a small modal with a single-line text input and a title.
+fn draw_text_input_modal(frame: &mut Frame, title: &str, value: &str, _cursor: usize) {
+    let area = frame.area();
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let popup_area = centered_rect_abs(width, 5, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    // Rough cursor representation: append "│" at end of input.
+    let display = format!(" {}│", value);
+    let para = Paragraph::new(display).style(Theme::text());
+    frame.render_widget(para, inner);
 }
 
 fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
@@ -1043,6 +1152,15 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
 
+    Rect::new(x, y, popup_width, popup_height)
+}
+
+/// Create a centered rectangle with absolute width and height.
+fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
+    let popup_width = width.min(area.width);
+    let popup_height = height.min(area.height.saturating_sub(2));
+    let x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let y = area.y + (area.height.saturating_sub(popup_height)) / 2;
     Rect::new(x, y, popup_width, popup_height)
 }
 

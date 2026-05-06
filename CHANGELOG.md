@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Context menu on a playlist (`x` shortcut), with "Rename" and "Delete" actions
+- Create a new playlist from the "Add to playlist" modal
+
+### Changed
+- Playlist picker: only personal and collaborative playlists shown
+- Context menu on a track inside a playlist detail shows "Remove from playlist" instead of "Add to playlist"
+
+### Fixed
+- Playlist picker GATEWAY_ERROR when adding a track to a playlist
+- Adding a track already present in a playlist now shows a friendly notification instead of the raw API error
+
 ## [1.10.0]
 
 ### Added

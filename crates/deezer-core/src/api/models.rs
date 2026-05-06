@@ -22,6 +22,9 @@ pub enum DeezerError {
 
     #[error("Track not available: {0}")]
     TrackUnavailable(String),
+
+    #[error("Track is already in this playlist")]
+    TrackAlreadyInPlaylist,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -248,6 +251,11 @@ pub struct PlaylistData {
     #[serde(rename = "PARENT_USERNAME")]
     #[serde(default)]
     pub author: String,
+    /// True if playlist is collaborative (writable by users other than the owner).
+    /// Synthesized in `get_user_playlists_raw` from the raw STATUS field; not
+    /// deserialized from the API directly.
+    #[serde(default)]
+    pub collaborative: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
