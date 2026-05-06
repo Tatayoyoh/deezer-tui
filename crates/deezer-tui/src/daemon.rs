@@ -8,7 +8,7 @@ use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem, PlaylistData,
     PlaylistDetail, TrackData,
 };
 use deezer_core::api::DeezerClient;
@@ -65,6 +65,24 @@ enum AsyncResult {
     PlaylistsError(String),
     AddedToPlaylist(String),
     AddToPlaylistError(String),
+    AlreadyInPlaylist,
+    RemovedFromPlaylist {
+        playlist_id: String,
+        track_id: String,
+    },
+    RemoveFromPlaylistError(String),
+    PlaylistCreatedAndAdded {
+        playlist_id: String,
+        title: String,
+    },
+    PlaylistCreatedError(String),
+    PlaylistRenamed {
+        playlist_id: String,
+        new_title: String,
+    },
+    PlaylistRenameError(String),
+    PlaylistDeleted(String),
+    PlaylistDeleteError(String),
     DislikeOk,
     DislikeError(String),
     MixReady(Vec<TrackData>),
@@ -690,6 +708,24 @@ impl Daemon {
                 track_id,
             } => {
                 self.start_add_to_playlist(playlist_id, track_id);
+            }
+            Command::RemoveFromPlaylist {
+                playlist_id,
+                track_id,
+            } => {
+                self.start_remove_from_playlist(playlist_id, track_id);
+            }
+            Command::CreatePlaylistAndAdd { title, track_id } => {
+                self.start_create_playlist_and_add(title, track_id);
+            }
+            Command::RenamePlaylist {
+                playlist_id,
+                new_title,
+            } => {
+                self.start_rename_playlist(playlist_id, new_title);
+            }
+            Command::DeletePlaylist { playlist_id } => {
+                self.start_delete_playlist(playlist_id);
             }
             Command::DislikeTrack { track_id } => {
                 self.start_dislike_track(track_id);
@@ -1344,6 +1380,32 @@ impl Daemon {
         });
     }
 
+    /// Apply a delta to a playlist's track count in cached `self.playlists` and
+    /// in any visible DisplayItem lists (col3 = "<N> titres").
+    fn adjust_playlist_count(&mut self, playlist_id: &str, delta: i64) {
+        for pl in self.playlists.iter_mut() {
+            if pl.playlist_id == playlist_id {
+                pl.nb_songs = (pl.nb_songs as i64 + delta).max(0) as u64;
+            }
+        }
+        let bump = |items: &mut [DisplayItem]| {
+            for it in items.iter_mut() {
+                if it.playlist_id.as_deref() == Some(playlist_id) {
+                    let new_count = it
+                        .col3
+                        .split_whitespace()
+                        .next()
+                        .and_then(|n| n.parse::<i64>().ok())
+                        .map(|n| (n + delta).max(0))
+                        .unwrap_or(0);
+                    it.col3 = format!("{} titres", new_count);
+                }
+            }
+        };
+        bump(&mut self.search_display);
+        bump(&mut self.favorites_display);
+    }
+
     fn start_load_playlists(&mut self) {
         if self.is_offline {
             return;
@@ -1375,8 +1437,96 @@ impl Daemon {
                 Ok(()) => {
                     let _ = tx.send(AsyncResult::AddedToPlaylist(playlist_id));
                 }
+                Err(DeezerError::TrackAlreadyInPlaylist) => {
+                    let _ = tx.send(AsyncResult::AlreadyInPlaylist);
+                }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::AddToPlaylistError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_remove_from_playlist(&mut self, playlist_id: String, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client
+                .remove_from_playlist(&playlist_id, &[track_id.as_str()])
+                .await
+            {
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::RemovedFromPlaylist {
+                        playlist_id,
+                        track_id,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::RemoveFromPlaylistError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_create_playlist_and_add(&mut self, title: String, track_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.create_playlist(&title).await {
+                Ok(playlist_id) => match client
+                    .add_to_playlist(&playlist_id, &[track_id.as_str()])
+                    .await
+                {
+                    Ok(()) => {
+                        let _ =
+                            tx.send(AsyncResult::PlaylistCreatedAndAdded { playlist_id, title });
+                    }
+                    Err(DeezerError::TrackAlreadyInPlaylist) => {
+                        let _ = tx.send(AsyncResult::AlreadyInPlaylist);
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::AddToPlaylistError(e.to_string()));
+                    }
+                },
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::PlaylistCreatedError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_rename_playlist(&mut self, playlist_id: String, new_title: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.rename_playlist(&playlist_id, &new_title).await {
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::PlaylistRenamed {
+                        playlist_id,
+                        new_title,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::PlaylistRenameError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_delete_playlist(&mut self, playlist_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.delete_playlist(&playlist_id).await {
+                Ok(()) => {
+                    let _ = tx.send(AsyncResult::PlaylistDeleted(playlist_id));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::PlaylistDeleteError(e.to_string()));
                 }
             }
         });
@@ -2060,9 +2210,99 @@ impl Daemon {
                     self.favorites_cache
                         .invalidate_playlists(Some(&playlist_id));
                     self.favorites_cache.save();
+                    self.adjust_playlist_count(&playlist_id, 1);
                 }
                 AsyncResult::AddToPlaylistError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_add_to_playlist_error, &err));
+                }
+                AsyncResult::AlreadyInPlaylist => {
+                    self.status_msg = Some(t().status_already_in_playlist.into());
+                }
+                AsyncResult::RemovedFromPlaylist {
+                    playlist_id,
+                    track_id,
+                } => {
+                    self.status_msg = Some(t().status_removed_from_playlist.into());
+                    self.favorites_cache
+                        .invalidate_playlists(Some(&playlist_id));
+                    self.favorites_cache.save();
+                    if let Some(ref mut detail) = self.playlist_detail {
+                        if detail.playlist_id == playlist_id {
+                            detail.tracks.retain(|t| t.track_id != track_id);
+                            detail.nb_tracks = detail.tracks.len() as u64;
+                        }
+                    }
+                    self.adjust_playlist_count(&playlist_id, -1);
+                }
+                AsyncResult::RemoveFromPlaylistError(err) => {
+                    self.status_msg =
+                        Some(t().fmt_error(t().status_remove_from_playlist_error, &err));
+                }
+                AsyncResult::PlaylistCreatedAndAdded {
+                    playlist_id,
+                    title: _,
+                } => {
+                    self.status_msg = Some(t().status_playlist_created.into());
+                    self.favorites_cache
+                        .invalidate_playlists(Some(&playlist_id));
+                    self.favorites_cache.save();
+                    self.playlists.clear(); // force reload on next picker open
+                }
+                AsyncResult::PlaylistCreatedError(err) => {
+                    self.status_msg = Some(t().fmt_error(t().status_playlist_create_error, &err));
+                }
+                AsyncResult::PlaylistRenamed {
+                    playlist_id,
+                    new_title,
+                } => {
+                    self.status_msg = Some(t().status_playlist_renamed.into());
+                    self.favorites_cache
+                        .invalidate_playlists(Some(&playlist_id));
+                    self.favorites_cache.save();
+                    for pl in self.playlists.iter_mut() {
+                        if pl.playlist_id == playlist_id {
+                            pl.title = new_title.clone();
+                        }
+                    }
+                    // Refresh title in any visible DisplayItem lists.
+                    let update = |items: &mut [DisplayItem]| {
+                        for it in items.iter_mut() {
+                            if it.playlist_id.as_deref() == Some(playlist_id.as_str()) {
+                                it.col1 = new_title.clone();
+                            }
+                        }
+                    };
+                    update(&mut self.search_display);
+                    update(&mut self.favorites_display);
+                    if let Some(ref mut detail) = self.playlist_detail {
+                        if detail.playlist_id == playlist_id {
+                            detail.title = new_title.clone();
+                        }
+                    }
+                }
+                AsyncResult::PlaylistRenameError(err) => {
+                    self.status_msg = Some(t().fmt_error(t().status_playlist_rename_error, &err));
+                }
+                AsyncResult::PlaylistDeleted(playlist_id) => {
+                    self.status_msg = Some(t().status_playlist_deleted.into());
+                    self.favorites_cache
+                        .invalidate_playlists(Some(&playlist_id));
+                    self.favorites_cache.save();
+                    self.playlists.retain(|p| p.playlist_id != playlist_id);
+                    self.search_display
+                        .retain(|it| it.playlist_id.as_deref() != Some(playlist_id.as_str()));
+                    self.favorites_display
+                        .retain(|it| it.playlist_id.as_deref() != Some(playlist_id.as_str()));
+                    if let Some(ref detail) = self.playlist_detail {
+                        if detail.playlist_id == playlist_id {
+                            self.playlist_detail = None;
+                            self.playlist_detail_selected = 0;
+                            self.playlist_detail_loading = false;
+                        }
+                    }
+                }
+                AsyncResult::PlaylistDeleteError(err) => {
+                    self.status_msg = Some(t().fmt_error(t().status_playlist_delete_error, &err));
                 }
                 AsyncResult::DislikeOk => {
                     self.status_msg = Some(t().status_track_disliked.into());

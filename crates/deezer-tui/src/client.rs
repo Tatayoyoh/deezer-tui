@@ -65,6 +65,7 @@ pub enum PopupAction {
     ToggleFavoriteArtist,
     ToggleFavoriteAlbum,
     AddToPlaylist,
+    RemoveFromPlaylist,
     DownloadOffline,
     DislikeTrack,
     PlayNext,
@@ -74,6 +75,8 @@ pub enum PopupAction {
     TrackInfo,
     ViewAlbum,
     ViewArtist,
+    RenamePlaylist,
+    DeletePlaylist,
 }
 
 /// What the popup menu is operating on.
@@ -88,6 +91,11 @@ pub enum PopupTarget {
         album_id: String,
         title: String,
         artist: String,
+    },
+    Playlist {
+        playlist_id: String,
+        title: String,
+        nb_songs: u64,
     },
 }
 
@@ -106,6 +114,22 @@ pub enum SubMenu {
         loading: bool,
     },
     TrackInfo,
+    /// Inline text input shown inside the playlist picker for creating a new
+    /// playlist + adding the current track to it.
+    CreatePlaylistInput {
+        name: String,
+        cursor: usize,
+    },
+    /// Modal text input shown for renaming a playlist (popup target = Playlist).
+    RenamePlaylistInput {
+        name: String,
+        cursor: usize,
+    },
+    /// Yes/no confirmation for deleting a non-empty playlist.
+    /// `confirm_yes` tracks which button is highlighted (true = Yes, false = No).
+    ConfirmDeletePlaylist {
+        confirm_yes: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +140,9 @@ pub struct PopupMenu {
     pub target: PopupTarget,
     pub is_favorite: bool,
     pub sub_menu: Option<SubMenu>,
+    /// When the popup is opened from inside a playlist detail view, this carries
+    /// the playlist's id so actions like `RemoveFromPlaylist` know the context.
+    pub playlist_context: Option<String>,
 }
 
 impl PopupMenu {
@@ -214,7 +241,22 @@ impl PopupMenu {
             target: PopupTarget::Track(track),
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
         }
+    }
+
+    /// Like `full`, but for a track displayed inside a playlist detail view.
+    /// "Add to playlist" is replaced by "Remove from this playlist".
+    fn full_in_playlist(track: TrackData, is_favorite: bool, playlist_id: String) -> Self {
+        let mut menu = Self::full(track, is_favorite);
+        for item in menu.items.iter_mut() {
+            if matches!(item.action, PopupAction::AddToPlaylist) {
+                item.label = t().remove_from_playlist.into();
+                item.action = PopupAction::RemoveFromPlaylist;
+            }
+        }
+        menu.playlist_context = Some(playlist_id);
+        menu
     }
 
     /// Build the manage-only menu (for `Ctrl+Space` on currently playing track).
@@ -265,6 +307,7 @@ impl PopupMenu {
             target: PopupTarget::Track(track),
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
         }
     }
 
@@ -300,6 +343,7 @@ impl PopupMenu {
             target: PopupTarget::Artist { artist_id, name },
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
         }
     }
 
@@ -339,6 +383,42 @@ impl PopupMenu {
             },
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
+        }
+    }
+
+    /// Build a context menu for a playlist item.
+    fn for_playlist(playlist_id: String, title: String, nb_songs: u64) -> Self {
+        let s = t();
+        let items = vec![
+            PopupMenuItem {
+                label: s.menu_manage.into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: s.rename_playlist.into(),
+                action: PopupAction::RenamePlaylist,
+                is_header: false,
+            },
+            PopupMenuItem {
+                label: s.delete_playlist.into(),
+                action: PopupAction::DeletePlaylist,
+                is_header: false,
+            },
+        ];
+        Self {
+            title: Some(format!(" {} ", title)),
+            items,
+            selected: 1,
+            target: PopupTarget::Playlist {
+                playlist_id,
+                title,
+                nb_songs,
+            },
+            is_favorite: false,
+            sub_menu: None,
+            playlist_context: None,
         }
     }
 
@@ -1398,12 +1478,25 @@ impl Client {
             return KeyAction::Detach;
         }
 
+        let popup_typing = self
+            .view
+            .popup
+            .as_ref()
+            .and_then(|p| p.sub_menu.as_ref())
+            .is_some_and(|sm| {
+                matches!(
+                    sm,
+                    SubMenu::CreatePlaylistInput { .. } | SubMenu::RenamePlaylistInput { .. }
+                )
+            });
+
         // ? : toggle help overlay (not during text input)
         if key.code == KeyCode::Char('?')
             && self.view.screen == Screen::Main
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
             && !self.view.favorites_filter_typing
+            && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
                 self.view.pop_overlay();
@@ -1419,6 +1512,7 @@ impl Client {
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
             && !self.view.favorites_filter_typing
+            && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Info)) {
                 self.view.pop_overlay();
@@ -2161,6 +2255,22 @@ impl Client {
                     return;
                 }
             }
+            if let Some(ref playlist_id) = item.playlist_id {
+                if item.track.is_none() {
+                    let nb_songs = item
+                        .col3
+                        .split_whitespace()
+                        .next()
+                        .and_then(|n| n.parse::<u64>().ok())
+                        .unwrap_or(0);
+                    self.view.popup = Some(PopupMenu::for_playlist(
+                        playlist_id.clone(),
+                        item.col1.clone(),
+                        nb_songs,
+                    ));
+                    return;
+                }
+            }
         }
 
         // Fall back to track popup
@@ -2500,15 +2610,13 @@ impl Client {
 
         // x: context menu for focused track
         if key.code == KeyCode::Char('x') {
-            if let Some(track) = self
-                .view
-                .playlist_detail
-                .as_ref()
-                .and_then(|d| d.tracks.get(selected))
-                .cloned()
-            {
+            let detail = self.view.playlist_detail.as_ref();
+            if let (Some(track), Some(playlist_id)) = (
+                detail.and_then(|d| d.tracks.get(selected)).cloned(),
+                detail.map(|d| d.playlist_id.clone()),
+            ) {
                 let is_fav = self.view.is_track_favorite(&track.track_id);
-                self.view.popup = Some(PopupMenu::full(track, is_fav));
+                self.view.popup = Some(PopupMenu::full_in_playlist(track, is_fav, playlist_id));
             }
             return KeyAction::Continue;
         }
@@ -2668,6 +2776,8 @@ impl Client {
                         }
                         return KeyAction::Continue;
                     }
+                    // Index 0 = "+ Create new playlist" entry; 1..=N = existing playlists.
+                    let total = playlists.len() + 1;
                     match key.code {
                         KeyCode::Esc => {
                             popup.sub_menu = None;
@@ -2678,13 +2788,18 @@ impl Client {
                             return KeyAction::Continue;
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
-                            if !playlists.is_empty() {
-                                *selected = (*selected + 1).min(playlists.len() - 1);
-                            }
+                            *selected = (*selected + 1).min(total - 1);
                             return KeyAction::Continue;
                         }
                         KeyCode::Enter => {
-                            if let Some(pl) = playlists.get(*selected) {
+                            if *selected == 0 {
+                                popup.sub_menu = Some(SubMenu::CreatePlaylistInput {
+                                    name: String::new(),
+                                    cursor: 0,
+                                });
+                                return KeyAction::Continue;
+                            }
+                            if let Some(pl) = playlists.get(*selected - 1) {
                                 if let Some(ref track_id) = track_id_for_playlist {
                                     let cmd = Command::AddToPlaylist {
                                         playlist_id: pl.playlist_id.clone(),
@@ -2705,6 +2820,141 @@ impl Client {
                     }
                     return KeyAction::Continue;
                 }
+                SubMenu::CreatePlaylistInput { name, cursor } => match key.code {
+                    KeyCode::Esc => {
+                        // Back to picker
+                        let playlists = self.view.playlists.clone();
+                        if let Some(ref mut popup) = self.view.popup {
+                            popup.sub_menu = Some(SubMenu::PlaylistPicker {
+                                playlists,
+                                selected: 0,
+                                loading: false,
+                            });
+                        }
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Enter => {
+                        let title = name.trim().to_string();
+                        if title.is_empty() {
+                            return KeyAction::Continue;
+                        }
+                        let Some(track_id) = track_id_for_playlist else {
+                            return KeyAction::Continue;
+                        };
+                        self.view.popup = None;
+                        return KeyAction::SendCommand(Command::CreatePlaylistAndAdd {
+                            title,
+                            track_id,
+                        });
+                    }
+                    KeyCode::Backspace => {
+                        if *cursor > 0 {
+                            let mut chars: Vec<char> = name.chars().collect();
+                            chars.remove(*cursor - 1);
+                            *name = chars.into_iter().collect();
+                            *cursor -= 1;
+                        }
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Left => {
+                        *cursor = cursor.saturating_sub(1);
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Right => {
+                        *cursor = (*cursor + 1).min(name.chars().count());
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Char(c) => {
+                        let mut chars: Vec<char> = name.chars().collect();
+                        chars.insert(*cursor, c);
+                        *name = chars.into_iter().collect();
+                        *cursor += 1;
+                        return KeyAction::Continue;
+                    }
+                    _ => return KeyAction::Continue,
+                },
+                SubMenu::RenamePlaylistInput { name, cursor } => match key.code {
+                    KeyCode::Esc => {
+                        popup.sub_menu = None;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Enter => {
+                        let new_title = name.trim().to_string();
+                        if new_title.is_empty() {
+                            return KeyAction::Continue;
+                        }
+                        let playlist_id = match &popup.target {
+                            PopupTarget::Playlist { playlist_id, .. } => playlist_id.clone(),
+                            _ => return KeyAction::Continue,
+                        };
+                        self.view.popup = None;
+                        return KeyAction::SendCommand(Command::RenamePlaylist {
+                            playlist_id,
+                            new_title,
+                        });
+                    }
+                    KeyCode::Backspace => {
+                        if *cursor > 0 {
+                            let mut chars: Vec<char> = name.chars().collect();
+                            chars.remove(*cursor - 1);
+                            *name = chars.into_iter().collect();
+                            *cursor -= 1;
+                        }
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Left => {
+                        *cursor = cursor.saturating_sub(1);
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Right => {
+                        *cursor = (*cursor + 1).min(name.chars().count());
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Char(c) => {
+                        let mut chars: Vec<char> = name.chars().collect();
+                        chars.insert(*cursor, c);
+                        *name = chars.into_iter().collect();
+                        *cursor += 1;
+                        return KeyAction::Continue;
+                    }
+                    _ => return KeyAction::Continue,
+                },
+                SubMenu::ConfirmDeletePlaylist { confirm_yes } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                        popup.sub_menu = None;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let playlist_id = match &popup.target {
+                            PopupTarget::Playlist { playlist_id, .. } => playlist_id.clone(),
+                            _ => return KeyAction::Continue,
+                        };
+                        self.view.popup = None;
+                        return KeyAction::SendCommand(Command::DeletePlaylist { playlist_id });
+                    }
+                    KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                    | KeyCode::Tab => {
+                        *confirm_yes = !*confirm_yes;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Enter => {
+                        if *confirm_yes {
+                            let playlist_id = match &popup.target {
+                                PopupTarget::Playlist { playlist_id, .. } => playlist_id.clone(),
+                                _ => return KeyAction::Continue,
+                            };
+                            self.view.popup = None;
+                            return KeyAction::SendCommand(Command::DeletePlaylist { playlist_id });
+                        } else {
+                            popup.sub_menu = None;
+                            return KeyAction::Continue;
+                        }
+                    }
+                    _ => return KeyAction::Continue,
+                },
             }
         }
 
@@ -2861,6 +3111,9 @@ impl Client {
                     PopupTarget::Album { album_id, .. } => {
                         format!("https://www.deezer.com/album/{album_id}")
                     }
+                    PopupTarget::Playlist { playlist_id, .. } => {
+                        format!("https://www.deezer.com/playlist/{playlist_id}")
+                    }
                 };
                 match arboard::Clipboard::new().and_then(|mut cb| cb.set_text(&url)) {
                     Ok(()) => {
@@ -2915,6 +3168,53 @@ impl Client {
                     KeyAction::SendCommand(Command::GetArtistDetail { artist_id })
                 } else {
                     self.view.popup = None;
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::RemoveFromPlaylist => {
+                let popup = self.view.popup.as_ref().unwrap();
+                let playlist_id = popup.playlist_context.clone();
+                if let (PopupTarget::Track(track), Some(playlist_id)) = (target, playlist_id) {
+                    self.view.popup = None;
+                    KeyAction::SendCommand(Command::RemoveFromPlaylist {
+                        playlist_id,
+                        track_id: track.track_id,
+                    })
+                } else {
+                    KeyAction::Continue
+                }
+            }
+            PopupAction::RenamePlaylist => {
+                if let PopupTarget::Playlist { ref title, .. } = target {
+                    let prefill = title.clone();
+                    let cursor = prefill.chars().count();
+                    if let Some(ref mut popup) = self.view.popup {
+                        popup.sub_menu = Some(SubMenu::RenamePlaylistInput {
+                            name: prefill,
+                            cursor,
+                        });
+                    }
+                }
+                KeyAction::Continue
+            }
+            PopupAction::DeletePlaylist => {
+                if let PopupTarget::Playlist {
+                    playlist_id,
+                    nb_songs,
+                    ..
+                } = target
+                {
+                    if nb_songs == 0 {
+                        self.view.popup = None;
+                        KeyAction::SendCommand(Command::DeletePlaylist { playlist_id })
+                    } else {
+                        if let Some(ref mut popup) = self.view.popup {
+                            popup.sub_menu =
+                                Some(SubMenu::ConfirmDeletePlaylist { confirm_yes: false });
+                        }
+                        KeyAction::Continue
+                    }
+                } else {
                     KeyAction::Continue
                 }
             }

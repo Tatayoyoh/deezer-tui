@@ -604,13 +604,83 @@ impl DeezerClient {
             "playlist_id": playlist_id,
             "songs": songs,
         });
-        self.gw_call_void("playlist.addSongs", params).await
+        match self.gw_call_void("playlist.addSongs", params).await {
+            Ok(()) => Ok(()),
+            Err(DeezerError::Api(msg)) => {
+                let lower = msg.to_lowercase();
+                if lower.contains("already") || lower.contains("duplicate") {
+                    Err(DeezerError::TrackAlreadyInPlaylist)
+                } else {
+                    Err(DeezerError::Api(msg))
+                }
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Remove tracks from a playlist.
+    pub async fn remove_from_playlist(
+        &self,
+        playlist_id: &str,
+        song_ids: &[&str],
+    ) -> Result<(), DeezerError> {
+        let songs: Vec<serde_json::Value> = song_ids.iter().map(|id| json!([id, 0])).collect();
+        let params = json!({
+            "playlist_id": playlist_id,
+            "songs": songs,
+        });
+        self.gw_call_void("playlist.deleteSongs", params).await
     }
 
     /// Mark a track as disliked (don't recommend).
     pub async fn dislike_track(&self, song_id: &str) -> Result<(), DeezerError> {
         let params = json!({ "SNG_ID": song_id });
         self.gw_call_void("song.dislike", params).await
+    }
+
+    /// Create a new (empty) personal playlist. Returns the new playlist's ID.
+    pub async fn create_playlist(&self, title: &str) -> Result<String, DeezerError> {
+        let params = json!({
+            "title": title,
+            "status": 0,
+            "description": "",
+            "songs": [],
+        });
+        let results = self.gw_call("playlist.create", params).await?;
+        // Deezer returns the new playlist_id either as a bare value or wrapped.
+        let pid = match &results {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => n.as_u64().map(|x| x.to_string()),
+            serde_json::Value::Object(_) => results
+                .get("PLAYLIST_ID")
+                .or_else(|| results.get("playlist_id"))
+                .and_then(|v| {
+                    v.as_str()
+                        .map(str::to_string)
+                        .or_else(|| v.as_u64().map(|n| n.to_string()))
+                }),
+            _ => None,
+        };
+        pid.ok_or_else(|| DeezerError::Api("Missing playlist_id in create response".into()))
+    }
+
+    /// Rename an existing playlist.
+    pub async fn rename_playlist(
+        &self,
+        playlist_id: &str,
+        new_title: &str,
+    ) -> Result<(), DeezerError> {
+        let params = json!({
+            "playlist_id": playlist_id,
+            "title": new_title,
+        });
+        self.gw_call_void("playlist.update", params).await
+    }
+
+    /// Delete a playlist owned by the current user.
+    pub async fn delete_playlist(&self, playlist_id: &str) -> Result<(), DeezerError> {
+        let params = json!({ "playlist_id": playlist_id });
+        self.gw_call_void("playlist.delete", params).await
     }
 
     /// Get user playlists as raw PlaylistData (for playlist picker).
@@ -622,17 +692,56 @@ impl DeezerClient {
 
         let params = json!({
             "user_id": session.user_id,
-            "start": 0,
+            "tab": "playlists",
             "nb": 2000,
         });
 
-        let results = self.gw_call("playlist.getList", params).await?;
+        let results = self.gw_call("deezer.pageProfile", params).await?;
         let data = results
-            .get("data")
-            .ok_or_else(|| DeezerError::Api("Missing 'data' in playlists".into()))?;
+            .get("TAB")
+            .and_then(|t| t.get("playlists"))
+            .and_then(|p| p.get("data"))
+            .ok_or_else(|| DeezerError::Api("Missing TAB.playlists.data in profile".into()))?;
 
-        serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))
+        let owner_id = session.user_id.to_string();
+        let all: Vec<serde_json::Value> = serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))?;
+
+        let writable: Vec<PlaylistData> = all
+            .into_iter()
+            .filter_map(|v| {
+                let parent_id = v.get("PARENT_USER_ID").and_then(|x| {
+                    x.as_str()
+                        .map(str::to_string)
+                        .or_else(|| x.as_u64().map(|n| n.to_string()))
+                });
+                let status = v
+                    .get("STATUS")
+                    .and_then(|x| {
+                        x.as_u64()
+                            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+                    })
+                    .unwrap_or(0);
+                let ptype = v.get("TYPE").and_then(|x| x.as_str()).unwrap_or("");
+                let is_owner = parent_id.as_deref() == Some(owner_id.as_str());
+                let is_collaborative = status == 2;
+
+                // Skip "loved tracks" pseudo-playlist (managed via favorites, not addSongs).
+                if ptype.eq_ignore_ascii_case("loved") {
+                    return None;
+                }
+                if !is_owner && !is_collaborative {
+                    return None;
+                }
+
+                let mut pl: PlaylistData = serde_json::from_value(v).ok()?;
+                pl.collaborative = is_collaborative;
+                Some(pl)
+            })
+            .collect();
+
+        debug!("user_playlists (writable): {} items", writable.len());
+        Ok(writable)
     }
 
     /// Get album details (title, artist, tracks, cover, release date) via the public API.
