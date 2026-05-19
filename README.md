@@ -50,6 +50,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Album/Artist miniature (require Kitty or Ghostty for real image display)<br>
 ✅ Auto update
 
+![search](assets/search.gif)
+
 ![themes](assets/themes.gif)
 
 ## Build on your system
