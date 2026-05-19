@@ -3,12 +3,14 @@ use tracing::debug;
 
 use super::models::{
     AlbumDetail, ArtistAlbumEntry, ArtistData, ArtistDetail, DeezerError, DisplayItem, EpisodeData,
-    PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults, SimilarArtistEntry,
-    TrackData,
+    MoodItem, PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults,
+    SimilarArtistEntry, TrackData,
 };
 use super::DeezerClient;
 
 const GW_LIGHT_URL: &str = "https://www.deezer.com/ajax/gw-light.php";
+const AUTH_JWT_URL: &str = "https://auth.deezer.com/login/arl?jo=p&rto=c&i=c";
+const PIPE_GRAPHQL_URL: &str = "https://pipe.deezer.com/api";
 
 impl DeezerClient {
     fn api_token(&self) -> Result<&str, DeezerError> {
@@ -1079,6 +1081,145 @@ impl DeezerClient {
         })
     }
 
+    /// Get the list of music genres/categories from the Deezer public API.
+    pub async fn get_genres(&self) -> Result<Vec<super::models::GenreData>, DeezerError> {
+        let resp: serde_json::Value = self
+            .http
+            .get("https://api.deezer.com/genre")
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let data = resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in genres response".into()))?;
+
+        let mut genres: Vec<super::models::GenreData> = data
+            .iter()
+            .filter_map(|entry| serde_json::from_value(entry.clone()).ok())
+            .collect();
+
+        // Filter out the meta-genre "All" (id == 0) returned by Deezer.
+        genres.retain(|g| g.id != 0);
+
+        Ok(genres)
+    }
+
+    /// Get the full content of a music genre/category — top tracks, albums,
+    /// artists, playlists from `/chart/{id}` plus radios from `/genre/{id}/radios`.
+    pub async fn get_genre_detail(
+        &self,
+        genre_id: u64,
+        name: String,
+    ) -> Result<super::models::GenreDetail, DeezerError> {
+        use super::models::{AlbumData, ArtistData, GenreDetail, PlaylistData, RadioData};
+
+        let chart_url = format!("https://api.deezer.com/chart/{}", genre_id);
+        let chart: serde_json::Value = self
+            .http
+            .get(&chart_url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        // Tracks: extract IDs, fetch full data via gw-light for streaming metadata.
+        let track_ids: Vec<String> = chart
+            .pointer("/tracks/data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let tracks = if track_ids.is_empty() {
+            Vec::new()
+        } else {
+            let refs: Vec<&str> = track_ids.iter().map(String::as_str).collect();
+            self.get_tracks(&refs).await.unwrap_or_default()
+        };
+
+        // Albums: parse public API format manually (lowercase, nested artist).
+        let album_entries = chart
+            .pointer("/albums/data")
+            .and_then(|d| d.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let albums: Vec<AlbumData> = album_entries.iter().filter_map(parse_chart_album).collect();
+
+        // Artists: Deezer's `/chart/{id}/artists` endpoint returns the global Top
+        // artists ignoring the genre filter. Derive genre-specific artists from
+        // the (correctly filtered) album list, deduping by id.
+        let mut artists: Vec<ArtistData> = Vec::new();
+        let mut seen_artist_ids = std::collections::HashSet::new();
+        for entry in &album_entries {
+            let Some(art) = entry.get("artist") else {
+                continue;
+            };
+            let Some(id) = art.get("id").and_then(|v| v.as_u64()) else {
+                continue;
+            };
+            if !seen_artist_ids.insert(id) {
+                continue;
+            }
+            let name = art
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            artists.push(ArtistData {
+                artist_id: id.to_string(),
+                name,
+                nb_fan: 0,
+            });
+        }
+
+        // Playlists.
+        let playlists: Vec<PlaylistData> = chart
+            .pointer("/playlists/data")
+            .and_then(|d| d.as_array())
+            .map(|arr| arr.iter().filter_map(parse_chart_playlist).collect())
+            .unwrap_or_default();
+
+        // Radios for this genre (separate endpoint).
+        let radios_url = format!("https://api.deezer.com/genre/{}/radios", genre_id);
+        let radios_resp: serde_json::Value = self
+            .http
+            .get(&radios_url)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?
+            .json()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+        let radios: Vec<RadioData> = radios_resp
+            .get("data")
+            .and_then(|d| d.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|r| serde_json::from_value(r.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(GenreDetail {
+            genre_id,
+            name,
+            tracks,
+            albums,
+            artists,
+            playlists,
+            radios,
+        })
+    }
+
     /// Get the list of radio stations from the Deezer public API.
     pub async fn get_radios(&self) -> Result<Vec<super::models::RadioData>, DeezerError> {
         let resp: serde_json::Value = self
@@ -1150,6 +1291,182 @@ impl DeezerClient {
             .map_err(|e| DeezerError::Api(format!("Failed to parse smart radio: {e}")))
     }
 
+    /// Acquire a JWT for pipe.deezer.com GraphQL API.
+    /// Exchanges the ARL cookie (already set on the cookie jar by `login_arl`)
+    /// for a JWT via `auth.deezer.com/login/arl`. Cached on the client.
+    async fn ensure_jwt(&self) -> Result<String, DeezerError> {
+        if let Ok(cache) = self.jwt_cache.lock() {
+            if let Some(ref jwt) = *cache {
+                return Ok(jwt.clone());
+            }
+        }
+
+        debug!("Fetching JWT from auth.deezer.com");
+        let resp = self
+            .http
+            .post(AUTH_JWT_URL)
+            .header("Content-Length", "0")
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let status = resp.status();
+        let raw = resp
+            .text()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+        let _ = std::fs::write(
+            "/tmp/deezer-jwt-debug.txt",
+            format!("status={status}\n{raw}"),
+        );
+        let body: serde_json::Value = serde_json::from_str(&raw)
+            .map_err(|e| DeezerError::Http(format!("JWT response not JSON: {e}")))?;
+
+        let jwt = body
+            .get("jwt")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                DeezerError::Auth(format!("Missing 'jwt' in auth response (status={status})"))
+            })?
+            .to_string();
+
+        if let Ok(mut cache) = self.jwt_cache.lock() {
+            *cache = Some(jwt.clone());
+        }
+        Ok(jwt)
+    }
+
+    /// Call the pipe.deezer.com GraphQL endpoint with a Bearer JWT.
+    async fn graphql_call(&self, query: &str) -> Result<serde_json::Value, DeezerError> {
+        let jwt = self.ensure_jwt().await?;
+        let body = json!({ "query": query });
+
+        let resp = self
+            .http
+            .post(PIPE_GRAPHQL_URL)
+            .bearer_auth(&jwt)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+        let status = resp.status();
+        let raw_text = resp
+            .text()
+            .await
+            .map_err(|e| DeezerError::Http(e.to_string()))?;
+        let _ = std::fs::write(
+            "/tmp/deezer-graphql-debug.txt",
+            format!("status={status}\n{raw_text}"),
+        );
+        let body: serde_json::Value = serde_json::from_str(&raw_text)
+            .map_err(|e| DeezerError::Http(format!("Non-JSON response: {e} body={raw_text}")))?;
+
+        if let Some(errors) = body.get("errors").and_then(|e| e.as_array()) {
+            if !errors.is_empty() {
+                let msg = errors
+                    .iter()
+                    .filter_map(|e| e.get("message").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(DeezerError::Api(format!("GraphQL error: {msg}")));
+            }
+        }
+
+        body.get("data")
+            .cloned()
+            .ok_or_else(|| DeezerError::Api("Missing 'data' in GraphQL response".into()))
+    }
+
+    /// Get the catalog of "mood" Flow configurations (Happy, Chill, Workout, …).
+    /// Queries pipe.deezer.com GraphQL via `me { flowConfigs { moods { … } } }`.
+    /// Falls back to a hardcoded list of mood radios if the call fails.
+    pub async fn get_moods(&self) -> Result<Vec<MoodItem>, DeezerError> {
+        let query = r#"{ me { flowConfigs { moods { edges { node { id title } } } } } }"#;
+
+        let data = self.graphql_call(query).await?;
+        // Temporary diagnostic dump: full GraphQL response written to /tmp.
+        let _ = std::fs::write(
+            "/tmp/deezer-moods-debug.json",
+            serde_json::to_string_pretty(&data).unwrap_or_default(),
+        );
+        let mut moods = Vec::new();
+        if let Some(edges) = data
+            .pointer("/me/flowConfigs/moods/edges")
+            .and_then(|v| v.as_array())
+        {
+            for edge in edges {
+                let id = edge
+                    .pointer("/node/id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let title = edge
+                    .pointer("/node/title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if !id.is_empty() && !title.is_empty() {
+                    moods.push(MoodItem {
+                        id,
+                        title,
+                        target: String::new(),
+                        radio_id: None,
+                    });
+                }
+            }
+        }
+        if moods.is_empty() {
+            debug!("GraphQL moods returned no entries, using hardcoded fallback");
+            return Ok(hardcoded_moods());
+        }
+        Ok(moods)
+    }
+
+    /// Resolve a mood into a track list to play.
+    /// Queries `flowConfig(flowConfigId: <id>) { tracks { track { id } } }`,
+    /// then fetches full track data via gw-light.
+    /// If the mood has a `radio_id` (hardcoded fallback path), uses that directly.
+    pub async fn get_mood_tracks(&self, mood: &MoodItem) -> Result<Vec<TrackData>, DeezerError> {
+        // Hardcoded fallback path: mood maps to a radio ID.
+        if let Some(rid) = mood.radio_id {
+            return self.get_radio_tracks(rid).await;
+        }
+
+        if mood.id.is_empty() {
+            return Err(DeezerError::Api("Mood has no id".into()));
+        }
+
+        // Escape the ID for embedding in the GraphQL query string.
+        let escaped_id = mood.id.replace('\\', "\\\\").replace('"', "\\\"");
+        let query = format!(
+            r#"{{ flowConfig(flowConfigId: "{escaped_id}") {{ tracks {{ track {{ id }} }} }} }}"#
+        );
+
+        let data = self.graphql_call(&query).await?;
+
+        let track_ids: Vec<String> = data
+            .pointer("/flowConfig/tracks")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| {
+                        t.pointer("/track/id")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if track_ids.is_empty() {
+            return Err(DeezerError::Api("No tracks in mood Flow config".into()));
+        }
+
+        let refs: Vec<&str> = track_ids.iter().map(String::as_str).collect();
+        self.get_tracks(&refs).await
+    }
+
     /// Get the user's personalized Flow (Deezer Flow).
     pub async fn get_flow(&self) -> Result<Vec<TrackData>, DeezerError> {
         let session = self
@@ -1200,4 +1517,78 @@ fn format_fans(n: u64) -> String {
     } else {
         format!("{n} fans")
     }
+}
+
+/// Fallback list of mood radios used when `page.get` is unavailable or empty.
+/// IDs are Deezer "smart radio" station IDs that play mood-fitting music.
+fn hardcoded_moods() -> Vec<MoodItem> {
+    let entries: &[(&str, u64)] = &[
+        ("Chill", 132),
+        ("Workout", 75),
+        ("Pop", 137),
+        ("Rock", 152),
+        ("Electro", 144),
+        ("Hip Hop", 116),
+        ("Latin", 84),
+        ("R&B", 153),
+        ("Reggae", 117),
+        ("Indie", 113),
+    ];
+    entries
+        .iter()
+        .map(|(title, rid)| MoodItem {
+            id: rid.to_string(),
+            title: (*title).to_string(),
+            target: String::new(),
+            radio_id: Some(*rid),
+        })
+        .collect()
+}
+
+// ── Chart-API parsers (public API uses lowercase fields, distinct from gw-light) ──
+
+fn parse_chart_album(v: &serde_json::Value) -> Option<super::models::AlbumData> {
+    let id = v.get("id")?.as_u64()?;
+    let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("");
+    let artist = v
+        .get("artist")
+        .and_then(|a| a.get("name"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    Some(super::models::AlbumData {
+        album_id: id.to_string(),
+        title: title.to_string(),
+        artist: artist.to_string(),
+        nb_tracks: v.get("nb_tracks").and_then(|n| n.as_u64()).unwrap_or(0),
+        release_date: String::new(),
+        nb_fan: 0,
+    })
+}
+
+fn parse_chart_artist(v: &serde_json::Value) -> Option<super::models::ArtistData> {
+    let id = v.get("id")?.as_u64()?;
+    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("");
+    Some(super::models::ArtistData {
+        artist_id: id.to_string(),
+        name: name.to_string(),
+        nb_fan: 0,
+    })
+}
+
+fn parse_chart_playlist(v: &serde_json::Value) -> Option<super::models::PlaylistData> {
+    let id = v.get("id")?.as_u64()?;
+    let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("");
+    let nb_songs = v.get("nb_tracks").and_then(|n| n.as_u64()).unwrap_or(0);
+    let author = v
+        .get("user")
+        .and_then(|u| u.get("name"))
+        .and_then(|x| x.as_str())
+        .unwrap_or("");
+    Some(super::models::PlaylistData {
+        playlist_id: id.to_string(),
+        title: title.to_string(),
+        nb_songs,
+        author: author.to_string(),
+        collaborative: false,
+    })
 }

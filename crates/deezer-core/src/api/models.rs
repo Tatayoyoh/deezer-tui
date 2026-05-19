@@ -306,6 +306,45 @@ pub struct RadioData {
     pub description: String,
 }
 
+/// A "mood" channel from the Deezer catalog (e.g. Chill, Workout, Party).
+/// `target` is either a slug like "/channels/soft" (resolved via page.get) or
+/// empty when the mood maps directly to a `radio_id` (hardcoded fallback).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoodItem {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub radio_id: Option<u64>,
+}
+
+/// A music genre/category from the Deezer public API (`/genre`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenreData {
+    pub id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub picture: String,
+}
+
+/// Full content of a music genre/category — top tracks, albums, artists, playlists, radios.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GenreDetail {
+    pub genre_id: u64,
+    pub name: String,
+    #[serde(default)]
+    pub tracks: Vec<TrackData>,
+    #[serde(default)]
+    pub albums: Vec<AlbumData>,
+    #[serde(default)]
+    pub artists: Vec<ArtistData>,
+    #[serde(default)]
+    pub playlists: Vec<PlaylistData>,
+    #[serde(default)]
+    pub radios: Vec<RadioData>,
+}
+
 /// Full album detail returned from the public API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumDetail {

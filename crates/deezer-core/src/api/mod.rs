@@ -3,7 +3,7 @@ pub mod gateway;
 pub mod media;
 pub mod models;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use reqwest::cookie::Jar;
 use reqwest::Client;
@@ -15,6 +15,8 @@ pub struct DeezerClient {
     pub(crate) http: Client,
     pub(crate) cookie_jar: Arc<Jar>,
     pub(crate) session: Option<Session>,
+    /// Cached JWT for pipe.deezer.com GraphQL API. Lazily fetched.
+    pub(crate) jwt_cache: Mutex<Option<String>>,
 }
 
 impl DeezerClient {
@@ -33,6 +35,7 @@ impl DeezerClient {
             http,
             cookie_jar,
             session: None,
+            jwt_cache: Mutex::new(None),
         })
     }
 

@@ -70,7 +70,9 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_updating(frame, version, progress_msg);
             return;
         }
-        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail) => {
+        Some(Overlay::AlbumDetail { .. })
+        | Some(Overlay::ArtistDetail)
+        | Some(Overlay::GenreDetail { .. }) => {
             // Detail views are rendered in the main content area
             // Don't return — let the popup (context menu) render on top if open
         }

@@ -1,9 +1,13 @@
 pub mod album_detail;
 pub mod artist_detail;
+pub mod categories;
 pub mod common;
 pub mod downloads;
+pub mod explore;
 pub mod favorites;
+pub mod genre_detail;
 pub mod login;
+pub mod moods;
 pub mod player;
 pub mod popup;
 pub mod radio;
@@ -54,6 +58,7 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
         std::iter::once(view.overlay.as_ref()).chain(view.overlay_stack.iter().rev().map(Some));
     let mut show_album = false;
     let mut show_artist = false;
+    let mut show_genre = false;
     for o in all_overlays {
         match o {
             Some(Overlay::AlbumDetail { .. }) => {
@@ -64,22 +69,33 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
                 show_artist = true;
                 break;
             }
+            Some(Overlay::GenreDetail { .. }) => {
+                show_genre = true;
+                break;
+            }
             _ => {}
         }
     }
 
-    // Tab bar (computed after show_album/show_artist)
-    draw_tabs(frame, view, chunks[0], show_album || show_artist);
+    // Tab bar (computed after show_album/show_artist/show_genre)
+    draw_tabs(
+        frame,
+        view,
+        chunks[0],
+        show_album || show_artist || show_genre,
+    );
 
     if show_album {
         album_detail::draw(frame, view, chunks[1]);
     } else if show_artist {
         artist_detail::draw(frame, view, chunks[1]);
+    } else if show_genre {
+        genre_detail::draw(frame, view, chunks[1]);
     } else {
         match view.active_tab {
             ActiveTab::Search => search::draw(frame, view, chunks[1]),
             ActiveTab::Favorites => favorites::draw(frame, view, chunks[1]),
-            ActiveTab::Radio => radio::draw(frame, view, chunks[1]),
+            ActiveTab::Explore => explore::draw(frame, view, chunks[1]),
             ActiveTab::Downloads => downloads::draw(frame, view, chunks[1]),
         }
     }
@@ -126,13 +142,13 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
             vec![
                 Line::from(s.tab_search),
                 Line::from(s.tab_favorites),
-                Line::from(s.tab_radios),
+                Line::from(s.tab_explore),
                 Line::from(s.tab_offline),
             ],
             match view.active_tab {
                 ActiveTab::Search => 0,
                 ActiveTab::Favorites => 1,
-                ActiveTab::Radio => 2,
+                ActiveTab::Explore => 2,
                 ActiveTab::Downloads => 3,
             },
         )

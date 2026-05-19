@@ -20,6 +20,8 @@ use serde::{Deserialize, Serialize};
 use deezer_core::api::models::{DisplayItem, PlaylistDetail, TrackData};
 use deezer_core::Config;
 
+use crate::protocol::MoodEntry;
+
 /// All cached favorites data, persisted to disk.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FavoritesCache {
@@ -41,6 +43,9 @@ pub struct FavoritesCache {
     /// Individual playlist details, keyed by playlist_id.
     #[serde(default)]
     pub playlist_details: HashMap<String, PlaylistDetail>,
+    /// Explore > Moods list. Rarely changes — cached forever, refreshed on login.
+    #[serde(default)]
+    pub moods: Option<Vec<MoodEntry>>,
 }
 
 impl FavoritesCache {
@@ -95,5 +100,9 @@ impl FavoritesCache {
 
     pub fn invalidate_following(&mut self) {
         self.following = None;
+    }
+
+    pub fn invalidate_moods(&mut self) {
+        self.moods = None;
     }
 }

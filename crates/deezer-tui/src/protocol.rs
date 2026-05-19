@@ -5,7 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, GenreDetail, PlaylistData,
     PlaylistDetail, TrackData,
 };
 use deezer_core::offline::OfflineTrack;
@@ -123,6 +123,18 @@ pub enum Command {
     LoadRadios,
     /// Play the selected radio station's tracks.
     PlayFromRadio { index: usize },
+    /// Load the mood channels list from Deezer.
+    LoadMoods,
+    /// Play the selected mood (resolves tracks via the API).
+    PlayFromMood { index: usize },
+    /// Load music genres/categories from Deezer.
+    LoadGenres,
+    /// Load the detail (chart + radios) of a specific genre.
+    GetGenreDetail { genre_id: u64, name: String },
+    /// Play a track from the genre detail Tracks sub-tab.
+    PlayFromGenreTrack { index: usize },
+    /// Play a radio from the genre detail Radios sub-tab.
+    PlayFromGenreRadio { index: usize },
     /// Download a track for offline mode.
     DownloadOffline { track: TrackData },
     /// Download an entire album for offline mode.
@@ -156,6 +168,40 @@ pub enum NavOverlay {
     ArtistDetail,
     AlbumDetail { from_artist: bool },
     PlaylistDetail,
+    GenreDetail,
+}
+
+/// Sub-categories within the GenreDetail overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum GenreDetailSubTab {
+    #[default]
+    Tracks,
+    Albums,
+    Artists,
+    Playlists,
+    Radios,
+}
+
+impl GenreDetailSubTab {
+    pub const ALL: [Self; 5] = [
+        Self::Tracks,
+        Self::Albums,
+        Self::Artists,
+        Self::Playlists,
+        Self::Radios,
+    ];
+
+    pub fn next(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + 1) % all.len()]
+    }
+
+    pub fn prev(&self) -> Self {
+        let all = Self::ALL;
+        let idx = all.iter().position(|c| c == self).unwrap_or(0);
+        all[(idx + all.len() - 1) % all.len()]
+    }
 }
 
 /// Messages sent from the daemon to the TUI client.
@@ -181,8 +227,44 @@ pub enum ActiveTab {
     #[default]
     Search,
     Favorites,
-    Radio,
+    Explore,
     Downloads,
+}
+
+/// Sub-categories within the Explore tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ExploreCategory {
+    #[default]
+    Moods,
+    Categories,
+    Radios,
+}
+
+impl ExploreCategory {
+    pub const ALL: [Self; 3] = [Self::Moods, Self::Categories, Self::Radios];
+
+    pub fn next(&self) -> Self {
+        match self {
+            Self::Moods => Self::Categories,
+            Self::Categories => Self::Radios,
+            Self::Radios => Self::Moods,
+        }
+    }
+
+    pub fn prev(&self) -> Self {
+        match self {
+            Self::Moods => Self::Radios,
+            Self::Categories => Self::Moods,
+            Self::Radios => Self::Categories,
+        }
+    }
+}
+
+/// A music genre/category for display.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GenreItem {
+    pub id: u64,
+    pub name: String,
 }
 
 /// Search category filter.
@@ -328,6 +410,17 @@ pub struct RadioItem {
     pub title: String,
 }
 
+/// A mood channel item for display in the Explore > Moods tab.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MoodEntry {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub radio_id: Option<u64>,
+}
+
 /// Complete state snapshot sent from daemon to client.
 /// All fields use `#[serde(default)]` for forward/backward compatibility
 /// when daemon and client are running different binary versions.
@@ -407,6 +500,10 @@ pub struct DaemonSnapshot {
     #[serde(default)]
     pub offline_track_ids: Vec<String>,
 
+    // Explore tab
+    #[serde(default)]
+    pub explore_category: ExploreCategory,
+
     // Radios
     #[serde(default)]
     pub radios: Vec<RadioItem>,
@@ -414,6 +511,22 @@ pub struct DaemonSnapshot {
     pub radios_selected: usize,
     #[serde(default)]
     pub radios_loading: bool,
+
+    // Moods
+    #[serde(default)]
+    pub moods: Vec<MoodEntry>,
+    #[serde(default)]
+    pub moods_selected: usize,
+    #[serde(default)]
+    pub moods_loading: bool,
+
+    // Genres / Categories
+    #[serde(default)]
+    pub genres: Vec<GenreItem>,
+    #[serde(default)]
+    pub genres_selected: usize,
+    #[serde(default)]
+    pub genres_loading: bool,
 
     // Playlists (for playlist picker in popup menu)
     #[serde(default)]
@@ -444,6 +557,12 @@ pub struct DaemonSnapshot {
     pub playlist_detail_selected: usize,
     #[serde(default)]
     pub playlist_detail_loading: bool,
+
+    // Genre detail
+    #[serde(default)]
+    pub genre_detail: Option<GenreDetail>,
+    #[serde(default)]
+    pub genre_detail_loading: bool,
 
     // Navigation overlay stack (persisted across reconnections)
     #[serde(default)]
@@ -501,9 +620,16 @@ impl Default for DaemonSnapshot {
             offline_selected: 0,
             offline_loading: false,
             offline_track_ids: Vec::new(),
+            explore_category: ExploreCategory::default(),
             radios: Vec::new(),
             radios_selected: 0,
             radios_loading: false,
+            moods: Vec::new(),
+            moods_selected: 0,
+            moods_loading: false,
+            genres: Vec::new(),
+            genres_selected: 0,
+            genres_loading: false,
             playlists: Vec::new(),
             album_detail: None,
             album_detail_selected: 0,
@@ -515,6 +641,8 @@ impl Default for DaemonSnapshot {
             playlist_detail: None,
             playlist_detail_selected: 0,
             playlist_detail_loading: false,
+            genre_detail: None,
+            genre_detail_loading: false,
             nav_overlay: None,
             nav_overlay_stack: Vec::new(),
             status_msg: None,
