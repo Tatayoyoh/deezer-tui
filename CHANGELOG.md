@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.12.0] - 2026-05-19
 
 ### Changed
 - Renamed `Radios` tab to `Explore`
