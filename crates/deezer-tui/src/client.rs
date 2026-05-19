@@ -32,11 +32,13 @@ use crate::i18n::{self, t, Locale};
 use deezer_core::offline::OfflineTrack;
 
 use crate::protocol::{
-    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
-    NavOverlay, OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, ExploreCategory,
+    FavoritesCategory, GenreDetailSubTab, GenreItem, MoodEntry, NavOverlay, OfflineCategory,
+    RadioItem, Screen, SearchCategory, ServerMessage,
 };
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
+use deezer_core::api::models::GenreDetail;
 
 const TICK_RATE: Duration = Duration::from_millis(50);
 
@@ -473,6 +475,11 @@ pub enum Overlay {
     ArtistDetail,
     /// Playlist detail modal.
     PlaylistDetail { selected: usize },
+    /// Genre/category detail page.
+    GenreDetail {
+        sub_tab: GenreDetailSubTab,
+        selected: usize,
+    },
     /// Waiting list (upcoming tracks in queue).
     WaitingList { selected: usize },
     /// Application info modal.
@@ -497,6 +504,10 @@ impl NavOverlay {
             NavOverlay::ArtistDetail => Overlay::ArtistDetail,
             NavOverlay::AlbumDetail { from_artist } => Overlay::AlbumDetail { from_artist },
             NavOverlay::PlaylistDetail => Overlay::PlaylistDetail { selected: 0 },
+            NavOverlay::GenreDetail => Overlay::GenreDetail {
+                sub_tab: GenreDetailSubTab::default(),
+                selected: 0,
+            },
         }
     }
 }
@@ -510,6 +521,7 @@ impl Overlay {
                 from_artist: *from_artist,
             }),
             Overlay::PlaylistDetail { .. } => Some(NavOverlay::PlaylistDetail),
+            Overlay::GenreDetail { .. } => Some(NavOverlay::GenreDetail),
             _ => None,
         }
     }
@@ -562,12 +574,22 @@ pub struct ViewState {
     pub offline_selected: usize,
     pub offline_loading: bool,
     pub offline_track_ids: Vec<String>,
+    pub explore_category: ExploreCategory,
     pub radios: Vec<RadioItem>,
     pub radios_filtered: Vec<RadioItem>,
     pub radios_selected: usize,
     pub radios_loading: bool,
     pub radio_filter_input: String,
     pub radio_filter_typing: bool,
+    pub moods: Vec<MoodEntry>,
+    pub moods_selected: usize,
+    pub moods_loading: bool,
+    pub genres: Vec<GenreItem>,
+    pub genres_filtered: Vec<GenreItem>,
+    pub genres_selected: usize,
+    pub genres_loading: bool,
+    pub genres_filter_input: String,
+    pub genres_filter_typing: bool,
     pub playlists: Vec<PlaylistData>,
     pub album_detail: Option<AlbumDetail>,
     pub album_detail_selected: usize,
@@ -584,6 +606,8 @@ pub struct ViewState {
     pub artist_detail_left_scrollable: bool,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
+    pub genre_detail: Option<GenreDetail>,
+    pub genre_detail_loading: bool,
     pub status_msg: Option<String>,
     pub login_error: Option<String>,
     pub login_loading: bool,
@@ -605,6 +629,11 @@ pub struct ViewState {
     pub overlay_stack: Vec<Overlay>,
     /// Pending navigation commands to send to daemon (queued by overlay changes).
     pub nav_commands: Vec<Command>,
+    /// True once we've synced nav overlay state from the daemon on initial connect.
+    /// After that, the client is authoritative for nav state — daemon snapshots
+    /// must not overwrite it, or we get glitches when a snapshot arrives between
+    /// a client-side push and the daemon's ack of the corresponding nav command.
+    pub nav_synced_from_daemon: bool,
     pub toast: Option<Toast>,
 
     // Cover art image (client-side only)
@@ -708,12 +737,22 @@ impl ViewState {
             offline_selected: snap.offline_selected,
             offline_loading: snap.offline_loading,
             offline_track_ids: snap.offline_track_ids.clone(),
+            explore_category: snap.explore_category,
             radios: snap.radios.clone(),
             radios_filtered: snap.radios.clone(),
             radios_selected: snap.radios_selected,
             radios_loading: snap.radios_loading,
             radio_filter_input: String::new(),
             radio_filter_typing: false,
+            moods: snap.moods.clone(),
+            moods_selected: snap.moods_selected,
+            moods_loading: snap.moods_loading,
+            genres: snap.genres.clone(),
+            genres_filtered: snap.genres.clone(),
+            genres_selected: snap.genres_selected,
+            genres_loading: snap.genres_loading,
+            genres_filter_input: String::new(),
+            genres_filter_typing: false,
             playlists: snap.playlists.clone(),
             album_detail: snap.album_detail.clone(),
             album_detail_selected: snap.album_detail_selected,
@@ -730,6 +769,8 @@ impl ViewState {
             artist_detail_left_scrollable: false,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
+            genre_detail: snap.genre_detail.clone(),
+            genre_detail_loading: snap.genre_detail_loading,
             status_msg: snap.status_msg.clone(),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
@@ -753,6 +794,7 @@ impl ViewState {
                 .map(|n| n.to_overlay())
                 .collect(),
             nav_commands: Vec::new(),
+            nav_synced_from_daemon: true, // initial snapshot was consumed in the constructor
             toast: None,
             cover_image: None,
             cover_image_url: String::new(),
@@ -806,7 +848,8 @@ impl ViewState {
             None => true,
             Some(Overlay::ArtistDetail)
             | Some(Overlay::AlbumDetail { .. })
-            | Some(Overlay::PlaylistDetail { .. }) => true,
+            | Some(Overlay::PlaylistDetail { .. })
+            | Some(Overlay::GenreDetail { .. }) => true,
             _ => false,
         }
     }
@@ -851,11 +894,23 @@ impl ViewState {
         self.offline_selected = snap.offline_selected;
         self.offline_loading = snap.offline_loading;
         self.offline_track_ids = snap.offline_track_ids;
+        self.explore_category = snap.explore_category;
         // Update radios and re-apply filter
         if self.radios.len() != snap.radios.len() || self.radios_loading != snap.radios_loading {
             self.radios = snap.radios;
             self.radios_loading = snap.radios_loading;
             self.apply_radio_filter();
+        }
+        // Update moods
+        if self.moods.len() != snap.moods.len() || self.moods_loading != snap.moods_loading {
+            self.moods = snap.moods;
+            self.moods_loading = snap.moods_loading;
+        }
+        // Update genres and re-apply filter
+        if self.genres.len() != snap.genres.len() || self.genres_loading != snap.genres_loading {
+            self.genres = snap.genres;
+            self.genres_loading = snap.genres_loading;
+            self.apply_genres_filter();
         }
 
         self.album_detail = snap.album_detail;
@@ -867,10 +922,15 @@ impl ViewState {
         self.playlist_detail = snap.playlist_detail;
         // Don't overwrite playlist_detail selected — it's managed client-side via Overlay
         self.playlist_detail_loading = snap.playlist_detail_loading;
+        self.genre_detail = snap.genre_detail;
+        self.genre_detail_loading = snap.genre_detail_loading;
 
         // Restore navigation overlay from daemon state.
         // Only apply if the current overlay is a nav type or None (don't clobber UI overlays).
-        if self.is_nav_or_none_overlay() {
+        // Skip entirely once we've synced once — the client is authoritative for nav
+        // afterwards. Reapplying every tick races with pending client-side pushes
+        // (which are async to the daemon) and causes flicker + loss of stack state.
+        if !self.nav_synced_from_daemon && self.is_nav_or_none_overlay() {
             let new_overlay = snap.nav_overlay.map(|n| n.to_overlay());
             // Preserve client-side `selected` for PlaylistDetail: the daemon only
             // tracks that the overlay *exists*, not the cursor position within it.
@@ -882,13 +942,44 @@ impl ViewState {
                 ) => Some(Overlay::PlaylistDetail {
                     selected: *selected,
                 }),
+                (
+                    Some(Overlay::GenreDetail { .. }),
+                    Some(Overlay::GenreDetail { sub_tab, selected }),
+                ) => Some(Overlay::GenreDetail {
+                    sub_tab: *sub_tab,
+                    selected: *selected,
+                }),
                 (new, _) => new,
             };
+            // Rebuild overlay_stack from daemon, but preserve UI-only fields
+            // (sub_tab, selected) of matching client-side entries — the daemon
+            // doesn't track those.
+            let prev_stack = std::mem::take(&mut self.overlay_stack);
             self.overlay_stack = snap
                 .nav_overlay_stack
                 .into_iter()
-                .map(|n| n.to_overlay())
+                .enumerate()
+                .map(|(i, n)| {
+                    let new = n.to_overlay();
+                    match (new, prev_stack.get(i)) {
+                        (
+                            Overlay::GenreDetail { .. },
+                            Some(Overlay::GenreDetail { sub_tab, selected }),
+                        ) => Overlay::GenreDetail {
+                            sub_tab: *sub_tab,
+                            selected: *selected,
+                        },
+                        (
+                            Overlay::PlaylistDetail { .. },
+                            Some(Overlay::PlaylistDetail { selected }),
+                        ) => Overlay::PlaylistDetail {
+                            selected: *selected,
+                        },
+                        (new, _) => new,
+                    }
+                })
                 .collect();
+            self.nav_synced_from_daemon = true;
         }
         self.status_msg = snap.status_msg;
         self.login_error = snap.login_error;
@@ -930,6 +1021,8 @@ impl ViewState {
             self.popup = None;
             self.radio_filter_input.clear();
             self.radio_filter_typing = false;
+            self.genres_filter_input.clear();
+            self.genres_filter_typing = false;
             self.favorites_filter_input.clear();
             self.favorites_filter_typing = false;
         }
@@ -948,6 +1041,22 @@ impl ViewState {
     /// Check if an album is in the user's favorites.
     fn is_album_favorite(&self, album_id: &str) -> bool {
         self.favorite_album_ids.iter().any(|id| id == album_id)
+    }
+
+    /// Apply the current filter text to the full genres list.
+    fn apply_genres_filter(&mut self) {
+        if self.genres_filter_input.is_empty() {
+            self.genres_filtered = self.genres.clone();
+        } else {
+            let query = self.genres_filter_input.to_lowercase();
+            self.genres_filtered = self
+                .genres
+                .iter()
+                .filter(|g| fuzzy_match(&query, &g.name.to_lowercase()))
+                .cloned()
+                .collect();
+        }
+        self.genres_selected = 0;
     }
 
     /// Apply the current filter text to the full radios list.
@@ -1495,6 +1604,7 @@ impl Client {
             && self.view.screen == Screen::Main
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
+            && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
             && !popup_typing
         {
@@ -1511,6 +1621,7 @@ impl Client {
             && self.view.screen == Screen::Main
             && self.view.input_mode != InputMode::Typing
             && !self.view.radio_filter_typing
+            && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
             && !popup_typing
         {
@@ -1540,11 +1651,19 @@ impl Client {
                         self.view.input_mode = InputMode::Typing;
                         self.view.search_input.clear();
                     }
-                    ActiveTab::Radio => {
-                        self.view.radio_filter_typing = true;
-                        self.view.radio_filter_input.clear();
-                        self.view.apply_radio_filter();
-                    }
+                    ActiveTab::Explore => match self.view.explore_category {
+                        ExploreCategory::Moods => {}
+                        ExploreCategory::Categories => {
+                            self.view.genres_filter_typing = true;
+                            self.view.genres_filter_input.clear();
+                            self.view.apply_genres_filter();
+                        }
+                        ExploreCategory::Radios => {
+                            self.view.radio_filter_typing = true;
+                            self.view.radio_filter_input.clear();
+                            self.view.apply_radio_filter();
+                        }
+                    },
                     ActiveTab::Favorites => {
                         self.view.favorites_filter_typing = true;
                         self.view.favorites_filter_input.clear();
@@ -1743,6 +1862,27 @@ impl Client {
             }
         }
 
+        // Genres filter typing mode
+        if self.view.genres_filter_typing {
+            match key.code {
+                KeyCode::Esc | KeyCode::Enter => {
+                    self.view.genres_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Char(c) => {
+                    self.view.genres_filter_input.push(c);
+                    self.view.apply_genres_filter();
+                    return KeyAction::Continue;
+                }
+                KeyCode::Backspace => {
+                    self.view.genres_filter_input.pop();
+                    self.view.apply_genres_filter();
+                    return KeyAction::Continue;
+                }
+                _ => return KeyAction::Continue,
+            }
+        }
+
         // Normal mode
         match key.code {
             // Tab navigation (disabled in offline mode — only Offline tab available)
@@ -1757,11 +1897,19 @@ impl Client {
                         self.view.input_mode = InputMode::Typing;
                         self.view.search_input.clear();
                     }
-                    ActiveTab::Radio => {
-                        self.view.radio_filter_typing = true;
-                        self.view.radio_filter_input.clear();
-                        self.view.apply_radio_filter();
-                    }
+                    ActiveTab::Explore => match self.view.explore_category {
+                        ExploreCategory::Moods => {}
+                        ExploreCategory::Categories => {
+                            self.view.genres_filter_typing = true;
+                            self.view.genres_filter_input.clear();
+                            self.view.apply_genres_filter();
+                        }
+                        ExploreCategory::Radios => {
+                            self.view.radio_filter_typing = true;
+                            self.view.radio_filter_input.clear();
+                            self.view.apply_radio_filter();
+                        }
+                    },
                     ActiveTab::Favorites => {
                         self.view.favorites_filter_typing = true;
                         self.view.favorites_filter_input.clear();
@@ -1803,8 +1951,18 @@ impl Client {
 
             // List navigation
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.view.active_tab == ActiveTab::Radio {
-                    self.view.radios_selected = self.view.radios_selected.saturating_sub(1);
+                if self.view.active_tab == ActiveTab::Explore {
+                    match self.view.explore_category {
+                        ExploreCategory::Moods => {
+                            self.view.moods_selected = self.view.moods_selected.saturating_sub(1);
+                        }
+                        ExploreCategory::Categories => {
+                            self.view.genres_selected = self.view.genres_selected.saturating_sub(1);
+                        }
+                        ExploreCategory::Radios => {
+                            self.view.radios_selected = self.view.radios_selected.saturating_sub(1);
+                        }
+                    }
                     return KeyAction::Continue;
                 }
                 if self.view.active_tab == ActiveTab::Downloads
@@ -1824,10 +1982,26 @@ impl Client {
                 KeyAction::SendCommand(Command::SelectUp)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                if self.view.active_tab == ActiveTab::Radio {
-                    if !self.view.radios_filtered.is_empty() {
-                        self.view.radios_selected = (self.view.radios_selected + 1)
-                            .min(self.view.radios_filtered.len() - 1);
+                if self.view.active_tab == ActiveTab::Explore {
+                    match self.view.explore_category {
+                        ExploreCategory::Moods => {
+                            if !self.view.moods.is_empty() {
+                                self.view.moods_selected =
+                                    (self.view.moods_selected + 1).min(self.view.moods.len() - 1);
+                            }
+                        }
+                        ExploreCategory::Categories => {
+                            if !self.view.genres_filtered.is_empty() {
+                                self.view.genres_selected = (self.view.genres_selected + 1)
+                                    .min(self.view.genres_filtered.len() - 1);
+                            }
+                        }
+                        ExploreCategory::Radios => {
+                            if !self.view.radios_filtered.is_empty() {
+                                self.view.radios_selected = (self.view.radios_selected + 1)
+                                    .min(self.view.radios_filtered.len() - 1);
+                            }
+                        }
                     }
                     return KeyAction::Continue;
                 }
@@ -1895,24 +2069,50 @@ impl Client {
                     ActiveTab::Favorites => KeyAction::SendCommand(Command::PlayFromFavorites {
                         index: self.view.favorites_selected_original_index(),
                     }),
-                    ActiveTab::Radio => {
-                        // Find the original index of the filtered radio in the full list
-                        if let Some(filtered_radio) =
-                            self.view.radios_filtered.get(self.view.radios_selected)
-                        {
-                            let original_idx = self
-                                .view
-                                .radios
-                                .iter()
-                                .position(|r| r.id == filtered_radio.id)
-                                .unwrap_or(0);
-                            KeyAction::SendCommand(Command::PlayFromRadio {
-                                index: original_idx,
-                            })
-                        } else {
-                            KeyAction::Continue
+                    ActiveTab::Explore => match self.view.explore_category {
+                        ExploreCategory::Moods => {
+                            if self.view.moods.is_empty() {
+                                KeyAction::Continue
+                            } else {
+                                KeyAction::SendCommand(Command::PlayFromMood {
+                                    index: self.view.moods_selected,
+                                })
+                            }
                         }
-                    }
+                        ExploreCategory::Radios => {
+                            // Find the original index of the filtered radio in the full list
+                            if let Some(filtered_radio) =
+                                self.view.radios_filtered.get(self.view.radios_selected)
+                            {
+                                let original_idx = self
+                                    .view
+                                    .radios
+                                    .iter()
+                                    .position(|r| r.id == filtered_radio.id)
+                                    .unwrap_or(0);
+                                KeyAction::SendCommand(Command::PlayFromRadio {
+                                    index: original_idx,
+                                })
+                            } else {
+                                KeyAction::Continue
+                            }
+                        }
+                        ExploreCategory::Categories => {
+                            if let Some(genre) =
+                                self.view.genres_filtered.get(self.view.genres_selected)
+                            {
+                                let genre_id = genre.id;
+                                let name = genre.name.clone();
+                                self.view.set_nav_overlay(Overlay::GenreDetail {
+                                    sub_tab: GenreDetailSubTab::default(),
+                                    selected: 0,
+                                });
+                                KeyAction::SendCommand(Command::GetGenreDetail { genre_id, name })
+                            } else {
+                                KeyAction::Continue
+                            }
+                        }
+                    },
                     ActiveTab::Downloads => match self.view.offline_category {
                         OfflineCategory::Tracks => {
                             KeyAction::SendCommand(Command::PlayFromOffline {
@@ -2078,6 +2278,7 @@ impl Client {
             Overlay::AlbumDetail { .. } => self.handle_album_detail_key(key),
             Overlay::ArtistDetail => self.handle_artist_detail_key(key),
             Overlay::PlaylistDetail { .. } => self.handle_playlist_detail_key(key),
+            Overlay::GenreDetail { .. } => self.handle_genre_detail_key(key),
             Overlay::WaitingList { .. } => self.handle_waiting_list_key(key),
             Overlay::ThemePicker { selected } => {
                 let count = ThemeId::ALL.len();
@@ -2649,6 +2850,134 @@ impl Client {
             KeyCode::Char('w') => {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
+            }
+            // Player controls
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Handle key events in the genre/category detail overlay.
+    fn handle_genre_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        let (sub_tab, selected) = match self.view.overlay {
+            Some(Overlay::GenreDetail { sub_tab, selected }) => (sub_tab, selected),
+            _ => return KeyAction::Continue,
+        };
+
+        let count = self
+            .view
+            .genre_detail
+            .as_ref()
+            .map(|d| match sub_tab {
+                GenreDetailSubTab::Tracks => d.tracks.len(),
+                GenreDetailSubTab::Albums => d.albums.len(),
+                GenreDetailSubTab::Artists => d.artists.len(),
+                GenreDetailSubTab::Playlists => d.playlists.len(),
+                GenreDetailSubTab::Radios => d.radios.len(),
+            })
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc => {
+                self.view.pop_overlay();
+                KeyAction::Continue
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.view.overlay = Some(Overlay::GenreDetail {
+                    sub_tab: sub_tab.prev(),
+                    selected: 0,
+                });
+                KeyAction::Continue
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.view.overlay = Some(Overlay::GenreDetail {
+                    sub_tab: sub_tab.next(),
+                    selected: 0,
+                });
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_sel = selected.saturating_sub(1);
+                self.view.overlay = Some(Overlay::GenreDetail {
+                    sub_tab,
+                    selected: new_sel,
+                });
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = count.saturating_sub(1);
+                let new_sel = (selected + 1).min(max);
+                self.view.overlay = Some(Overlay::GenreDetail {
+                    sub_tab,
+                    selected: new_sel,
+                });
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                let Some(detail) = self.view.genre_detail.as_ref() else {
+                    return KeyAction::Continue;
+                };
+                match sub_tab {
+                    GenreDetailSubTab::Tracks => {
+                        if selected < detail.tracks.len() {
+                            KeyAction::SendCommand(Command::PlayFromGenreTrack { index: selected })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                    GenreDetailSubTab::Albums => {
+                        if let Some(album) = detail.albums.get(selected) {
+                            let album_id = album.album_id.clone();
+                            self.view
+                                .push_overlay(Overlay::AlbumDetail { from_artist: false });
+                            self.view.album_detail_selected = 0;
+                            self.view.album_detail_left_scroll = 0;
+                            self.view.album_detail_left_focused = false;
+                            KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                    GenreDetailSubTab::Artists => {
+                        if let Some(artist) = detail.artists.get(selected) {
+                            let artist_id = artist.artist_id.clone();
+                            self.view.push_overlay(Overlay::ArtistDetail);
+                            self.view.artist_detail_selected = 0;
+                            self.view.artist_detail_left_scroll = 0;
+                            self.view.artist_detail_left_focused = false;
+                            KeyAction::SendCommand(Command::GetArtistDetail { artist_id })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                    GenreDetailSubTab::Playlists => {
+                        if let Some(playlist) = detail.playlists.get(selected) {
+                            let playlist_id = playlist.playlist_id.clone();
+                            self.view
+                                .push_overlay(Overlay::PlaylistDetail { selected: 0 });
+                            KeyAction::SendCommand(Command::GetPlaylistDetail { playlist_id })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                    GenreDetailSubTab::Radios => {
+                        if selected < detail.radios.len() {
+                            KeyAction::SendCommand(Command::PlayFromGenreRadio { index: selected })
+                        } else {
+                            KeyAction::Continue
+                        }
+                    }
+                }
             }
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),

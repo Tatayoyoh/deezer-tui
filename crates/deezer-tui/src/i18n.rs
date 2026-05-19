@@ -1,6 +1,8 @@
 use std::cell::Cell;
 
-use crate::protocol::{FavoritesCategory, OfflineCategory, SearchCategory};
+use crate::protocol::{
+    ExploreCategory, FavoritesCategory, GenreDetailSubTab, OfflineCategory, SearchCategory,
+};
 
 /// Supported locales.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +60,7 @@ pub struct Strings {
     // --- Tabs ---
     pub tab_search: &'static str,
     pub tab_favorites: &'static str,
-    pub tab_radios: &'static str,
+    pub tab_explore: &'static str,
     pub tab_offline: &'static str,
     /// Tab label shown in offline mode (replaces all tabs with a single "Downloaded tracks" tab)
     pub tab_offline_downloads: &'static str,
@@ -247,6 +249,31 @@ pub struct Strings {
     pub radios_title: &'static str,
     pub header_radio: &'static str,
 
+    // --- Explore / Categories (genres) ---
+    pub explore_cat_moods: &'static str,
+    pub explore_cat_categories: &'static str,
+    pub explore_cat_radios: &'static str,
+    pub moods_loading: &'static str,
+    pub moods_no_results: &'static str,
+    pub status_moods_error: &'static str,
+    pub genres_loading: &'static str,
+    pub genres_no_results: &'static str,
+    pub genres_filter_typing: &'static str,
+    pub genres_filter_normal: &'static str,
+    pub genres_filter_placeholder: &'static str,
+    pub genres_title: &'static str,
+    pub header_genre: &'static str,
+
+    // --- Genre detail (chart + radios for one category) ---
+    pub genre_detail_loading: &'static str,
+    pub genre_detail_no_data: &'static str,
+    pub genre_detail_empty: &'static str,
+    pub genre_detail_sub_tracks: &'static str,
+    pub genre_detail_sub_albums: &'static str,
+    pub genre_detail_sub_artists: &'static str,
+    pub genre_detail_sub_playlists: &'static str,
+    pub genre_detail_sub_radios: &'static str,
+
     // --- Offline ---
     pub offline_empty: &'static str,
     pub download_for_offline: &'static str,
@@ -314,6 +341,11 @@ pub struct Strings {
     pub status_playlist_error: &'static str,
     pub status_radios_loaded: &'static str,
     pub status_radios_error: &'static str,
+    pub status_moods_loaded: &'static str,
+    pub status_genres_loaded: &'static str,
+    pub status_genres_error: &'static str,
+    pub status_genre_detail_loaded: &'static str,
+    pub status_genre_detail_error: &'static str,
     pub status_no_radio_tracks: &'static str,
     pub status_radio_tracks: &'static str,
     pub status_radio_tracks_error: &'static str,
@@ -409,6 +441,14 @@ impl Strings {
         }
     }
 
+    pub fn explore_category_label(&self, cat: ExploreCategory) -> &'static str {
+        match cat {
+            ExploreCategory::Moods => self.explore_cat_moods,
+            ExploreCategory::Categories => self.explore_cat_categories,
+            ExploreCategory::Radios => self.explore_cat_radios,
+        }
+    }
+
     pub fn favorites_category_label(&self, cat: FavoritesCategory) -> &'static str {
         match cat {
             FavoritesCategory::RecentlyPlayed => self.cat_recently_played,
@@ -500,6 +540,32 @@ impl Strings {
         format!(" {} ({}) ", self.radios_title, count)
     }
 
+    /// Format "Categories (N)"
+    pub fn genres_count_title(&self, count: usize) -> String {
+        format!(" {} ({}) ", self.genres_title, count)
+    }
+
+    /// Format "{N} categories loaded"
+    pub fn fmt_genres_loaded(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_genres_loaded)
+    }
+
+    /// Format the loaded message for a single genre detail.
+    pub fn fmt_genre_detail_loaded(&self, name: &str) -> String {
+        format!("{} {name}", self.status_genre_detail_loaded)
+    }
+
+    /// Sub-tab label for genre detail.
+    pub fn genre_detail_sub_tab_label(&self, tab: GenreDetailSubTab) -> &'static str {
+        match tab {
+            GenreDetailSubTab::Tracks => self.genre_detail_sub_tracks,
+            GenreDetailSubTab::Albums => self.genre_detail_sub_albums,
+            GenreDetailSubTab::Artists => self.genre_detail_sub_artists,
+            GenreDetailSubTab::Playlists => self.genre_detail_sub_playlists,
+            GenreDetailSubTab::Radios => self.genre_detail_sub_radios,
+        }
+    }
+
     /// Format "Connected as {name}"
     pub fn fmt_connected_as(&self, name: &str) -> String {
         format!("{} {}", self.status_connected_as, name)
@@ -523,6 +589,11 @@ impl Strings {
     /// Format "{N} radios loaded"
     pub fn fmt_radios_loaded(&self, count: usize) -> String {
         format!("{} {}", count, self.status_radios_loaded)
+    }
+
+    /// Format "{N} moods loaded"
+    pub fn fmt_moods_loaded(&self, count: usize) -> String {
+        format!("{} {}", count, self.status_moods_loaded)
     }
 
     /// Format "Mix: {N} tracks"
@@ -570,7 +641,7 @@ impl Strings {
 static EN: Strings = Strings {
     tab_search: " Search ",
     tab_favorites: " Favorites ",
-    tab_radios: " Radios ",
+    tab_explore: " Explore ",
     tab_offline: " Offline ",
     tab_offline_downloads: " Downloaded tracks ",
 
@@ -741,6 +812,28 @@ static EN: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
+    explore_cat_moods: "Moods",
+    explore_cat_categories: "Categories",
+    explore_cat_radios: "Radios",
+    moods_loading: "Loading moods...",
+    moods_no_results: "No moods available",
+    genres_loading: "Loading categories...",
+    genres_no_results: "No categories found",
+    genres_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
+    genres_filter_normal: " Filter - [Ctrl+F] or [/] ",
+    genres_filter_placeholder: " filter categories...",
+    genres_title: "Categories",
+    header_genre: "Category",
+
+    genre_detail_loading: "Loading category...",
+    genre_detail_no_data: "No data for this category",
+    genre_detail_empty: "Nothing here",
+    genre_detail_sub_tracks: "Tracks",
+    genre_detail_sub_albums: "Albums",
+    genre_detail_sub_artists: "Artists",
+    genre_detail_sub_playlists: "Playlists",
+    genre_detail_sub_radios: "Radios",
+
     offline_empty: "No offline content yet",
     download_for_offline: "Download for offline mode",
     remove_offline: "Remove from offline",
@@ -806,6 +899,12 @@ static EN: Strings = Strings {
     status_playlist_error: "Playlist error",
     status_radios_loaded: "radios loaded",
     status_radios_error: "Radios error",
+    status_moods_loaded: "moods loaded",
+    status_moods_error: "Moods error",
+    status_genres_loaded: "categories loaded",
+    status_genres_error: "Categories error",
+    status_genre_detail_loaded: "Category loaded:",
+    status_genre_detail_error: "Category error",
     status_no_radio_tracks: "No tracks in this radio",
     status_radio_tracks: "Radio:",
     status_radio_tracks_error: "Radio tracks error",
@@ -856,7 +955,7 @@ static EN: Strings = Strings {
 static FR: Strings = Strings {
     tab_search: " Recherche ",
     tab_favorites: " Favoris ",
-    tab_radios: " Radios ",
+    tab_explore: " Explorer ",
     tab_offline: " Hors-ligne ",
     tab_offline_downloads: " Pistes téléchargées ",
 
@@ -1027,6 +1126,28 @@ static FR: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
+    explore_cat_moods: "Ambiances",
+    explore_cat_categories: "Catégories",
+    explore_cat_radios: "Radios",
+    moods_loading: "Chargement des ambiances...",
+    moods_no_results: "Aucune ambiance disponible",
+    genres_loading: "Chargement des catégories...",
+    genres_no_results: "Aucune catégorie trouvée",
+    genres_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
+    genres_filter_normal: " Filtre - [Ctrl+F] ou [/] ",
+    genres_filter_placeholder: " filtrer les catégories...",
+    genres_title: "Catégories",
+    header_genre: "Catégorie",
+
+    genre_detail_loading: "Chargement de la catégorie...",
+    genre_detail_no_data: "Aucune donnée pour cette catégorie",
+    genre_detail_empty: "Aucun élément",
+    genre_detail_sub_tracks: "Titres",
+    genre_detail_sub_albums: "Albums",
+    genre_detail_sub_artists: "Artistes",
+    genre_detail_sub_playlists: "Playlists",
+    genre_detail_sub_radios: "Radios",
+
     offline_empty: "Aucun contenu hors-ligne",
     download_for_offline: "Télécharger hors-ligne",
     remove_offline: "Supprimer du mode hors-ligne",
@@ -1091,6 +1212,12 @@ static FR: Strings = Strings {
     status_playlist_error: "Erreur de la playlist",
     status_radios_loaded: "radios chargées",
     status_radios_error: "Erreur des radios",
+    status_moods_loaded: "ambiances chargées",
+    status_moods_error: "Erreur des ambiances",
+    status_genres_loaded: "catégories chargées",
+    status_genres_error: "Erreur des catégories",
+    status_genre_detail_loaded: "Catégorie chargée :",
+    status_genre_detail_error: "Erreur de la catégorie",
     status_no_radio_tracks: "Aucun titre dans cette radio",
     status_radio_tracks: "Radio :",
     status_radio_tracks_error: "Erreur des titres radio",
@@ -1141,7 +1268,7 @@ static FR: Strings = Strings {
 static ES: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
-    tab_radios: " Radios ",
+    tab_explore: " Explorar ",
     tab_offline: " Sin conexión ",
     tab_offline_downloads: " Pistas descargadas ",
 
@@ -1312,6 +1439,28 @@ static ES: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
+    explore_cat_moods: "Ambientes",
+    explore_cat_categories: "Categorías",
+    explore_cat_radios: "Radios",
+    moods_loading: "Cargando ambientes...",
+    moods_no_results: "Sin ambientes disponibles",
+    genres_loading: "Cargando categorías...",
+    genres_no_results: "No se encontraron categorías",
+    genres_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    genres_filter_normal: " Filtro - [Ctrl+F] o [/] ",
+    genres_filter_placeholder: " filtrar categorías...",
+    genres_title: "Categorías",
+    header_genre: "Categoría",
+
+    genre_detail_loading: "Cargando categoría...",
+    genre_detail_no_data: "Sin datos para esta categoría",
+    genre_detail_empty: "Nada aquí",
+    genre_detail_sub_tracks: "Pistas",
+    genre_detail_sub_albums: "Álbumes",
+    genre_detail_sub_artists: "Artistas",
+    genre_detail_sub_playlists: "Playlists",
+    genre_detail_sub_radios: "Radios",
+
     offline_empty: "Sin contenido sin conexión",
     download_for_offline: "Descargar para modo sin conexión",
     remove_offline: "Eliminar del modo sin conexión",
@@ -1376,6 +1525,12 @@ static ES: Strings = Strings {
     status_playlist_error: "Error de la playlist",
     status_radios_loaded: "radios cargadas",
     status_radios_error: "Error de radios",
+    status_moods_loaded: "ambientes cargados",
+    status_moods_error: "Error de ambientes",
+    status_genres_loaded: "categorías cargadas",
+    status_genres_error: "Error de categorías",
+    status_genre_detail_loaded: "Categoría cargada:",
+    status_genre_detail_error: "Error de categoría",
     status_no_radio_tracks: "No hay canciones en esta radio",
     status_radio_tracks: "Radio:",
     status_radio_tracks_error: "Error de canciones de radio",
@@ -1426,7 +1581,7 @@ static ES: Strings = Strings {
 static PT: Strings = Strings {
     tab_search: " Buscar ",
     tab_favorites: " Favoritos ",
-    tab_radios: " Rádios ",
+    tab_explore: " Explorar ",
     tab_offline: " Offline ",
     tab_offline_downloads: " Faixas baixadas ",
 
@@ -1597,6 +1752,28 @@ static PT: Strings = Strings {
     radios_title: "Rádios",
     header_radio: "Rádio",
 
+    explore_cat_moods: "Climas",
+    explore_cat_categories: "Categorias",
+    explore_cat_radios: "Rádios",
+    moods_loading: "Carregando climas...",
+    moods_no_results: "Nenhum clima disponível",
+    genres_loading: "Carregando categorias...",
+    genres_no_results: "Nenhuma categoria encontrada",
+    genres_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    genres_filter_normal: " Filtro - [Ctrl+F] ou [/] ",
+    genres_filter_placeholder: " filtrar categorias...",
+    genres_title: "Categorias",
+    header_genre: "Categoria",
+
+    genre_detail_loading: "Carregando categoria...",
+    genre_detail_no_data: "Sem dados para esta categoria",
+    genre_detail_empty: "Nada aqui",
+    genre_detail_sub_tracks: "Faixas",
+    genre_detail_sub_albums: "Álbuns",
+    genre_detail_sub_artists: "Artistas",
+    genre_detail_sub_playlists: "Playlists",
+    genre_detail_sub_radios: "Rádios",
+
     offline_empty: "Sem conteúdo offline",
     download_for_offline: "Baixar para modo offline",
     remove_offline: "Remover do modo offline",
@@ -1661,6 +1838,12 @@ static PT: Strings = Strings {
     status_playlist_error: "Erro da playlist",
     status_radios_loaded: "rádios carregadas",
     status_radios_error: "Erro das rádios",
+    status_moods_loaded: "climas carregados",
+    status_moods_error: "Erro dos climas",
+    status_genres_loaded: "categorias carregadas",
+    status_genres_error: "Erro das categorias",
+    status_genre_detail_loaded: "Categoria carregada:",
+    status_genre_detail_error: "Erro da categoria",
     status_no_radio_tracks: "Nenhuma música nesta rádio",
     status_radio_tracks: "Rádio:",
     status_radio_tracks_error: "Erro das músicas da rádio",
@@ -1711,7 +1894,7 @@ static PT: Strings = Strings {
 static DE: Strings = Strings {
     tab_search: " Suche ",
     tab_favorites: " Favoriten ",
-    tab_radios: " Radios ",
+    tab_explore: " Entdecken ",
     tab_offline: " Offline ",
     tab_offline_downloads: " Heruntergeladene Titel ",
 
@@ -1882,6 +2065,28 @@ static DE: Strings = Strings {
     radios_title: "Radios",
     header_radio: "Radio",
 
+    explore_cat_moods: "Stimmungen",
+    explore_cat_categories: "Kategorien",
+    explore_cat_radios: "Radios",
+    moods_loading: "Stimmungen werden geladen...",
+    moods_no_results: "Keine Stimmungen verfügbar",
+    genres_loading: "Kategorien werden geladen...",
+    genres_no_results: "Keine Kategorien gefunden",
+    genres_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
+    genres_filter_normal: " Filter - [Ctrl+F] oder [/] ",
+    genres_filter_placeholder: " Kategorien filtern...",
+    genres_title: "Kategorien",
+    header_genre: "Kategorie",
+
+    genre_detail_loading: "Kategorie wird geladen...",
+    genre_detail_no_data: "Keine Daten für diese Kategorie",
+    genre_detail_empty: "Nichts vorhanden",
+    genre_detail_sub_tracks: "Titel",
+    genre_detail_sub_albums: "Alben",
+    genre_detail_sub_artists: "Künstler",
+    genre_detail_sub_playlists: "Playlists",
+    genre_detail_sub_radios: "Radios",
+
     offline_empty: "Keine Offline-Inhalte",
     download_for_offline: "Für Offline-Modus herunterladen",
     remove_offline: "Aus Offline entfernen",
@@ -1946,6 +2151,12 @@ static DE: Strings = Strings {
     status_playlist_error: "Playlist-Fehler",
     status_radios_loaded: "Radios geladen",
     status_radios_error: "Radio-Fehler",
+    status_moods_loaded: "Stimmungen geladen",
+    status_moods_error: "Stimmungs-Fehler",
+    status_genres_loaded: "Kategorien geladen",
+    status_genres_error: "Kategorien-Fehler",
+    status_genre_detail_loaded: "Kategorie geladen:",
+    status_genre_detail_error: "Kategorien-Fehler",
     status_no_radio_tracks: "Keine Titel in diesem Radio",
     status_radio_tracks: "Radio:",
     status_radio_tracks_error: "Radio-Titel-Fehler",

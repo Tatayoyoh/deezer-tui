@@ -60,6 +60,10 @@ impl DeezerClient {
             user_id: user_data.user.user_id,
             user_name: user_data.user.user_name,
         };
+        // Invalidate any cached JWT from a previous session.
+        if let Ok(mut cache) = self.jwt_cache.lock() {
+            *cache = None;
+        }
 
         let offer_name = user_data
             .offer

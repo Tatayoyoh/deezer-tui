@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Renamed `Radios` tab to `Explore`
+
+### Added
+- Explore > `Moods` (new)
+- Explore > `Categories` (new), with detail page (Enter on a music category)
+- Explore > `Radios` (previously Radios tab)
+
 ## [1.11.0] - 2026-05-06
 
 ### Added
@@ -16,7 +26,7 @@ All notable changes to this project will be documented in this file.
 - Playlist picker GATEWAY_ERROR when adding a track to a playlist
 - Adding a track already present in a playlist now shows a friendly notification instead of the raw API error
 
-## [1.10.0]
+## [1.10.0] - 2026-04-15
 
 ### Added
 - Similar artists section on the artist detail page

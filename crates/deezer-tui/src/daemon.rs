@@ -20,9 +20,11 @@ use deezer_core::Config;
 use crate::favorites_cache::FavoritesCache;
 use crate::i18n::t;
 use crate::protocol::{
-    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, FavoritesCategory,
-    OfflineCategory, RadioItem, Screen, SearchCategory, ServerMessage,
+    pid_path, read_line, socket_path, ActiveTab, Command, DaemonSnapshot, ExploreCategory,
+    FavoritesCategory, GenreItem, MoodEntry, OfflineCategory, RadioItem, Screen, SearchCategory,
+    ServerMessage,
 };
+use deezer_core::api::models::GenreDetail;
 
 const TICK_RATE: Duration = Duration::from_millis(250);
 
@@ -99,6 +101,14 @@ enum AsyncResult {
     RadiosError(String),
     RadioTracksReady(Vec<TrackData>),
     RadioTracksError(String),
+    MoodsReady(Vec<MoodEntry>),
+    MoodsError(String),
+    MoodTracksReady(Vec<TrackData>),
+    MoodTracksError(String),
+    GenresReady(Vec<GenreItem>),
+    GenresError(String),
+    GenreDetailReady(GenreDetail),
+    GenreDetailError(String),
     OfflineTrackSaved {
         track: TrackData,
         quality: AudioQuality,
@@ -139,10 +149,23 @@ pub struct Daemon {
     favorite_album_ids: Vec<String>,
     favorites_cache: FavoritesCache,
 
+    // Explore tab
+    explore_category: ExploreCategory,
+
     // Radios
     radios: Vec<RadioItem>,
     radios_selected: usize,
     radios_loading: bool,
+
+    // Moods
+    moods: Vec<MoodEntry>,
+    moods_selected: usize,
+    moods_loading: bool,
+
+    // Genres / Categories
+    genres: Vec<GenreItem>,
+    genres_selected: usize,
+    genres_loading: bool,
 
     // Offline
     offline_index: OfflineIndex,
@@ -168,6 +191,10 @@ pub struct Daemon {
     playlist_detail: Option<PlaylistDetail>,
     playlist_detail_selected: usize,
     playlist_detail_loading: bool,
+
+    // Genre detail
+    genre_detail: Option<GenreDetail>,
+    genre_detail_loading: bool,
 
     // Navigation overlay stack (persisted across client reconnections)
     nav_overlay: Option<crate::protocol::NavOverlay>,
@@ -227,6 +254,9 @@ impl Daemon {
             deezer_core::player::stream::new_cdn_client().map_err(|e| anyhow::anyhow!("{e}"))?;
         let (async_tx, async_rx) = tokio::sync::mpsc::unbounded_channel();
 
+        let favorites_cache = FavoritesCache::load();
+        let cached_moods = favorites_cache.moods.clone().unwrap_or_default();
+
         Ok(Self {
             config,
             screen,
@@ -255,16 +285,23 @@ impl Daemon {
             favorites_display: Vec::new(),
             favorite_artist_ids: Vec::new(),
             favorite_album_ids: Vec::new(),
-            favorites_cache: FavoritesCache::load(),
+            favorites_cache,
 
             offline_index: OfflineIndex::load(),
             offline_category: OfflineCategory::default(),
             offline_selected: 0,
             offline_loading: false,
 
+            explore_category: ExploreCategory::default(),
             radios: Vec::new(),
             radios_selected: 0,
             radios_loading: false,
+            moods: cached_moods,
+            moods_selected: 0,
+            moods_loading: false,
+            genres: Vec::new(),
+            genres_selected: 0,
+            genres_loading: false,
 
             playlists: Vec::new(),
 
@@ -280,6 +317,9 @@ impl Daemon {
             playlist_detail: None,
             playlist_detail_selected: 0,
             playlist_detail_loading: false,
+
+            genre_detail: None,
+            genre_detail_loading: false,
 
             nav_overlay: None,
             nav_overlay_stack: Vec::new(),
@@ -570,9 +610,17 @@ impl Daemon {
                 ActiveTab::Favorites => {
                     self.favorites_selected = self.favorites_selected.saturating_sub(1);
                 }
-                ActiveTab::Radio => {
-                    self.radios_selected = self.radios_selected.saturating_sub(1);
-                }
+                ActiveTab::Explore => match self.explore_category {
+                    ExploreCategory::Moods => {
+                        self.moods_selected = self.moods_selected.saturating_sub(1);
+                    }
+                    ExploreCategory::Categories => {
+                        self.genres_selected = self.genres_selected.saturating_sub(1);
+                    }
+                    ExploreCategory::Radios => {
+                        self.radios_selected = self.radios_selected.saturating_sub(1);
+                    }
+                },
                 ActiveTab::Downloads => {
                     self.offline_selected = self.offline_selected.saturating_sub(1);
                 }
@@ -590,12 +638,26 @@ impl Daemon {
                             (self.favorites_selected + 1).min(self.favorites_display.len() - 1);
                     }
                 }
-                ActiveTab::Radio => {
-                    if !self.radios.is_empty() {
-                        self.radios_selected =
-                            (self.radios_selected + 1).min(self.radios.len() - 1);
+                ActiveTab::Explore => match self.explore_category {
+                    ExploreCategory::Moods => {
+                        if !self.moods.is_empty() {
+                            self.moods_selected =
+                                (self.moods_selected + 1).min(self.moods.len() - 1);
+                        }
                     }
-                }
+                    ExploreCategory::Categories => {
+                        if !self.genres.is_empty() {
+                            self.genres_selected =
+                                (self.genres_selected + 1).min(self.genres.len() - 1);
+                        }
+                    }
+                    ExploreCategory::Radios => {
+                        if !self.radios.is_empty() {
+                            self.radios_selected =
+                                (self.radios_selected + 1).min(self.radios.len() - 1);
+                        }
+                    }
+                },
                 ActiveTab::Downloads => {
                     let len = match self.offline_category {
                         OfflineCategory::Tracks => self.offline_index.tracks.len(),
@@ -609,8 +671,8 @@ impl Daemon {
             Command::NextTab => {
                 self.active_tab = match self.active_tab {
                     ActiveTab::Search => ActiveTab::Favorites,
-                    ActiveTab::Favorites => ActiveTab::Radio,
-                    ActiveTab::Radio => ActiveTab::Downloads,
+                    ActiveTab::Favorites => ActiveTab::Explore,
+                    ActiveTab::Explore => ActiveTab::Downloads,
                     ActiveTab::Downloads => ActiveTab::Search,
                 };
             }
@@ -618,8 +680,8 @@ impl Daemon {
                 self.active_tab = match self.active_tab {
                     ActiveTab::Search => ActiveTab::Downloads,
                     ActiveTab::Favorites => ActiveTab::Search,
-                    ActiveTab::Radio => ActiveTab::Favorites,
-                    ActiveTab::Downloads => ActiveTab::Radio,
+                    ActiveTab::Explore => ActiveTab::Favorites,
+                    ActiveTab::Downloads => ActiveTab::Explore,
                 };
             }
             Command::NextCategory => match self.active_tab {
@@ -635,11 +697,19 @@ impl Daemon {
                     self.favorites_selected = 0;
                     self.start_load_favorites_category();
                 }
+                ActiveTab::Explore => {
+                    self.explore_category = self.explore_category.next();
+                    if self.explore_category == ExploreCategory::Categories
+                        && self.genres.is_empty()
+                        && !self.genres_loading
+                    {
+                        self.start_load_genres();
+                    }
+                }
                 ActiveTab::Downloads => {
                     self.offline_category = self.offline_category.next();
                     self.offline_selected = 0;
                 }
-                _ => {}
             },
             Command::PrevCategory => match self.active_tab {
                 ActiveTab::Search => {
@@ -654,11 +724,19 @@ impl Daemon {
                     self.favorites_selected = 0;
                     self.start_load_favorites_category();
                 }
+                ActiveTab::Explore => {
+                    self.explore_category = self.explore_category.prev();
+                    if self.explore_category == ExploreCategory::Categories
+                        && self.genres.is_empty()
+                        && !self.genres_loading
+                    {
+                        self.start_load_genres();
+                    }
+                }
                 ActiveTab::Downloads => {
                     self.offline_category = self.offline_category.prev();
                     self.offline_selected = 0;
                 }
-                _ => {}
             },
             Command::ShuffleFavorites => {
                 if !self.favorites.is_empty() {
@@ -834,6 +912,29 @@ impl Daemon {
                     }
                 }
             }
+            Command::GetGenreDetail { genre_id, name } => {
+                self.start_load_genre_detail(genre_id, name);
+            }
+            Command::PlayFromGenreTrack { index } => {
+                if let Some(ref detail) = self.genre_detail {
+                    if let Some(track) = detail.tracks.get(index).cloned() {
+                        self.flow_active = false;
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = detail.tracks.clone();
+                            state.queue_index = index;
+                        }
+                        self.start_play_track(track);
+                    }
+                }
+            }
+            Command::PlayFromGenreRadio { index } => {
+                if let Some(ref detail) = self.genre_detail {
+                    if let Some(radio) = detail.radios.get(index) {
+                        let radio_id = radio.id;
+                        self.start_play_radio(radio_id);
+                    }
+                }
+            }
             Command::Logout => {
                 // Clear ARL, stop playback, return to login screen
                 self.config.arl = None;
@@ -853,6 +954,8 @@ impl Daemon {
                 self.favorites.clear();
                 self.favorites_display.clear();
                 self.radios.clear();
+                self.genres.clear();
+                self.genre_detail = None;
                 self.playlists.clear();
                 self.nav_overlay = None;
                 self.nav_overlay_stack.clear();
@@ -868,6 +971,17 @@ impl Daemon {
                     let radio_id = radio.id;
                     self.start_play_radio(radio_id);
                 }
+            }
+            Command::LoadMoods => {
+                self.start_load_moods();
+            }
+            Command::PlayFromMood { index } => {
+                if let Some(mood) = self.moods.get(index).cloned() {
+                    self.start_play_mood(mood);
+                }
+            }
+            Command::LoadGenres => {
+                self.start_load_genres();
             }
             Command::DownloadOffline { track } => {
                 self.start_download_offline(track);
@@ -987,9 +1101,16 @@ impl Daemon {
             offline_selected: self.offline_selected,
             offline_loading: self.offline_loading,
             offline_track_ids: self.offline_index.track_ids(),
+            explore_category: self.explore_category,
             radios: self.radios.clone(),
             radios_selected: self.radios_selected,
             radios_loading: self.radios_loading,
+            moods: self.moods.clone(),
+            moods_selected: self.moods_selected,
+            moods_loading: self.moods_loading,
+            genres: self.genres.clone(),
+            genres_selected: self.genres_selected,
+            genres_loading: self.genres_loading,
             playlists: self.playlists.clone(),
             album_detail: self.album_detail.clone(),
             album_detail_selected: self.album_detail_selected,
@@ -1001,6 +1122,8 @@ impl Daemon {
             playlist_detail: self.playlist_detail.clone(),
             playlist_detail_selected: self.playlist_detail_selected,
             playlist_detail_loading: self.playlist_detail_loading,
+            genre_detail: self.genre_detail.clone(),
+            genre_detail_loading: self.genre_detail_loading,
             nav_overlay: self.nav_overlay.clone(),
             nav_overlay_stack: self.nav_overlay_stack.clone(),
             status_msg: self.status_msg.clone(),
@@ -1700,6 +1823,57 @@ impl Daemon {
         });
     }
 
+    fn start_load_genres(&mut self) {
+        if self.is_offline {
+            return;
+        }
+        self.genres_loading = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_genres().await {
+                Ok(genres) => {
+                    let items: Vec<GenreItem> = genres
+                        .iter()
+                        .map(|g| GenreItem {
+                            id: g.id,
+                            name: g.name.clone(),
+                        })
+                        .collect();
+                    let _ = tx.send(AsyncResult::GenresReady(items));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::GenresError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_load_genre_detail(&mut self, genre_id: u64, name: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+        self.genre_detail = None;
+        self.genre_detail_loading = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_genre_detail(genre_id, name).await {
+                Ok(detail) => {
+                    let _ = tx.send(AsyncResult::GenreDetailReady(detail));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::GenreDetailError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_play_radio(&mut self, radio_id: u64) {
         if self.is_offline {
             self.status_msg = Some(t().no_internet.into());
@@ -1717,6 +1891,69 @@ impl Daemon {
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::RadioTracksError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_load_moods(&mut self) {
+        if self.is_offline {
+            return;
+        }
+        // Skip if we already have a cached list — moods rarely change.
+        if !self.moods.is_empty() {
+            return;
+        }
+        self.moods_loading = true;
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_moods().await {
+                Ok(moods) => {
+                    let items: Vec<MoodEntry> = moods
+                        .iter()
+                        .map(|m| MoodEntry {
+                            id: m.id.clone(),
+                            title: m.title.clone(),
+                            target: m.target.clone(),
+                            radio_id: m.radio_id,
+                        })
+                        .collect();
+                    let _ = tx.send(AsyncResult::MoodsReady(items));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::MoodsError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    fn start_play_mood(&mut self, mood: MoodEntry) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+        self.status_msg = Some(t().status_loading_radio_tracks.into());
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+
+        let core_mood = deezer_core::api::models::MoodItem {
+            id: mood.id,
+            title: mood.title,
+            target: mood.target,
+            radio_id: mood.radio_id,
+        };
+
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_mood_tracks(&core_mood).await {
+                Ok(tracks) => {
+                    let _ = tx.send(AsyncResult::MoodTracksReady(tracks));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::MoodTracksError(e.to_string()));
                 }
             }
         });
@@ -2072,6 +2309,8 @@ impl Daemon {
                     self.start_load_favorites_category();
                     self.start_load_favorite_ids();
                     self.start_load_radios();
+                    self.start_load_moods();
+                    self.start_load_genres();
                 }
                 AsyncResult::MasterKeyError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_key_error, &err));
@@ -2424,6 +2663,54 @@ impl Daemon {
                 }
                 AsyncResult::RadioTracksError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_radio_tracks_error, &err));
+                }
+                AsyncResult::MoodsReady(items) => {
+                    self.moods_loading = false;
+                    self.status_msg = Some(t().fmt_moods_loaded(items.len()));
+                    self.moods = items.clone();
+                    self.moods_selected = 0;
+                    self.favorites_cache.moods = Some(items);
+                    self.favorites_cache.save();
+                }
+                AsyncResult::MoodsError(err) => {
+                    self.moods_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_moods_error, &err));
+                }
+                AsyncResult::MoodTracksReady(tracks) => {
+                    if tracks.is_empty() {
+                        self.status_msg = Some(t().status_no_radio_tracks.into());
+                    } else {
+                        self.status_msg = Some(t().fmt_radio_tracks(tracks.len()));
+                        let first = tracks[0].clone();
+                        self.flow_active = false;
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = 0;
+                        }
+                        self.start_play_track(first);
+                    }
+                }
+                AsyncResult::MoodTracksError(err) => {
+                    self.status_msg = Some(t().fmt_error(t().status_radio_tracks_error, &err));
+                }
+                AsyncResult::GenresReady(items) => {
+                    self.genres_loading = false;
+                    self.status_msg = Some(t().fmt_genres_loaded(items.len()));
+                    self.genres = items;
+                    self.genres_selected = 0;
+                }
+                AsyncResult::GenresError(err) => {
+                    self.genres_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_genres_error, &err));
+                }
+                AsyncResult::GenreDetailReady(detail) => {
+                    self.genre_detail_loading = false;
+                    self.status_msg = Some(t().fmt_genre_detail_loaded(&detail.name));
+                    self.genre_detail = Some(detail);
+                }
+                AsyncResult::GenreDetailError(err) => {
+                    self.genre_detail_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_genre_detail_error, &err));
                 }
                 AsyncResult::OfflineTrackSaved { track, quality } => {
                     self.offline_loading = false;
