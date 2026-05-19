@@ -227,6 +227,10 @@ pub struct Daemon {
 
     // Flow mode — when true, auto-fetch more Flow tracks when queue ends
     flow_active: bool,
+
+    // Track ID for which we already sent log.listen during this play.
+    // Reset on every new track start so each play is logged exactly once.
+    listen_logged_for: Option<String>,
 }
 
 impl Daemon {
@@ -346,6 +350,7 @@ impl Daemon {
             track_generation: 0,
             consecutive_skip_count: 0,
             flow_active: false,
+            listen_logged_for: None,
         })
     }
 
@@ -1982,6 +1987,7 @@ impl Daemon {
         // Increment generation so any in-flight fetch for a previous track is ignored
         self.track_generation += 1;
         let generation = self.track_generation;
+        self.listen_logged_for = None;
 
         info!(
             gen = generation,
@@ -2973,6 +2979,7 @@ impl Daemon {
     fn start_play_offline_track(&mut self, track: TrackData) {
         self.track_generation += 1;
         let generation = self.track_generation;
+        self.listen_logged_for = None;
 
         if let Ok(mut state) = self.player_state.lock() {
             state.status = PlaybackStatus::Loading;
@@ -3020,6 +3027,10 @@ impl Daemon {
             }
         }
 
+        // Report play to Deezer once per track after ~30s — needed for the
+        // track to show up under Favorites > Recently Played.
+        self.maybe_log_listen();
+
         // Auto-advance when track finishes
         if let Some(ref engine) = self.engine {
             if engine.is_finished() {
@@ -3037,6 +3048,58 @@ impl Daemon {
                 }
             }
         }
+    }
+
+    /// Report the current track to Deezer's `log.listen` endpoint once we've
+    /// played past 30 seconds. Required for the track to appear in the user's
+    /// listening history (Favorites > Recently Played).
+    fn maybe_log_listen(&mut self) {
+        const LISTEN_THRESHOLD_SECS: u64 = 30;
+
+        if self.is_offline {
+            return;
+        }
+        let (track, position) = {
+            let state = match self.player_state.lock() {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            if state.status != PlaybackStatus::Playing {
+                return;
+            }
+            let Some(track) = state.current_track.clone() else {
+                return;
+            };
+            (track, state.position_secs)
+        };
+
+        if position < LISTEN_THRESHOLD_SECS {
+            return;
+        }
+        // User-uploaded tracks (negative SNG_ID) aren't part of Deezer's catalog
+        // and can't be logged.
+        if track.is_user_uploaded() {
+            return;
+        }
+        if self.listen_logged_for.as_ref() == Some(&track.track_id) {
+            return;
+        }
+        self.listen_logged_for = Some(track.track_id.clone());
+
+        let client = Arc::clone(&self.client);
+        let format = self.config.quality.as_api_format();
+        let track_id = track.track_id.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            if let Err(e) = client
+                .log_listen(&track_id, format, &track_id, "song_id")
+                .await
+            {
+                debug!(track_id = %track_id, err = %e, "log.listen failed");
+            } else {
+                debug!(track_id = %track_id, "log.listen sent");
+            }
+        });
     }
 }
 
