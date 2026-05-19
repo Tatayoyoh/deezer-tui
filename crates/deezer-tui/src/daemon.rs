@@ -233,6 +233,7 @@ impl Daemon {
     pub fn new() -> Result<Self> {
         let config = Config::load();
         let initial_volume = config.volume;
+        let initial_quality = config.quality;
 
         // Check network connectivity
         let is_offline = std::net::TcpStream::connect_timeout(
@@ -326,6 +327,7 @@ impl Daemon {
 
             player_state: Arc::new(Mutex::new(PlayerState {
                 volume: initial_volume,
+                quality: initial_quality,
                 ..PlayerState::default()
             })),
 
@@ -581,6 +583,14 @@ impl Daemon {
                 }
                 self.config.volume = volume.clamp(0.0, 1.0);
                 let _ = self.config.save();
+            }
+            Command::SetQuality { quality } => {
+                self.config.quality = quality;
+                let _ = self.config.save();
+                info!(
+                    quality = quality.as_api_format(),
+                    "preferred quality updated (applies to next track)"
+                );
             }
             Command::SeekForward { secs } => {
                 self.seek_relative(secs as i64);

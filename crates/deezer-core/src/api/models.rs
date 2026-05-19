@@ -29,10 +29,14 @@ pub enum DeezerError {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum AudioQuality {
+    #[serde(rename = "MP3_64", alias = "Mp3_64", alias = "mp3_64")]
     Mp3_64,
     #[default]
+    #[serde(rename = "MP3_128", alias = "Mp3_128", alias = "mp3_128")]
     Mp3_128,
+    #[serde(rename = "MP3_320", alias = "Mp3_320", alias = "mp3_320")]
     Mp3_320,
+    #[serde(rename = "FLAC", alias = "Flac", alias = "flac")]
     Flac,
 }
 
@@ -45,6 +49,20 @@ impl AudioQuality {
             Self::Flac => "FLAC",
         }
     }
+
+    /// Human-friendly label for UI display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Mp3_64 => "MP3 64 kbps",
+            Self::Mp3_128 => "MP3 128 kbps",
+            Self::Mp3_320 => "MP3 320 kbps (Premium)",
+            Self::Flac => "FLAC (HiFi)",
+        }
+    }
+
+    /// All variants in display order (lowest to highest).
+    pub const ALL: &'static [AudioQuality] =
+        &[Self::Mp3_64, Self::Mp3_128, Self::Mp3_320, Self::Flac];
 
     pub fn fallback(&self) -> Option<Self> {
         match self {

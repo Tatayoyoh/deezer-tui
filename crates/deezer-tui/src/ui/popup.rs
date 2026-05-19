@@ -51,6 +51,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_language_picker(frame, *selected);
             return;
         }
+        Some(Overlay::QualityPicker { selected }) => {
+            draw_quality_picker(frame, *selected);
+            return;
+        }
         Some(Overlay::Info) => {
             draw_info_overlay(frame);
             return;
@@ -601,6 +605,7 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let entries: &[(&str, &str)] = &[
         (s.settings_shortcuts, "[?]"),
         (s.settings_themes, ""),
+        (s.settings_quality, ""),
         (s.settings_language, ""),
         (s.settings_logout, ""),
         (s.settings_background, "[Ctrl+Z]"),
@@ -778,6 +783,47 @@ fn draw_language_picker(frame: &mut Frame, selected: usize) {
                 Style::default()
                     .fg(Theme::primary())
                     .add_modifier(Modifier::BOLD)
+            } else {
+                Theme::text()
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, inner);
+}
+
+/// Draw the audio quality picker overlay.
+fn draw_quality_picker(frame: &mut Frame, selected: usize) {
+    use deezer_core::api::models::AudioQuality;
+
+    let qualities = AudioQuality::ALL;
+
+    let area = frame.area();
+    let height = qualities.len() as u16 + 4;
+    let popup_area = centered_rect(50, height, area);
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(format!(" {} ", t().settings_quality))
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let items: Vec<ListItem> = qualities
+        .iter()
+        .enumerate()
+        .map(|(i, &q)| {
+            let prefix = if i == selected { " > " } else { "   " };
+            let label = format!("{}{}", prefix, q.label());
+            let style = if i == selected {
+                Theme::highlight()
             } else {
                 Theme::text()
             };
