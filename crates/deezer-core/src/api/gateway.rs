@@ -91,6 +91,33 @@ impl DeezerClient {
         Ok(())
     }
 
+    /// Report that a track was played, so it shows up in the user's
+    /// listening history. Mirrors what the web player sends after ~30s.
+    pub async fn log_listen(
+        &self,
+        track_id: &str,
+        format: &str,
+        ctxt_id: &str,
+        ctxt_type: &str,
+    ) -> Result<(), DeezerError> {
+        let ts_listen = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let track_num: serde_json::Value = parse_id(track_id);
+        let ctxt_num: serde_json::Value = parse_id(ctxt_id);
+        let params = json!({
+            "params": {
+                "ts_listen": ts_listen,
+                "type": 0,
+                "stat": { "seek": 0, "pause": 0, "sync": 1 },
+                "media": { "id": track_num, "type": "song", "format": format },
+                "ctxt": { "id": ctxt_num, "t": ctxt_type },
+            }
+        });
+        self.gw_call_void("log.listen", params).await
+    }
+
     /// Get full track data by song ID (includes TRACK_TOKEN and MD5_ORIGIN).
     pub async fn get_track(&self, song_id: &str) -> Result<TrackData, DeezerError> {
         let params = json!({ "sng_id": song_id });
@@ -460,55 +487,45 @@ impl DeezerClient {
         Ok(items)
     }
 
-    /// Get listening history (recently played tracks).
+    /// Get listening history (recently played tracks), most recent first.
     pub async fn get_listening_history(&self) -> Result<Vec<TrackData>, DeezerError> {
+        // Try the dedicated history endpoint first. This returns rows that
+        // include a TS / DATE field per play, ordered most-recent first.
+        let params = json!({ "nb": 200 });
+        if let Ok(res) = self.gw_call("user.getSongsHistory", params).await {
+            if let Some(tracks) = extract_history_tracks(&res) {
+                return Ok(tracks);
+            }
+            debug!(
+                "user.getSongsHistory unexpected shape: keys={:?}",
+                res.as_object().map(|o| o.keys().collect::<Vec<_>>())
+            );
+        }
+
+        // Fallback: profile page listening_history tab (data grouped by day).
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
-
-        // Use deezer.pageProfile to fetch the user's listening history
         let params = json!({
             "user_id": session.user_id,
             "tab": "listening_history",
             "nb": 200,
         });
-
-        let results = self.gw_call("deezer.pageProfile", params).await;
-
-        match results {
-            Ok(res) => {
-                // The response contains TAB.listening_history.data
-                if let Some(tab) = res.get("TAB") {
-                    if let Some(history) = tab.get("listening_history") {
-                        if let Some(data) = history.get("data") {
-                            let tracks: Result<Vec<TrackData>, _> =
-                                serde_json::from_value(data.clone());
-                            if let Ok(tracks) = tracks {
-                                return Ok(tracks);
-                            }
-                        }
-                    }
-                }
-                // Try alternate structure: direct data array
-                if let Some(data) = res.get("data") {
-                    let tracks: Result<Vec<TrackData>, _> = serde_json::from_value(data.clone());
-                    if let Ok(tracks) = tracks {
-                        return Ok(tracks);
-                    }
+        if let Ok(res) = self.gw_call("deezer.pageProfile", params).await {
+            if let Some(tab) = res.get("TAB").and_then(|t| t.get("listening_history")) {
+                if let Some(tracks) = extract_history_tracks(tab) {
+                    return Ok(tracks);
                 }
                 debug!(
-                    "History response structure: {:?}",
-                    res.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                    "pageProfile listening_history tab keys={:?}",
+                    tab.as_object().map(|o| o.keys().collect::<Vec<_>>())
                 );
-                // Fallback to favorites
-                self.get_favorites().await
-            }
-            Err(e) => {
-                debug!("History API error: {e}, falling back to favorites");
-                self.get_favorites().await
             }
         }
+
+        debug!("History endpoints exhausted, falling back to favorites");
+        self.get_favorites().await
     }
 
     /// Get followed users/profiles via the public API.
@@ -1491,6 +1508,74 @@ impl DeezerClient {
 }
 
 /// Parse a search section's "data" array into a typed vec.
+/// Pull the listening-history track list out of a gw-light response chunk,
+/// sorted most-recent first when a timestamp field is present.
+///
+/// Accepts three shapes seen in the wild:
+///   { "data": [ TrackData, ... ] }
+///   { "data": [ { "DATE": "...", "data": [ TrackData, ... ] }, ... ] }   (day-grouped)
+///   [ TrackData, ... ]
+fn extract_history_tracks(node: &serde_json::Value) -> Option<Vec<TrackData>> {
+    let array = node
+        .get("data")
+        .and_then(|d| d.as_array())
+        .or_else(|| node.as_array())?;
+
+    // Day-grouped: outer entries have their own "data" array of tracks. Flatten.
+    if array
+        .iter()
+        .any(|e| e.get("data").and_then(|d| d.as_array()).is_some())
+    {
+        let mut out: Vec<(Option<i64>, TrackData)> = Vec::new();
+        for group in array {
+            let group_ts = extract_ts(group);
+            if let Some(inner) = group.get("data").and_then(|d| d.as_array()) {
+                for item in inner {
+                    if let Ok(t) = serde_json::from_value::<TrackData>(item.clone()) {
+                        out.push((extract_ts(item).or(group_ts), t));
+                    }
+                }
+            }
+        }
+        if out.is_empty() {
+            return None;
+        }
+        out.sort_by(|a, b| b.0.cmp(&a.0));
+        return Some(out.into_iter().map(|(_, t)| t).collect());
+    }
+
+    // Flat: each entry is itself a track (possibly carrying TS/DATE).
+    let mut out: Vec<(Option<i64>, TrackData)> = Vec::new();
+    for item in array {
+        if let Ok(t) = serde_json::from_value::<TrackData>(item.clone()) {
+            out.push((extract_ts(item), t));
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    if out.iter().any(|(ts, _)| ts.is_some()) {
+        out.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+    Some(out.into_iter().map(|(_, t)| t).collect())
+}
+
+fn extract_ts(v: &serde_json::Value) -> Option<i64> {
+    for key in ["TS", "DATE", "DATE_ADD", "TIMESTAMP"] {
+        if let Some(val) = v.get(key) {
+            if let Some(n) = val.as_i64() {
+                return Some(n);
+            }
+            if let Some(s) = val.as_str() {
+                if let Ok(n) = s.parse::<i64>() {
+                    return Some(n);
+                }
+            }
+        }
+    }
+    None
+}
+
 fn parse_search_section<T: serde::de::DeserializeOwned>(
     section: Option<&serde_json::Value>,
 ) -> Result<Vec<T>, DeezerError> {

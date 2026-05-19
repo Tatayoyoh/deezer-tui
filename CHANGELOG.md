@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Favorites > Recently Played now shows actual play history in reverse-chronological order
+- Tracks played in deezer-tui now show up in your Deezer listening history (Favorites > Recently Played and your profile on deezer.com), after ~30 s of playback
+
 ## [1.12.0] - 2026-05-19
 
 ### Changed
