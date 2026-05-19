@@ -44,6 +44,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Shortcut menu [?]<br>
 ✅ Global app menu [ctrl+o] <br>
 ✅ Themes, from official Deezer themes<br>
+✅ Audio quality selection (MP3 64/128/320, FLAC)<br>
 ✅ Translations <br>
 ✅ Offline mode with downloaded tracks<br>
 ✅ Album/Artist miniature (require Kitty or Ghostty for real image display)<br>

@@ -467,6 +467,8 @@ pub enum Overlay {
     Settings { selected: usize },
     /// Theme picker.
     ThemePicker { selected: usize },
+    /// Audio quality picker.
+    QualityPicker { selected: usize },
     /// Language picker.
     LanguagePicker { selected: usize },
     /// Album detail view. `from_artist` is true when opened from the artist detail page.
@@ -2191,7 +2193,7 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 6;
+                const SETTINGS_COUNT: usize = 7;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
@@ -2219,6 +2221,17 @@ impl Client {
                                 return KeyAction::Continue;
                             }
                             2 => {
+                                // Audio quality
+                                let current = self.view.quality;
+                                let idx = AudioQuality::ALL
+                                    .iter()
+                                    .position(|&q| q == current)
+                                    .unwrap_or(1);
+                                self.view
+                                    .push_overlay(Overlay::QualityPicker { selected: idx });
+                                return KeyAction::Continue;
+                            }
+                            3 => {
                                 // Language
                                 let current = i18n::current_locale();
                                 let idx =
@@ -2227,16 +2240,16 @@ impl Client {
                                     .push_overlay(Overlay::LanguagePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
-                            3 => {
+                            4 => {
                                 // Logout
                                 self.view.pop_overlay();
                                 return KeyAction::SendCommand(Command::Logout);
                             }
-                            4 => {
+                            5 => {
                                 // Send to background
                                 return KeyAction::Detach;
                             }
-                            5 => {
+                            6 => {
                                 // Quit
                                 return KeyAction::Quit;
                             }
@@ -2270,6 +2283,27 @@ impl Client {
                         config.language = Some(locale.as_str().to_string());
                         let _ = config.save();
                         self.view.pop_overlay();
+                    }
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
+            Overlay::QualityPicker { selected } => {
+                let count = AudioQuality::ALL.len();
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.view.pop_overlay();
+                    }
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        *selected = selected.saturating_sub(1);
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        *selected = (*selected + 1).min(count - 1);
+                    }
+                    KeyCode::Enter => {
+                        let quality = AudioQuality::ALL[*selected];
+                        self.view.pop_overlay();
+                        return KeyAction::SendCommand(Command::SetQuality { quality });
                     }
                     _ => {}
                 }

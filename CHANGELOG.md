@@ -11,9 +11,11 @@ All notable changes to this project will be documented in this file.
 - Explore > `Moods` (new)
 - Explore > `Categories` (new), with detail page (Enter on a music category)
 - Explore > `Radios` (previously Radios tab)
+- Audio quality picker in settings (`Ctrl+O` > Audio quality): MP3 64 / 128 / 320 / FLAC
 
 ### Fixed
 - Favorites > Recently Played failing to load when list contains user-uploaded MP3 tracks (#7)
+- `quality` field in `config.json` now accepts the API names (`MP3_128`, `MP3_320`, `FLAC`, `MP3_64`), as shown in the player bar, and case-insensitive. Previously only the internal PascalCase form was accepted, causing the whole config to revert to defaults on parse failure (#8)
 
 ## [1.11.0] - 2026-05-06
 

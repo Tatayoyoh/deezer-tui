@@ -156,6 +156,8 @@ pub enum Command {
     PopNavOverlay,
     /// Clear the entire navigation overlay stack (e.g. when entering a new top-level detail).
     ClearNavOverlayStack,
+    /// Change the preferred audio quality (persisted to config). Takes effect on next track.
+    SetQuality { quality: AudioQuality },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
