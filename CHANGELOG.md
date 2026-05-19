@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.12.1] - 2026-05-20
 
 ### Fixed
 - Favorites > Recently Played now shows actual play history in reverse-chronological order
