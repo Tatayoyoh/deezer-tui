@@ -135,6 +135,7 @@ pub struct UserOffer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackData {
     #[serde(rename = "SNG_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
     pub track_id: String,
     #[serde(rename = "SNG_TITLE")]
     pub title: String,
@@ -171,6 +172,7 @@ pub struct TrackData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackFallback {
     #[serde(rename = "SNG_ID")]
+    #[serde(deserialize_with = "deserialize_id_to_string")]
     pub track_id: String,
 }
 
@@ -181,6 +183,11 @@ impl TrackData {
 
     pub fn has_track_token(&self) -> bool {
         self.track_token.as_ref().is_some_and(|t| !t.is_empty())
+    }
+
+    /// User-uploaded MP3s have a negative SNG_ID.
+    pub fn is_user_uploaded(&self) -> bool {
+        self.track_id.starts_with('-')
     }
 }
 

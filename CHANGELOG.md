@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
 - Explore > `Categories` (new), with detail page (Enter on a music category)
 - Explore > `Radios` (previously Radios tab)
 
+### Fixed
+- Favorites > Recently Played failing to load when list contains user-uploaded MP3 tracks (#7)
+
 ## [1.11.0] - 2026-05-06
 
 ### Added
