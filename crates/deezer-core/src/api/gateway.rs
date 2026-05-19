@@ -96,6 +96,10 @@ impl DeezerClient {
         let params = json!({ "sng_id": song_id });
         let results = self.gw_call("song.getData", params).await?;
 
+        if song_id.starts_with('-') {
+            debug!(track_id = %song_id, payload = %results, "song.getData (user-uploaded)");
+        }
+
         let track: TrackData = serde_json::from_value(results)
             .map_err(|e| DeezerError::Api(format!("Failed to parse track data: {e}")))?;
 

@@ -31,11 +31,22 @@ impl DeezerClient {
             "get_stream_url: track_token info"
         );
 
-        // Try requested quality, then fall back to lower, then try higher
-        let qualities_to_try = quality.all_fallbacks();
+        // User-uploaded MP3s use the MP3_MISC format and are not served at other qualities.
+        let qualities_to_try: Vec<(AudioQuality, &'static str)> = if track.is_user_uploaded() {
+            vec![(AudioQuality::Mp3_128, "MP3_MISC")]
+        } else {
+            quality
+                .all_fallbacks()
+                .into_iter()
+                .map(|q| {
+                    let fmt = q.as_api_format();
+                    (q, fmt)
+                })
+                .collect()
+        };
 
-        for q in qualities_to_try {
-            debug!(quality = q.as_api_format(), track_id = %track.track_id, "Requesting stream URL");
+        for (q, fmt) in qualities_to_try {
+            debug!(quality = fmt, track_id = %track.track_id, "Requesting stream URL");
 
             let payload = json!({
                 "license_token": session.license_token,
@@ -43,7 +54,7 @@ impl DeezerClient {
                     "type": "FULL",
                     "formats": [{
                         "cipher": "BF_CBC_STRIPE",
-                        "format": q.as_api_format(),
+                        "format": fmt,
                     }]
                 }],
                 "track_tokens": [track_token],
@@ -73,13 +84,13 @@ impl DeezerClient {
                 .and_then(|s| s.get("url"))
                 .and_then(|u| u.as_str())
             {
-                debug!(quality = q.as_api_format(), "Got stream URL");
+                debug!(quality = fmt, "Got stream URL");
                 return Ok((url.to_string(), q));
             }
 
             // Log the full response for debugging
             warn!(
-                quality = q.as_api_format(),
+                quality = fmt,
                 track_id = %track.track_id,
                 response = %body,
                 "get_stream_url: no streaming URL in response"
