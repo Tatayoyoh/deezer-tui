@@ -2,6 +2,8 @@ mod client;
 mod daemon;
 mod favorites_cache;
 mod i18n;
+#[cfg(target_os = "linux")]
+mod mpris;
 mod protocol;
 mod theme;
 mod ui;

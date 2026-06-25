@@ -231,6 +231,13 @@ pub struct Daemon {
     // Track ID for which we already sent log.listen during this play.
     // Reset on every new track start so each play is logged exactly once.
     listen_logged_for: Option<String>,
+
+    // MPRIS D-Bus server (Linux desktops only). Lets media keys / now-playing
+    // widgets control playback. `None` if D-Bus is unavailable.
+    #[cfg(target_os = "linux")]
+    mpris: Option<mpris_server::Server<crate::mpris::MprisHandler>>,
+    #[cfg(target_os = "linux")]
+    mpris_last: crate::mpris::MprisSnapshot,
 }
 
 impl Daemon {
@@ -351,6 +358,11 @@ impl Daemon {
             consecutive_skip_count: 0,
             flow_active: false,
             listen_logged_for: None,
+
+            #[cfg(target_os = "linux")]
+            mpris: None,
+            #[cfg(target_os = "linux")]
+            mpris_last: crate::mpris::MprisSnapshot::default(),
         })
     }
 
@@ -402,6 +414,28 @@ impl Daemon {
         let mut next_client_id: u64 = 0;
         let (client_cmd_tx, mut client_cmd_rx) =
             tokio::sync::mpsc::unbounded_channel::<(u64, Option<Command>)>();
+
+        // Register the MPRIS D-Bus media player (Linux desktops). Commands from
+        // media keys / now-playing widgets arrive on `mpris_cmd_rx` and are fed
+        // through the normal command path below. On non-Linux the sender is
+        // dropped immediately so the receiver branch stays dormant.
+        let (mpris_cmd_tx, mut mpris_cmd_rx) = tokio::sync::mpsc::unbounded_channel::<Command>();
+        #[cfg(target_os = "linux")]
+        {
+            let handler =
+                crate::mpris::MprisHandler::new(mpris_cmd_tx, Arc::clone(&self.player_state));
+            match mpris_server::Server::new(crate::mpris::BUS_SUFFIX, handler).await {
+                Ok(server) => {
+                    info!("MPRIS server registered");
+                    self.mpris = Some(server);
+                }
+                Err(e) => {
+                    warn!("MPRIS unavailable (no D-Bus session?): {e}");
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        drop(mpris_cmd_tx);
 
         loop {
             // Build tick interval
@@ -469,6 +503,7 @@ impl Daemon {
                             // Broadcast snapshot to all clients
                             let snap = self.snapshot();
                             broadcast_snapshot(&clients, snap).await;
+                            self.mpris_refresh().await;
 
                             if should_shutdown {
                                 info!("Shutdown requested, exiting daemon");
@@ -482,6 +517,22 @@ impl Daemon {
                     }
                 }
 
+                // Command received from the MPRIS D-Bus interface (media keys, etc.)
+                Some(command) = mpris_cmd_rx.recv() => {
+                    debug!(?command, "Received MPRIS command");
+                    let should_shutdown = matches!(command, Command::Shutdown);
+                    self.handle_command(command);
+
+                    let snap = self.snapshot();
+                    broadcast_snapshot(&clients, snap).await;
+                    self.mpris_refresh().await;
+
+                    if should_shutdown {
+                        info!("Shutdown requested via MPRIS, exiting daemon");
+                        break;
+                    }
+                }
+
                 // Tick: update position, auto-advance, process async results
                 _ = tick => {
                     self.process_async_results();
@@ -490,6 +541,7 @@ impl Daemon {
                     // Broadcast periodic snapshot to all clients
                     let snap = self.snapshot();
                     broadcast_snapshot(&clients, snap).await;
+                    self.mpris_refresh().await;
                 }
             }
         }
@@ -583,10 +635,15 @@ impl Daemon {
             Command::NextTrack => self.play_next(),
             Command::PrevTrack => self.play_prev(),
             Command::SetVolume { volume } => {
+                let volume = volume.clamp(0.0, 1.0);
                 if let Some(ref engine) = self.engine {
                     engine.set_volume(volume);
+                } else if let Ok(mut state) = self.player_state.lock() {
+                    // No engine yet (nothing playing) — keep state authoritative
+                    // so the UI and MPRIS reflect the new volume.
+                    state.volume = volume;
                 }
-                self.config.volume = volume.clamp(0.0, 1.0);
+                self.config.volume = volume;
                 let _ = self.config.save();
             }
             Command::SetQuality { quality } => {
@@ -602,6 +659,16 @@ impl Daemon {
             }
             Command::SeekBackward { secs } => {
                 self.seek_relative(-(secs as i64));
+            }
+            Command::SeekAbsolute { secs } => {
+                self.seek_absolute(secs);
+            }
+            Command::Stop => {
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.stop();
+                }
+                self.playback_started_at = None;
+                self.playback_offset_secs = 0;
             }
             Command::ToggleShuffle => {
                 let mut state = self.player_state.lock().unwrap();
@@ -2269,6 +2336,11 @@ impl Daemon {
         }
     }
 
+    fn seek_absolute(&mut self, target_secs: u64) {
+        let current = self.player_state.lock().unwrap().position_secs;
+        self.seek_relative(target_secs as i64 - current as i64);
+    }
+
     fn seek_relative(&mut self, delta_secs: i64) {
         let Some(ref engine) = self.engine else {
             return;
@@ -3049,6 +3121,40 @@ impl Daemon {
             }
         }
     }
+
+    /// Emit MPRIS `PropertiesChanged` for any player state that changed since
+    /// the last refresh, so desktop now-playing widgets stay in sync. No-op if
+    /// the MPRIS server failed to register (e.g. no D-Bus session).
+    #[cfg(target_os = "linux")]
+    async fn mpris_refresh(&mut self) {
+        // Take the server out so we can mutate `self.mpris_last` without an
+        // aliasing borrow; put it back afterwards.
+        let Some(server) = self.mpris.take() else {
+            return;
+        };
+        let (current, props) = {
+            let state = match self.player_state.lock() {
+                Ok(s) => s,
+                Err(_) => {
+                    self.mpris = Some(server);
+                    return;
+                }
+            };
+            let current = crate::mpris::MprisSnapshot::capture(&state);
+            let props = current.changed_properties(&self.mpris_last, &state);
+            (current, props)
+        };
+        if !props.is_empty() {
+            self.mpris_last = current;
+            if let Err(e) = server.properties_changed(props).await {
+                debug!("MPRIS properties_changed failed: {e}");
+            }
+        }
+        self.mpris = Some(server);
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    async fn mpris_refresh(&mut self) {}
 
     /// Report the current track to Deezer's `log.listen` endpoint once we've
     /// played past 30 seconds. Required for the track to appear in the user's

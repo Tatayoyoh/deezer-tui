@@ -28,3 +28,8 @@ reqwest = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# MPRIS D-Bus media control (Linux desktops only). Lets hardware media keys
+# and desktop now-playing widgets control the daemon.
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = { version = "0.10", features = ["tokio"] }

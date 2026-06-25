@@ -36,6 +36,10 @@ pub enum Command {
     SeekForward { secs: u64 },
     /// Seek backward by a number of seconds in the current track.
     SeekBackward { secs: u64 },
+    /// Seek to an absolute position (seconds) in the current track.
+    SeekAbsolute { secs: u64 },
+    /// Stop playback entirely (clears current track, resets position).
+    Stop,
     /// Toggle shuffle mode.
     ToggleShuffle,
     /// Cycle repeat mode (Off -> Queue -> Track -> Off).
