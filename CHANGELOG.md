@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.13.0] - 2026-06-27
 
 ### Added
 - MPRIS support on Linux: hardware media keys (play/pause, next, previous) and desktop now-playing widgets (GNOME, KDE, `playerctl`, …) can control and observe playback (#9)
