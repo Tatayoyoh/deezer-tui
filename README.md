@@ -49,6 +49,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Offline mode with downloaded tracks<br>
 ✅ Album/Artist miniature (require Kitty or Ghostty for real image display)<br>
 ✅ Auto update
+✅ MPRIS support for Linux desktops environments : play/next track/previous track
 
 ![search](assets/search.gif)
 
