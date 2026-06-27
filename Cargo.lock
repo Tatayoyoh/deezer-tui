@@ -758,7 +758,7 @@ checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 
 [[package]]
 name = "deezer-core"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "blowfish",
  "cbc",
@@ -778,7 +778,7 @@ dependencies = [
 
 [[package]]
 name = "deezer-tui"
-version = "1.12.1"
+version = "1.13.0"
 dependencies = [
  "anyhow",
  "arboard",
