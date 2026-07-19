@@ -97,12 +97,4 @@ impl FavoritesCache {
             self.playlist_details.remove(id);
         }
     }
-
-    pub fn invalidate_following(&mut self) {
-        self.following = None;
-    }
-
-    pub fn invalidate_moods(&mut self) {
-        self.moods = None;
-    }
 }

@@ -75,7 +75,6 @@ enum AsyncResult {
     RemoveFromPlaylistError(String),
     PlaylistCreatedAndAdded {
         playlist_id: String,
-        title: String,
     },
     PlaylistCreatedError(String),
     PlaylistRenamed {
@@ -95,16 +94,28 @@ enum AsyncResult {
     AlbumDetailError(String),
     ArtistDetailReady(ArtistDetail),
     ArtistDetailError(String),
-    PlaylistDetailReady(PlaylistDetail),
-    PlaylistDetailError(String),
+    PlaylistDetailReady {
+        detail: PlaylistDetail,
+        background: bool,
+    },
+    PlaylistDetailError {
+        err: String,
+        background: bool,
+    },
     RadiosReady(Vec<RadioItem>),
     RadiosError(String),
     RadioTracksReady(Vec<TrackData>),
     RadioTracksError(String),
     MoodsReady(Vec<MoodEntry>),
     MoodsError(String),
-    MoodTracksReady(Vec<TrackData>),
-    MoodTracksError(String),
+    MoodTracksReady {
+        tracks: Vec<TrackData>,
+        continuation: bool,
+    },
+    MoodTracksError {
+        err: String,
+        continuation: bool,
+    },
     GenresReady(Vec<GenreItem>),
     GenresError(String),
     GenreDetailReady(GenreDetail),
@@ -227,6 +238,10 @@ pub struct Daemon {
 
     // Flow mode — when true, auto-fetch more Flow tracks when queue ends
     flow_active: bool,
+
+    // Currently playing mood — when set, auto-fetch more tracks for this mood
+    // when the queue ends (mutually exclusive with `flow_active`).
+    active_mood: Option<deezer_core::api::models::MoodItem>,
 
     // Track ID for which we already sent log.listen during this play.
     // Reset on every new track start so each play is logged exactly once.
@@ -357,6 +372,7 @@ impl Daemon {
             track_generation: 0,
             consecutive_skip_count: 0,
             flow_active: false,
+            active_mood: None,
             listen_logged_for: None,
 
             #[cfg(target_os = "linux")]
@@ -387,10 +403,9 @@ impl Daemon {
 
         if self.is_offline {
             // In offline mode, create the audio engine immediately (no master key needed for local playback)
-            match PlayerEngine::new([0u8; 16]) {
+            match PlayerEngine::new([0u8; 16], Arc::clone(&self.player_state)) {
                 Ok(engine) => {
                     engine.set_volume(self.config.volume);
-                    self.player_state = engine.state();
                     self.engine = Some(engine);
                 }
                 Err(e) => {
@@ -580,6 +595,7 @@ impl Daemon {
                             .position(|t| t.track_id == track.track_id)
                             .unwrap_or(0);
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = playable;
                             state.queue_index = queue_idx;
@@ -607,6 +623,7 @@ impl Daemon {
                             .unwrap_or(0);
                         info!(track_id = %track.track_id, title = %track.title, queue_len = playable.len(), queue_idx, "PlayFromFavorites: setting queue and playing");
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = playable;
                             state.queue_index = queue_idx;
@@ -824,6 +841,7 @@ impl Daemon {
                 if !self.favorites.is_empty() {
                     // Set queue from favorites with shuffle enabled
                     self.flow_active = false;
+                    self.active_mood = None;
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue = self.favorites.clone();
                         state.shuffle = true;
@@ -937,6 +955,7 @@ impl Daemon {
             }
             Command::StartFlow => {
                 self.flow_active = false;
+                self.active_mood = None;
                 self.start_flow();
             }
             Command::GetAlbumDetail { album_id } => {
@@ -949,6 +968,7 @@ impl Daemon {
                 if let Some(ref detail) = self.artist_detail {
                     if let Some(track) = detail.top_tracks.get(index).cloned() {
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.top_tracks.clone();
                             state.queue_index = index;
@@ -971,6 +991,7 @@ impl Daemon {
                     if let Some(track) = detail.tracks.get(index).cloned() {
                         // Set queue from album tracks
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.tracks.clone();
                             state.queue_index = index;
@@ -986,6 +1007,7 @@ impl Daemon {
                 if let Some(ref detail) = self.playlist_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.tracks.clone();
                             state.queue_index = index;
@@ -1001,6 +1023,7 @@ impl Daemon {
                 if let Some(ref detail) = self.genre_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = detail.tracks.clone();
                             state.queue_index = index;
@@ -1059,7 +1082,14 @@ impl Daemon {
             }
             Command::PlayFromMood { index } => {
                 if let Some(mood) = self.moods.get(index).cloned() {
-                    self.start_play_mood(mood);
+                    self.flow_active = false;
+                    let core_mood = deezer_core::api::models::MoodItem {
+                        id: mood.id,
+                        title: mood.title,
+                        target: mood.target,
+                        radio_id: mood.radio_id,
+                    };
+                    self.start_play_mood(core_mood, false);
                 }
             }
             Command::LoadGenres => {
@@ -1090,6 +1120,7 @@ impl Daemon {
                     .collect();
                 if let Some(track) = tracks.get(index).cloned() {
                     self.flow_active = false;
+                    self.active_mood = None;
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue = tracks;
                         state.queue_index = index;
@@ -1110,6 +1141,7 @@ impl Daemon {
                     let tracks = album.tracks.clone();
                     if let Some(track) = tracks.get(track_index).cloned() {
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = track_index;
@@ -1611,6 +1643,31 @@ impl Daemon {
         bump(&mut self.favorites_display);
     }
 
+    /// Set a playlist's track count to an authoritative value (e.g. from a
+    /// freshly-fetched `PlaylistDetail`), everywhere it's cached or displayed —
+    /// unlike `adjust_playlist_count`, this also updates the on-disk favorites
+    /// cache, so counts stay correct after a track was added/removed from
+    /// another device rather than just after a local add/remove.
+    fn set_playlist_track_count(&mut self, playlist_id: &str, count: usize) {
+        for pl in self.playlists.iter_mut() {
+            if pl.playlist_id == playlist_id {
+                pl.nb_songs = count as u64;
+            }
+        }
+        let set = |items: &mut [DisplayItem]| {
+            for it in items.iter_mut() {
+                if it.playlist_id.as_deref() == Some(playlist_id) {
+                    it.col3 = format!("{count} titres");
+                }
+            }
+        };
+        set(&mut self.search_display);
+        set(&mut self.favorites_display);
+        if let Some(ref mut cached) = self.favorites_cache.playlists {
+            set(cached);
+        }
+    }
+
     fn start_load_playlists(&mut self) {
         if self.is_offline {
             return;
@@ -1685,8 +1742,7 @@ impl Daemon {
                     .await
                 {
                     Ok(()) => {
-                        let _ =
-                            tx.send(AsyncResult::PlaylistCreatedAndAdded { playlist_id, title });
+                        let _ = tx.send(AsyncResult::PlaylistCreatedAndAdded { playlist_id });
                     }
                     Err(DeezerError::TrackAlreadyInPlaylist) => {
                         let _ = tx.send(AsyncResult::AlreadyInPlaylist);
@@ -1842,36 +1898,43 @@ impl Daemon {
             return;
         }
 
-        // Cache hit: serve immediately without a network call
-        if let Some(cached) = self
+        // Cache hit: serve immediately without a network call, then refresh
+        // in the background so stale content (e.g. tracks added from another
+        // device) eventually shows up without a jarring reload.
+        let background = self
             .favorites_cache
             .playlist_details
             .get(&playlist_id)
             .cloned()
-        {
-            self.status_msg =
-                Some(t().fmt_playlist_tracks_status(&cached.title, cached.tracks.len()));
-            self.playlist_detail = Some(cached);
+            .is_some_and(|cached| {
+                self.status_msg =
+                    Some(t().fmt_playlist_tracks_status(&cached.title, cached.tracks.len()));
+                self.playlist_detail = Some(cached);
+                self.playlist_detail_selected = 0;
+                self.playlist_detail_loading = false;
+                true
+            });
+
+        if !background {
+            self.playlist_detail_loading = true;
+            self.playlist_detail = None;
             self.playlist_detail_selected = 0;
-            self.playlist_detail_loading = false;
-            return;
+            self.status_msg = Some(t().status_loading_playlist.into());
         }
 
-        // Cache miss: fetch from API
-        self.playlist_detail_loading = true;
-        self.playlist_detail = None;
-        self.playlist_detail_selected = 0;
-        self.status_msg = Some(t().status_loading_playlist.into());
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.get_playlist_detail(&playlist_id).await {
                 Ok(detail) => {
-                    let _ = tx.send(AsyncResult::PlaylistDetailReady(detail));
+                    let _ = tx.send(AsyncResult::PlaylistDetailReady { detail, background });
                 }
                 Err(e) => {
-                    let _ = tx.send(AsyncResult::PlaylistDetailError(e.to_string()));
+                    let _ = tx.send(AsyncResult::PlaylistDetailError {
+                        err: e.to_string(),
+                        background,
+                    });
                 }
             }
         });
@@ -2012,7 +2075,11 @@ impl Daemon {
         });
     }
 
-    fn start_play_mood(&mut self, mood: MoodEntry) {
+    fn start_play_mood(
+        &mut self,
+        core_mood: deezer_core::api::models::MoodItem,
+        continuation: bool,
+    ) {
         if self.is_offline {
             self.status_msg = Some(t().no_internet.into());
             return;
@@ -2021,21 +2088,26 @@ impl Daemon {
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
-        let core_mood = deezer_core::api::models::MoodItem {
-            id: mood.id,
-            title: mood.title,
-            target: mood.target,
-            radio_id: mood.radio_id,
-        };
+        // Remember which mood is active so play_next() can fetch more of it
+        // once the queue runs out — mirrors `flow_active` for Deezer Flow.
+        if !continuation {
+            self.active_mood = Some(core_mood.clone());
+        }
 
         tokio::spawn(async move {
             let client = client.lock().await;
             match client.get_mood_tracks(&core_mood).await {
                 Ok(tracks) => {
-                    let _ = tx.send(AsyncResult::MoodTracksReady(tracks));
+                    let _ = tx.send(AsyncResult::MoodTracksReady {
+                        tracks,
+                        continuation,
+                    });
                 }
                 Err(e) => {
-                    let _ = tx.send(AsyncResult::MoodTracksError(e.to_string()));
+                    let _ = tx.send(AsyncResult::MoodTracksError {
+                        err: e.to_string(),
+                        continuation,
+                    });
                 }
             }
         });
@@ -2251,19 +2323,44 @@ impl Daemon {
             }
 
             let next_idx = if state.shuffle {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut hasher = DefaultHasher::new();
-                Instant::now().hash(&mut hasher);
-                hasher.finish() as usize % state.queue.len()
+                if state.queue.len() == 1 {
+                    0
+                } else {
+                    use std::collections::hash_map::DefaultHasher;
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = DefaultHasher::new();
+                    Instant::now().hash(&mut hasher);
+                    // Pick among all tracks except the one currently playing, so
+                    // shuffle never repeats the same track twice in a row — even
+                    // right after the queue was extended (e.g. Flow continuation).
+                    let r = hasher.finish() as usize % (state.queue.len() - 1);
+                    if r >= state.queue_index {
+                        r + 1
+                    } else {
+                        r
+                    }
+                }
             } else {
                 let next = state.queue_index + 1;
                 if next >= state.queue.len() {
                     if self.flow_active {
-                        // Flow mode — fetch more tracks to continue playback
+                        // Flow mode — fetch more tracks to continue playback.
+                        // Mark as Loading so on_tick's auto-advance (which fires on
+                        // every tick while status == Playing and the engine is
+                        // finished) doesn't re-enter here and fire duplicate Flow
+                        // fetches while this one is still in flight.
+                        state.status = PlaybackStatus::Loading;
                         drop(state);
                         info!("play_next: end of Flow queue, fetching more tracks");
                         self.start_flow();
+                        return;
+                    }
+                    if let Some(mood) = self.active_mood.clone() {
+                        // Mood mode — same continuation dance as Flow above.
+                        state.status = PlaybackStatus::Loading;
+                        drop(state);
+                        info!("play_next: end of Mood queue, fetching more tracks");
+                        self.start_play_mood(mood, true);
                         return;
                     }
                     match state.repeat {
@@ -2383,10 +2480,9 @@ impl Daemon {
                 AsyncResult::MasterKeyReady(key) => {
                     self.master_key = Some(key);
                     self.status_msg = Some(t().status_ready.into());
-                    match PlayerEngine::new(key) {
+                    match PlayerEngine::new(key, Arc::clone(&self.player_state)) {
                         Ok(engine) => {
                             engine.set_volume(self.config.volume);
-                            self.player_state = engine.state();
                             self.engine = Some(engine);
                         }
                         Err(e) => {
@@ -2565,10 +2661,7 @@ impl Daemon {
                     self.status_msg =
                         Some(t().fmt_error(t().status_remove_from_playlist_error, &err));
                 }
-                AsyncResult::PlaylistCreatedAndAdded {
-                    playlist_id,
-                    title: _,
-                } => {
+                AsyncResult::PlaylistCreatedAndAdded { playlist_id } => {
                     self.status_msg = Some(t().status_playlist_created.into());
                     self.favorites_cache
                         .invalidate_playlists(Some(&playlist_id));
@@ -2644,6 +2737,7 @@ impl Daemon {
                         self.status_msg = Some(t().fmt_mix_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = 0;
@@ -2673,6 +2767,7 @@ impl Daemon {
                         self.status_msg = Some(t().fmt_flow_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         self.flow_active = true;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = 0;
@@ -2682,6 +2777,12 @@ impl Daemon {
                 }
                 AsyncResult::FlowError(err) => {
                     self.status_msg = Some(t().fmt_error(t().status_flow_error, &err));
+                    // Clear the Loading state set before the fetch, otherwise
+                    // playback is stuck forever (on_tick only auto-advances
+                    // while status == Playing).
+                    if let Ok(mut state) = self.player_state.lock() {
+                        state.status = PlaybackStatus::Stopped;
+                    }
                 }
                 AsyncResult::AlbumDetailReady(detail) => {
                     self.album_detail_loading = false;
@@ -2709,21 +2810,55 @@ impl Daemon {
                     self.artist_detail_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_artist_error, &err));
                 }
-                AsyncResult::PlaylistDetailReady(detail) => {
-                    self.playlist_detail_loading = false;
-                    self.status_msg =
-                        Some(t().fmt_playlist_tracks_status(&detail.title, detail.tracks.len()));
-                    // Persist in cache for instant re-open
+                AsyncResult::PlaylistDetailReady { detail, background } => {
+                    // Persist the fresh copy for instant re-open, regardless of
+                    // whether the user is still looking at this playlist.
                     self.favorites_cache
                         .playlist_details
                         .insert(detail.playlist_id.clone(), detail.clone());
+                    self.set_playlist_track_count(&detail.playlist_id, detail.tracks.len());
                     self.favorites_cache.save();
-                    self.playlist_detail = Some(detail);
-                    self.playlist_detail_selected = 0;
+
+                    let still_viewing = self
+                        .playlist_detail
+                        .as_ref()
+                        .is_some_and(|d| d.playlist_id == detail.playlist_id);
+
+                    if background {
+                        // Silent refresh: only touch the view if the user hasn't
+                        // navigated away, and keep their selection on the same
+                        // track even if it moved places in the list.
+                        if still_viewing {
+                            let selected_track_id = self
+                                .playlist_detail
+                                .as_ref()
+                                .and_then(|d| d.tracks.get(self.playlist_detail_selected))
+                                .map(|t| t.track_id.clone());
+                            if let Some(new_idx) = selected_track_id
+                                .and_then(|id| detail.tracks.iter().position(|t| t.track_id == id))
+                            {
+                                self.playlist_detail_selected = new_idx;
+                            } else {
+                                self.playlist_detail_selected = self
+                                    .playlist_detail_selected
+                                    .min(detail.tracks.len().saturating_sub(1));
+                            }
+                            self.playlist_detail = Some(detail);
+                        }
+                    } else {
+                        self.playlist_detail_loading = false;
+                        self.status_msg = Some(
+                            t().fmt_playlist_tracks_status(&detail.title, detail.tracks.len()),
+                        );
+                        self.playlist_detail = Some(detail);
+                        self.playlist_detail_selected = 0;
+                    }
                 }
-                AsyncResult::PlaylistDetailError(err) => {
-                    self.playlist_detail_loading = false;
-                    self.status_msg = Some(t().fmt_error(t().status_playlist_error, &err));
+                AsyncResult::PlaylistDetailError { err, background } => {
+                    if !background {
+                        self.playlist_detail_loading = false;
+                        self.status_msg = Some(t().fmt_error(t().status_playlist_error, &err));
+                    }
                 }
                 AsyncResult::RadiosReady(items) => {
                     self.radios_loading = false;
@@ -2742,6 +2877,7 @@ impl Daemon {
                         self.status_msg = Some(t().fmt_radio_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         self.flow_active = false;
+                        self.active_mood = None;
                         if let Ok(mut state) = self.player_state.lock() {
                             state.queue = tracks;
                             state.queue_index = 0;
@@ -2764,10 +2900,26 @@ impl Daemon {
                     self.moods_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_moods_error, &err));
                 }
-                AsyncResult::MoodTracksReady(tracks) => {
+                AsyncResult::MoodTracksReady {
+                    tracks,
+                    continuation,
+                } => {
                     if tracks.is_empty() {
                         self.status_msg = Some(t().status_no_radio_tracks.into());
+                    } else if continuation {
+                        // Continuation — append new tracks to existing queue and advance,
+                        // mirroring Flow's continuation branch above.
+                        let next_track = tracks[0].clone();
+                        let count = tracks.len();
+                        if let Ok(mut state) = self.player_state.lock() {
+                            let append_idx = state.queue.len();
+                            state.queue.extend(tracks);
+                            state.queue_index = append_idx;
+                        }
+                        self.status_msg = Some(t().fmt_radio_tracks(count));
+                        self.start_play_track(next_track);
                     } else {
+                        // Initial mood selection — replace queue
                         self.status_msg = Some(t().fmt_radio_tracks(tracks.len()));
                         let first = tracks[0].clone();
                         self.flow_active = false;
@@ -2778,8 +2930,16 @@ impl Daemon {
                         self.start_play_track(first);
                     }
                 }
-                AsyncResult::MoodTracksError(err) => {
+                AsyncResult::MoodTracksError { err, continuation } => {
                     self.status_msg = Some(t().fmt_error(t().status_radio_tracks_error, &err));
+                    if continuation {
+                        // Clear the Loading state set before the fetch, otherwise
+                        // playback is stuck forever (on_tick only auto-advances
+                        // while status == Playing).
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.status = PlaybackStatus::Stopped;
+                        }
+                    }
                 }
                 AsyncResult::GenresReady(items) => {
                     self.genres_loading = false;

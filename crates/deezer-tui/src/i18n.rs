@@ -85,7 +85,6 @@ pub struct Strings {
     pub shuffle_favorites: &'static str,
     pub loading: &'static str,
     pub no_favorites: &'static str,
-    pub favorites: &'static str,
     pub favorites_filter_typing: &'static str,
     pub favorites_filter_normal: &'static str,
     pub favorites_filter_placeholder: &'static str,
@@ -131,10 +130,12 @@ pub struct Strings {
     // --- Playlist picker ---
     pub add_to_playlist_title: &'static str, // "Add \"{}\" to playlist"
     pub loading_playlists: &'static str,
-    pub no_playlists: &'static str,
     pub playlist_kind_personal: &'static str,
     pub playlist_kind_collaborative: &'static str,
     pub create_new_playlist: &'static str,
+    pub playlist_filter_typing: &'static str,
+    pub playlist_filter_normal: &'static str,
+    pub playlist_filter_placeholder: &'static str,
     pub create_playlist_prompt: &'static str,
     pub rename_playlist: &'static str,
     pub rename_playlist_prompt: &'static str,
@@ -201,8 +202,6 @@ pub struct Strings {
     pub transparency_label: &'static str,
     pub theme_picker_hint_transparency: &'static str,
     pub theme_picker_hint_navigate: &'static str,
-    pub theme_picker_hint_confirm: &'static str,
-    pub theme_picker_hint_back: &'static str,
 
     // --- Album detail ---
     pub loading_album: &'static str,
@@ -230,7 +229,6 @@ pub struct Strings {
 
     // --- Waiting list ---
     pub waiting_list: &'static str,
-    pub queue_empty: &'static str,
     pub queue_empty_title: &'static str,
     pub queue_empty_subtitle: &'static str,
 
@@ -278,7 +276,6 @@ pub struct Strings {
     // --- Offline ---
     pub offline_empty: &'static str,
     pub download_for_offline: &'static str,
-    pub remove_offline: &'static str,
     pub status_downloading_track: &'static str,
     pub status_track_saved_offline: &'static str,
     pub status_album_saved_offline: &'static str,
@@ -286,7 +283,6 @@ pub struct Strings {
     pub status_removed_offline: &'static str,
     pub hint_download_album: &'static str,
     pub hint_expand_collapse: &'static str,
-    pub offline_mode: &'static str,
     pub offline_indicator: &'static str,
     pub no_internet: &'static str,
 
@@ -390,8 +386,6 @@ pub struct Strings {
     pub update_later: &'static str,
     pub update_never: &'static str,
     pub update_downloading: &'static str,
-    pub update_installing: &'static str,
-    pub update_restarting: &'static str,
     pub update_failed: &'static str,
     pub update_restart_manually: &'static str,
     pub update_sudo_prompt: &'static str,
@@ -503,9 +497,9 @@ impl Strings {
         format!(" {} ({}) ", self.results, count)
     }
 
-    /// Format "Favorites (N)"
-    pub fn favorites_title(&self, count: usize) -> String {
-        format!(" {} ({}) ", self.favorites, count)
+    /// Format "Recently Played (N)" / "Tracks (N)" / etc., per selected category
+    pub fn favorites_category_title(&self, cat: FavoritesCategory, count: usize) -> String {
+        format!(" {} ({}) ", self.favorites_category_label(cat), count)
     }
 
     /// Format "Album — N tracks"
@@ -663,7 +657,6 @@ static EN: Strings = Strings {
     shuffle_favorites: "Shuffle play my favorites",
     loading: "Loading...",
     no_favorites: "No favorites yet \u{2014} add some on Deezer!",
-    favorites: "Favorites",
     favorites_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
     favorites_filter_normal: " Filter - [Ctrl+F] or [/] ",
     favorites_filter_placeholder: " filter favorites...",
@@ -705,10 +698,12 @@ static EN: Strings = Strings {
 
     add_to_playlist_title: "Add to playlist",
     loading_playlists: "Loading playlists...",
-    no_playlists: "No playlists found",
     playlist_kind_personal: "Personal",
     playlist_kind_collaborative: "Collaborative",
     create_new_playlist: "+ Create new playlist...",
+    playlist_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
+    playlist_filter_normal: " Filter - [/] ",
+    playlist_filter_placeholder: " filter playlists...",
     create_playlist_prompt: " New playlist name ",
     rename_playlist: "Rename playlist",
     rename_playlist_prompt: " Rename playlist ",
@@ -771,8 +766,6 @@ static EN: Strings = Strings {
     transparency_label: "Transparency",
     theme_picker_hint_transparency: "[←/→] Transparency",
     theme_picker_hint_navigate: "[↑/↓] Theme",
-    theme_picker_hint_confirm: "[Enter] Confirm",
-    theme_picker_hint_back: "[Esc] Back",
 
     loading_album: "Loading album...",
     no_album_loaded: "No album loaded",
@@ -796,7 +789,6 @@ static EN: Strings = Strings {
     playlist: " Playlist ",
 
     waiting_list: "Waiting List",
-    queue_empty: "Queue is empty",
     queue_empty_title: "Waiting list",
     queue_empty_subtitle: "No music playing",
 
@@ -838,7 +830,6 @@ static EN: Strings = Strings {
 
     offline_empty: "No offline content yet",
     download_for_offline: "Download for offline mode",
-    remove_offline: "Remove from offline",
     status_downloading_track: "Downloading for offline...",
     status_track_saved_offline: "Track saved for offline",
     status_album_saved_offline: "Album saved for offline",
@@ -846,7 +837,6 @@ static EN: Strings = Strings {
     status_removed_offline: "Removed from offline",
     hint_download_album: " download  ",
     hint_expand_collapse: "→ expand/collapse",
-    offline_mode: "offline mode",
     offline_indicator: "● Offline mode ",
     no_internet: "No internet connection",
 
@@ -946,8 +936,6 @@ static EN: Strings = Strings {
     update_later: "Later",
     update_never: "Never ask again",
     update_downloading: "Downloading update...",
-    update_installing: "Installing update...",
-    update_restarting: "Restarting...",
     update_failed: "Update failed",
     update_restart_manually: "Update complete! Please restart deezer-tui to apply changes.",
     update_sudo_prompt: "Root access required to install update...",
@@ -978,7 +966,6 @@ static FR: Strings = Strings {
     shuffle_favorites: "Jouer aléatoirement mes favoris",
     loading: "Chargement...",
     no_favorites: "Pas encore de favoris \u{2014} ajoutez-en sur Deezer !",
-    favorites: "Favoris",
     favorites_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
     favorites_filter_normal: " Filtre - [Ctrl+F] ou [/] ",
     favorites_filter_placeholder: " filtrer les favoris...",
@@ -1020,10 +1007,12 @@ static FR: Strings = Strings {
 
     add_to_playlist_title: "Ajouter à la playlist",
     loading_playlists: "Chargement des playlists...",
-    no_playlists: "Aucune playlist trouvée",
     playlist_kind_personal: "Personnelle",
     playlist_kind_collaborative: "Collaborative",
     create_new_playlist: "+ Créer une nouvelle playlist...",
+    playlist_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
+    playlist_filter_normal: " Filtre - [/] ",
+    playlist_filter_placeholder: " filtrer les playlists...",
     create_playlist_prompt: " Nom de la nouvelle playlist ",
     rename_playlist: "Renommer la playlist",
     rename_playlist_prompt: " Renommer la playlist ",
@@ -1086,8 +1075,6 @@ static FR: Strings = Strings {
     transparency_label: "Transparence",
     theme_picker_hint_transparency: "[←/→] Transparence",
     theme_picker_hint_navigate: "[↑/↓] Thème",
-    theme_picker_hint_confirm: "[Entrée] Confirmer",
-    theme_picker_hint_back: "[Échap] Retour",
 
     loading_album: "Chargement de l'album...",
     no_album_loaded: "Aucun album chargé",
@@ -1111,7 +1098,6 @@ static FR: Strings = Strings {
     playlist: " Playlist ",
 
     waiting_list: "File d'attente",
-    queue_empty: "La file d'attente est vide",
     queue_empty_title: "File d'attente",
     queue_empty_subtitle: "Aucune musique jouée",
 
@@ -1153,7 +1139,6 @@ static FR: Strings = Strings {
 
     offline_empty: "Aucun contenu hors-ligne",
     download_for_offline: "Télécharger hors-ligne",
-    remove_offline: "Supprimer du mode hors-ligne",
     status_downloading_track: "Téléchargement hors-ligne...",
     status_track_saved_offline: "Titre sauvegardé hors-ligne",
     status_album_saved_offline: "Album sauvegardé hors-ligne",
@@ -1161,7 +1146,6 @@ static FR: Strings = Strings {
     status_removed_offline: "Supprimé du mode hors-ligne",
     hint_download_album: " télécharger  ",
     hint_expand_collapse: "→ déplier/replier",
-    offline_mode: "mode hors-ligne",
     offline_indicator: "● Mode hors-ligne ",
     no_internet: "Pas de connexion internet",
 
@@ -1260,8 +1244,6 @@ static FR: Strings = Strings {
     update_later: "Plus tard",
     update_never: "Ne plus demander",
     update_downloading: "Téléchargement de la mise à jour...",
-    update_installing: "Installation de la mise à jour...",
-    update_restarting: "Redémarrage...",
     update_failed: "Échec de la mise à jour",
     update_restart_manually: "Mise à jour terminée ! Veuillez redémarrer deezer-tui.",
     update_sudo_prompt: "Accès root nécessaire pour installer la mise à jour...",
@@ -1292,7 +1274,6 @@ static ES: Strings = Strings {
     shuffle_favorites: "Reproducir favoritos aleatoriamente",
     loading: "Cargando...",
     no_favorites: "Aún no hay favoritos \u{2014} ¡agrega algunos en Deezer!",
-    favorites: "Favoritos",
     favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
     favorites_filter_normal: " Filtro - [Ctrl+F] o [/] ",
     favorites_filter_placeholder: " filtrar favoritos...",
@@ -1334,10 +1315,12 @@ static ES: Strings = Strings {
 
     add_to_playlist_title: "Agregar a playlist",
     loading_playlists: "Cargando playlists...",
-    no_playlists: "No se encontraron playlists",
     playlist_kind_personal: "Personal",
     playlist_kind_collaborative: "Colaborativa",
     create_new_playlist: "+ Crear nueva playlist...",
+    playlist_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    playlist_filter_normal: " Filtro - [/] ",
+    playlist_filter_placeholder: " filtrar playlists...",
     create_playlist_prompt: " Nombre de la nueva playlist ",
     rename_playlist: "Renombrar playlist",
     rename_playlist_prompt: " Renombrar playlist ",
@@ -1400,8 +1383,6 @@ static ES: Strings = Strings {
     transparency_label: "Transparencia",
     theme_picker_hint_transparency: "[←/→] Transparencia",
     theme_picker_hint_navigate: "[↑/↓] Tema",
-    theme_picker_hint_confirm: "[Enter] Confirmar",
-    theme_picker_hint_back: "[Esc] Volver",
 
     loading_album: "Cargando álbum...",
     no_album_loaded: "Ningún álbum cargado",
@@ -1425,7 +1406,6 @@ static ES: Strings = Strings {
     playlist: " Playlist ",
 
     waiting_list: "Cola de reproducción",
-    queue_empty: "La cola está vacía",
     queue_empty_title: "Lista de espera",
     queue_empty_subtitle: "Sin música en reproducción",
 
@@ -1467,7 +1447,6 @@ static ES: Strings = Strings {
 
     offline_empty: "Sin contenido sin conexión",
     download_for_offline: "Descargar para modo sin conexión",
-    remove_offline: "Eliminar del modo sin conexión",
     status_downloading_track: "Descargando sin conexión...",
     status_track_saved_offline: "Pista guardada sin conexión",
     status_album_saved_offline: "Álbum guardado sin conexión",
@@ -1475,7 +1454,6 @@ static ES: Strings = Strings {
     status_removed_offline: "Eliminado del modo sin conexión",
     hint_download_album: " descargar  ",
     hint_expand_collapse: "→ expandir/contraer",
-    offline_mode: "modo sin conexión",
     offline_indicator: "● Modo sin conexión ",
     no_internet: "Sin conexión a internet",
 
@@ -1574,8 +1552,6 @@ static ES: Strings = Strings {
     update_later: "Más tarde",
     update_never: "No volver a preguntar",
     update_downloading: "Descargando actualización...",
-    update_installing: "Instalando actualización...",
-    update_restarting: "Reiniciando...",
     update_failed: "Error en la actualización",
     update_restart_manually: "¡Actualización completada! Reinicie deezer-tui para aplicar los cambios.",
     update_sudo_prompt: "Se requiere acceso root para instalar la actualización...",
@@ -1606,7 +1582,6 @@ static PT: Strings = Strings {
     shuffle_favorites: "Reproduzir favoritos aleatoriamente",
     loading: "Carregando...",
     no_favorites: "Nenhum favorito ainda \u{2014} adicione alguns no Deezer!",
-    favorites: "Favoritos",
     favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
     favorites_filter_normal: " Filtro - [Ctrl+F] ou [/] ",
     favorites_filter_placeholder: " filtrar favoritos...",
@@ -1648,10 +1623,12 @@ static PT: Strings = Strings {
 
     add_to_playlist_title: "Adicionar à playlist",
     loading_playlists: "Carregando playlists...",
-    no_playlists: "Nenhuma playlist encontrada",
     playlist_kind_personal: "Pessoal",
     playlist_kind_collaborative: "Colaborativa",
     create_new_playlist: "+ Criar nova playlist...",
+    playlist_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
+    playlist_filter_normal: " Filtro - [/] ",
+    playlist_filter_placeholder: " filtrar playlists...",
     create_playlist_prompt: " Nome da nova playlist ",
     rename_playlist: "Renomear playlist",
     rename_playlist_prompt: " Renomear playlist ",
@@ -1714,8 +1691,6 @@ static PT: Strings = Strings {
     transparency_label: "Transparência",
     theme_picker_hint_transparency: "[←/→] Transparência",
     theme_picker_hint_navigate: "[↑/↓] Tema",
-    theme_picker_hint_confirm: "[Enter] Confirmar",
-    theme_picker_hint_back: "[Esc] Voltar",
 
     loading_album: "Carregando álbum...",
     no_album_loaded: "Nenhum álbum carregado",
@@ -1739,7 +1714,6 @@ static PT: Strings = Strings {
     playlist: " Playlist ",
 
     waiting_list: "Fila de reprodução",
-    queue_empty: "A fila está vazia",
     queue_empty_title: "Fila de reprodução",
     queue_empty_subtitle: "Nenhuma música tocando",
 
@@ -1781,7 +1755,6 @@ static PT: Strings = Strings {
 
     offline_empty: "Sem conteúdo offline",
     download_for_offline: "Baixar para modo offline",
-    remove_offline: "Remover do modo offline",
     status_downloading_track: "Baixando para offline...",
     status_track_saved_offline: "Faixa salva para offline",
     status_album_saved_offline: "Álbum salvo para offline",
@@ -1789,7 +1762,6 @@ static PT: Strings = Strings {
     status_removed_offline: "Removido do modo offline",
     hint_download_album: " baixar  ",
     hint_expand_collapse: "→ expandir/recolher",
-    offline_mode: "modo offline",
     offline_indicator: "● Modo offline ",
     no_internet: "Sem conexão com a internet",
 
@@ -1888,8 +1860,6 @@ static PT: Strings = Strings {
     update_later: "Mais tarde",
     update_never: "Não perguntar novamente",
     update_downloading: "Baixando atualização...",
-    update_installing: "Instalando atualização...",
-    update_restarting: "Reiniciando...",
     update_failed: "Falha na atualização",
     update_restart_manually: "Atualização concluída! Reinicie o deezer-tui para aplicar as alterações.",
     update_sudo_prompt: "Acesso root necessário para instalar a atualização...",
@@ -1920,7 +1890,6 @@ static DE: Strings = Strings {
     shuffle_favorites: "Favoriten zufällig abspielen",
     loading: "Laden...",
     no_favorites: "Noch keine Favoriten \u{2014} füge welche auf Deezer hinzu!",
-    favorites: "Favoriten",
     favorites_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
     favorites_filter_normal: " Filter - [Ctrl+F] oder [/] ",
     favorites_filter_placeholder: " Favoriten filtern...",
@@ -1962,10 +1931,12 @@ static DE: Strings = Strings {
 
     add_to_playlist_title: "Zur Playlist hinzufügen",
     loading_playlists: "Playlists werden geladen...",
-    no_playlists: "Keine Playlists gefunden",
     playlist_kind_personal: "Persönlich",
     playlist_kind_collaborative: "Kollaborativ",
     create_new_playlist: "+ Neue Playlist erstellen...",
+    playlist_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
+    playlist_filter_normal: " Filter - [/] ",
+    playlist_filter_placeholder: " Playlists filtern...",
     create_playlist_prompt: " Name der neuen Playlist ",
     rename_playlist: "Playlist umbenennen",
     rename_playlist_prompt: " Playlist umbenennen ",
@@ -2028,8 +1999,6 @@ static DE: Strings = Strings {
     transparency_label: "Transparenz",
     theme_picker_hint_transparency: "[←/→] Transparenz",
     theme_picker_hint_navigate: "[↑/↓] Thema",
-    theme_picker_hint_confirm: "[Enter] Bestätigen",
-    theme_picker_hint_back: "[Esc] Zurück",
 
     loading_album: "Album wird geladen...",
     no_album_loaded: "Kein Album geladen",
@@ -2053,7 +2022,6 @@ static DE: Strings = Strings {
     playlist: " Playlist ",
 
     waiting_list: "Warteschlange",
-    queue_empty: "Die Warteschlange ist leer",
     queue_empty_title: "Warteschlange",
     queue_empty_subtitle: "Keine Musik wird abgespielt",
 
@@ -2095,7 +2063,6 @@ static DE: Strings = Strings {
 
     offline_empty: "Keine Offline-Inhalte",
     download_for_offline: "Für Offline-Modus herunterladen",
-    remove_offline: "Aus Offline entfernen",
     status_downloading_track: "Offline wird heruntergeladen...",
     status_track_saved_offline: "Titel offline gespeichert",
     status_album_saved_offline: "Album offline gespeichert",
@@ -2103,7 +2070,6 @@ static DE: Strings = Strings {
     status_removed_offline: "Aus Offline entfernt",
     hint_download_album: " herunterladen  ",
     hint_expand_collapse: "→ auf-/zuklappen",
-    offline_mode: "Offline-Modus",
     offline_indicator: "● Offline-Modus ",
     no_internet: "Keine Internetverbindung",
 
@@ -2202,8 +2168,6 @@ static DE: Strings = Strings {
     update_later: "Später",
     update_never: "Nicht mehr fragen",
     update_downloading: "Update wird heruntergeladen...",
-    update_installing: "Update wird installiert...",
-    update_restarting: "Neustart...",
     update_failed: "Update fehlgeschlagen",
     update_restart_manually: "Update abgeschlossen! Bitte starten Sie deezer-tui neu.",
     update_sudo_prompt: "Root-Zugriff erforderlich für die Installation...",
