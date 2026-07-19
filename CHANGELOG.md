@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Fuzzy search (`/`) in the "Add to playlist" picker (#10)
+- Repeat mode indicator (`[r]`) in the player bar
+
+### Fixed
+- Shuffle mode could get stuck unable to disable once MPRIS was active, due to a stale state reference kept after login (#11)
+- Shuffle no longer replays the same track twice in a row, including right after the queue is extended
+- Playlist contents were cached forever and never picked up tracks added from another device; playlists now refresh in the background on reopen (#12)
+- Track count next to a playlist (Favorites > Playlists, and the "Add to playlist" picker) didn't update after tracks were added/removed from another device, even after the playlist's own track list had refreshed
+- Deezer Flow could skip ahead in the stream instead of continuing sequentially when the loaded queue ran out
+- Moods played only the first batch of tracks and then stopped instead of continuing
+- Favorites > Recently Played header now shows the track count
+- Playlist picker: `?` and `i` shortcuts no longer interrupt typing in the filter field
+
 ## [1.13.0] - 2026-06-27
 
 ### Added

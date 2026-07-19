@@ -165,7 +165,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         })
         .collect();
 
-    let title = s.favorites_title(items.len());
+    let title = s.favorites_category_title(view.favorites_category, items.len());
     let table = Table::new(
         rows,
         [

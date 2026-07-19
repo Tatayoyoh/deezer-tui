@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
-use deezer_core::player::state::PlaybackStatus;
+use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::client::ViewState;
 use crate::i18n::t;
@@ -109,6 +109,21 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     } else {
         Theme::dim()
     };
+    let (repeat_label, repeat_style) = match view.repeat {
+        RepeatMode::Off => (s.repeat, Theme::dim()),
+        RepeatMode::Queue => (
+            s.repeat_all,
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+        RepeatMode::Track => (
+            s.repeat_one,
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        ),
+    };
     let controls_left = Line::from(vec![
         Span::styled("  ", Theme::dim()),
         Span::styled("[?]", Theme::text()),
@@ -119,7 +134,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled(format!(" {}  ", s.next), Theme::dim()),
         Span::styled("[b]", Theme::text()),
         Span::styled(format!(" {}  ", s.prev), Theme::dim()),
-        Span::styled(format!("[s] {}", s.shuffle), shuffle_style),
+        Span::styled(format!("[s] {}  ", s.shuffle), shuffle_style),
+        Span::styled(format!("[r] {}", repeat_label), repeat_style),
     ]);
 
     let flow_style = Style::default()

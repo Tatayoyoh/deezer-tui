@@ -114,6 +114,10 @@ pub enum SubMenu {
         playlists: Vec<PlaylistData>,
         selected: usize,
         loading: bool,
+        /// Fuzzy filter text typed with `/`; empty means unfiltered.
+        filter_input: String,
+        /// Whether the filter input box is currently capturing keystrokes.
+        filter_typing: bool,
     },
     TrackInfo,
     /// Inline text input shown inside the playlist picker for creating a new
@@ -683,7 +687,7 @@ impl Toast {
 /// Fuzzy match: returns true if every character of `query` appears in `target`
 /// as a subsequence (in order, not necessarily contiguous). Both inputs should
 /// already be lowercased by the caller.
-fn fuzzy_match(query: &str, target: &str) -> bool {
+pub(crate) fn fuzzy_match(query: &str, target: &str) -> bool {
     let mut target_chars = target.chars();
     'outer: for qc in query.chars() {
         loop {
@@ -834,13 +838,6 @@ impl ViewState {
             self.nav_commands.push(Command::ClearNavOverlayStack);
             self.nav_commands.push(Command::PushNavOverlay(nav));
         }
-    }
-
-    /// Clear all overlays (nav + UI).
-    fn clear_overlays(&mut self) {
-        self.overlay = None;
-        self.overlay_stack.clear();
-        self.nav_commands.push(Command::ClearNavOverlayStack);
     }
 
     /// Returns true if the current overlay is a navigation overlay (or None).
@@ -1598,6 +1595,12 @@ impl Client {
                 matches!(
                     sm,
                     SubMenu::CreatePlaylistInput { .. } | SubMenu::RenamePlaylistInput { .. }
+                ) || matches!(
+                    sm,
+                    SubMenu::PlaylistPicker {
+                        filter_typing: true,
+                        ..
+                    }
                 )
             });
 
@@ -3132,6 +3135,8 @@ impl Client {
                     playlists,
                     selected,
                     loading,
+                    filter_input,
+                    filter_typing,
                 } => {
                     if *loading {
                         if key.code == KeyCode::Esc {
@@ -3139,11 +3144,49 @@ impl Client {
                         }
                         return KeyAction::Continue;
                     }
-                    // Index 0 = "+ Create new playlist" entry; 1..=N = existing playlists.
-                    let total = playlists.len() + 1;
+
+                    // Playlists matching the current fuzzy filter (indices into `playlists`).
+                    let filtered: Vec<usize> = if filter_input.is_empty() {
+                        (0..playlists.len()).collect()
+                    } else {
+                        let query = filter_input.to_lowercase();
+                        playlists
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, pl)| fuzzy_match(&query, &pl.title.to_lowercase()))
+                            .map(|(i, _)| i)
+                            .collect()
+                    };
+                    // Index 0 = "+ Create new playlist" entry; 1..=N = filtered playlists.
+                    let total = filtered.len() + 1;
+
+                    if *filter_typing {
+                        match key.code {
+                            KeyCode::Esc | KeyCode::Enter => {
+                                *filter_typing = false;
+                                return KeyAction::Continue;
+                            }
+                            KeyCode::Char(c) => {
+                                filter_input.push(c);
+                                *selected = (*selected).min(total.saturating_sub(1));
+                                return KeyAction::Continue;
+                            }
+                            KeyCode::Backspace => {
+                                filter_input.pop();
+                                *selected = (*selected).min(total.saturating_sub(1));
+                                return KeyAction::Continue;
+                            }
+                            _ => return KeyAction::Continue,
+                        }
+                    }
+
                     match key.code {
                         KeyCode::Esc => {
                             popup.sub_menu = None;
+                            return KeyAction::Continue;
+                        }
+                        KeyCode::Char('/') => {
+                            *filter_typing = true;
                             return KeyAction::Continue;
                         }
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -3151,7 +3194,7 @@ impl Client {
                             return KeyAction::Continue;
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
-                            *selected = (*selected + 1).min(total - 1);
+                            *selected = (*selected + 1).min(total.saturating_sub(1));
                             return KeyAction::Continue;
                         }
                         KeyCode::Enter => {
@@ -3162,14 +3205,16 @@ impl Client {
                                 });
                                 return KeyAction::Continue;
                             }
-                            if let Some(pl) = playlists.get(*selected - 1) {
-                                if let Some(ref track_id) = track_id_for_playlist {
-                                    let cmd = Command::AddToPlaylist {
-                                        playlist_id: pl.playlist_id.clone(),
-                                        track_id: track_id.clone(),
-                                    };
-                                    self.view.popup = None;
-                                    return KeyAction::SendCommand(cmd);
+                            if let Some(&idx) = filtered.get(*selected - 1) {
+                                if let Some(pl) = playlists.get(idx) {
+                                    if let Some(ref track_id) = track_id_for_playlist {
+                                        let cmd = Command::AddToPlaylist {
+                                            playlist_id: pl.playlist_id.clone(),
+                                            track_id: track_id.clone(),
+                                        };
+                                        self.view.popup = None;
+                                        return KeyAction::SendCommand(cmd);
+                                    }
                                 }
                             }
                             return KeyAction::Continue;
@@ -3192,6 +3237,8 @@ impl Client {
                                 playlists,
                                 selected: 0,
                                 loading: false,
+                                filter_input: String::new(),
+                                filter_typing: false,
                             });
                         }
                         return KeyAction::Continue;
@@ -3403,6 +3450,8 @@ impl Client {
                             playlists: Vec::new(),
                             selected: 0,
                             loading: true,
+                            filter_input: String::new(),
+                            filter_typing: false,
                         });
                     }
                     KeyAction::SendCommand(Command::RequestPlaylists)
@@ -3414,6 +3463,8 @@ impl Client {
                             playlists,
                             selected: 0,
                             loading: false,
+                            filter_input: String::new(),
+                            filter_typing: false,
                         });
                     }
                     KeyAction::Continue

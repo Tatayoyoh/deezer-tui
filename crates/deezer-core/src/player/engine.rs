@@ -16,7 +16,10 @@ pub struct PlayerEngine {
 }
 
 impl PlayerEngine {
-    pub fn new(_master_key: [u8; 16]) -> Result<Self, DeezerError> {
+    /// Builds the engine on top of an existing shared state handle, so callers that
+    /// already handed out `Arc` clones (e.g. MPRIS) keep seeing live updates instead
+    /// of a snapshot frozen before the engine existed.
+    pub fn new(_master_key: [u8; 16], state: Arc<Mutex<PlayerState>>) -> Result<Self, DeezerError> {
         let (stream, stream_handle) =
             OutputStream::try_default().map_err(|e| DeezerError::Playback(e.to_string()))?;
 
@@ -24,7 +27,7 @@ impl PlayerEngine {
             Sink::try_new(&stream_handle).map_err(|e| DeezerError::Playback(e.to_string()))?;
 
         Ok(Self {
-            state: Arc::new(Mutex::new(PlayerState::default())),
+            state,
             _stream: stream,
             stream_handle,
             sink,

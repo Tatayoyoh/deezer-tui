@@ -1654,16 +1654,6 @@ fn parse_chart_album(v: &serde_json::Value) -> Option<super::models::AlbumData> 
     })
 }
 
-fn parse_chart_artist(v: &serde_json::Value) -> Option<super::models::ArtistData> {
-    let id = v.get("id")?.as_u64()?;
-    let name = v.get("name").and_then(|x| x.as_str()).unwrap_or("");
-    Some(super::models::ArtistData {
-        artist_id: id.to_string(),
-        name: name.to_string(),
-        nb_fan: 0,
-    })
-}
-
 fn parse_chart_playlist(v: &serde_json::Value) -> Option<super::models::PlaylistData> {
     let id = v.get("id")?.as_u64()?;
     let title = v.get("title").and_then(|x| x.as_str()).unwrap_or("");

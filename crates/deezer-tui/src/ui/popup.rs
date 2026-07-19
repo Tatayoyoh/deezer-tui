@@ -4,7 +4,7 @@ use ratatui::widgets::{
     ScrollbarOrientation, ScrollbarState, Table, TableState,
 };
 
-use crate::client::{Overlay, PopupMenu, SubMenu, ViewState};
+use crate::client::{fuzzy_match, Overlay, PopupMenu, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
 
@@ -129,9 +129,19 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             playlists,
             selected,
             loading,
+            filter_input,
+            filter_typing,
         }) => {
             let picker_title = popup.track().map(|t| t.title.as_str()).unwrap_or("");
-            draw_playlist_picker(frame, playlists, *selected, *loading, picker_title);
+            draw_playlist_picker(
+                frame,
+                playlists,
+                *selected,
+                *loading,
+                filter_input,
+                *filter_typing,
+                picker_title,
+            );
         }
         Some(SubMenu::TrackInfo) => {
             draw_track_info(frame, popup);
@@ -234,15 +244,28 @@ fn draw_playlist_picker(
     playlists: &[deezer_core::api::models::PlaylistData],
     selected: usize,
     loading: bool,
+    filter_input: &str,
+    filter_typing: bool,
     track_title: &str,
 ) {
     let area = frame.area();
     let max_height = area.height.saturating_sub(4).max(10);
+    let filtered: Vec<&deezer_core::api::models::PlaylistData> = if filter_input.is_empty() {
+        playlists.iter().collect()
+    } else {
+        let query = filter_input.to_lowercase();
+        playlists
+            .iter()
+            .filter(|pl| fuzzy_match(&query, &pl.title.to_lowercase()))
+            .collect()
+    };
+    // Height is based on the unfiltered count so the modal doesn't resize as the
+    // user types — only the row list inside it shrinks/grows with the filter.
     let total_rows = (playlists.len() as u16) + 1; // +1 for "create" entry
     let height = if loading {
         5
     } else {
-        (total_rows + 4).min(max_height)
+        (total_rows + 7).min(max_height) // +4 for borders/margins, +3 for filter box
     };
     let width = 70u16.min(area.width.saturating_sub(4));
     let popup_area = centered_rect_abs(width, height, area);
@@ -267,8 +290,15 @@ fn draw_playlist_picker(
         return;
     }
 
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(3), Constraint::Min(3)])
+        .split(inner);
+
+    draw_playlist_filter_input(frame, filter_input, filter_typing, chunks[0]);
+
     let s = t();
-    let mut rows: Vec<Row> = Vec::with_capacity(playlists.len() + 1);
+    let mut rows: Vec<Row> = Vec::with_capacity(filtered.len() + 1);
     // First row: "+ Create new playlist..." entry.
     rows.push(Row::new(vec![
         Cell::from(Span::styled(
@@ -279,7 +309,7 @@ fn draw_playlist_picker(
         )),
         Cell::from(Span::raw("")),
     ]));
-    rows.extend(playlists.iter().map(|pl| {
+    rows.extend(filtered.iter().map(|pl| {
         let kind = if pl.collaborative {
             s.playlist_kind_collaborative
         } else {
@@ -300,15 +330,47 @@ fn draw_playlist_picker(
         .highlight_symbol(" > ");
 
     let mut table_state = TableState::default().with_selected(Some(selected));
-    frame.render_stateful_widget(table, inner, &mut table_state);
+    frame.render_stateful_widget(table, chunks[1], &mut table_state);
 
-    let total = playlists.len() + 1;
-    if total as u16 > inner.height {
-        let max_scroll = total.saturating_sub(inner.height as usize);
+    let total = filtered.len() + 1;
+    if total as u16 > chunks[1].height {
+        let max_scroll = total.saturating_sub(chunks[1].height as usize);
         let mut scrollbar_state = ScrollbarState::new(max_scroll).position(selected);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Theme::primary()));
-        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, chunks[1], &mut scrollbar_state);
+    }
+}
+
+fn draw_playlist_filter_input(frame: &mut Frame, filter_input: &str, is_typing: bool, area: Rect) {
+    let s = t();
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if is_typing {
+            Theme::border_focused()
+        } else {
+            Theme::border()
+        })
+        .title(if is_typing {
+            s.playlist_filter_typing
+        } else {
+            s.playlist_filter_normal
+        })
+        .title_style(Theme::title());
+
+    let input_text = if filter_input.is_empty() && !is_typing {
+        Span::styled(s.playlist_filter_placeholder, Theme::dim())
+    } else {
+        Span::styled(filter_input, Theme::text())
+    };
+
+    let input = Paragraph::new(input_text).block(input_block);
+    frame.render_widget(input, area);
+
+    if is_typing {
+        let cursor_x = area.x + 1 + filter_input.chars().count() as u16;
+        let cursor_y = area.y + 1;
+        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 }
 

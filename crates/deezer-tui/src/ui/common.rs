@@ -91,8 +91,3 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
     };
     frame.render_widget(deezer_logo(), logo_area);
 }
-
-/// Centered text helper.
-pub fn centered_text<'a>(text: &'a str, style: Style) -> Paragraph<'a> {
-    Paragraph::new(Span::styled(text, style)).alignment(Alignment::Center)
-}
