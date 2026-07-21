@@ -6,17 +6,19 @@
 [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](#)
 
-<p align="center">
+<div align="center">
     <img src="assets/logo.png" alt="Deezer TUI logo"/>
-</p>
+    <br>
+    <h3>Bored to use 300M of RAM to play music ?</h3>
+    <div align="center">
+        for developers <3<br>
+        easy account login<br>
+        low memory footprint<br>
+        music playing in the background<br>
+        compliant with Deezer features<br>
+    </div>
+</div>
 
-Bored to use 300M of RAM to play music ?
-
-* for developers <3
-* easy account login
-* low memory footprint
-* music playing in the background
-* compliant with Deezer features
 
 ## Install
 
