@@ -11,11 +11,11 @@
     <br>
     <h3>Bored to use 300M of RAM to play music ?</h3>
     <div align="center">
-        for developers <3<br>
-        easy account login<br>
-        low memory footprint<br>
-        music playing in the background<br>
-        compliant with Deezer features<br>
+        For developers ❤️<br>
+        Easy account login<br>
+        Low memory footprint<br>
+        Play music in the background<br>
+        Compliant with Deezer features<br>
     </div>
 </div>
 
