@@ -6,7 +6,9 @@
 [![Built With Ratatui](https://ratatui.rs/built-with-ratatui/badge.svg)](https://ratatui.rs/)
 [![Claude](https://img.shields.io/badge/Claude-D97757?logo=claude&logoColor=fff)](#)
 
-![text](assets/logo.png)
+<p align="center">
+    <img src="assets/logo.png" alt="Deezer TUI logo"/>
+</p>
 
 Bored to use 300M of RAM to play music ?
 
