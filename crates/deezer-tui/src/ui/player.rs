@@ -3,7 +3,7 @@ use ratatui::widgets::{Block, Borders, Gauge, Paragraph};
 
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
-use crate::client::ViewState;
+use crate::client::{ClickTarget, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
 
@@ -67,6 +67,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([Constraint::Min(1), Constraint::Length(quality_width)])
         .split(chunks[0]);
     frame.render_widget(Paragraph::new(track_left), track_chunks[0]);
+    view.record_click(track_chunks[0], ClickTarget::CurrentTrack);
     frame.render_widget(
         Paragraph::new(track_right).alignment(Alignment::Right),
         track_chunks[1],
@@ -94,6 +95,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .ratio(ratio)
         .label(time_label);
     frame.render_widget(progress, progress_chunks[0]);
+    view.record_click(progress_chunks[0], ClickTarget::CurrentTrack);
 
     let vol_line = Line::from(vec![
         Span::raw(" "),
@@ -167,4 +169,5 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Paragraph::new(controls_right).alignment(Alignment::Right),
         ctrl_chunks[1],
     );
+    view.record_click(ctrl_chunks[1], ClickTarget::FlowChip);
 }

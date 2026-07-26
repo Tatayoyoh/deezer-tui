@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::ViewState;
+use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
 use crate::ui::common::shortcut_line;
@@ -44,6 +44,7 @@ fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let input = Paragraph::new(input_text).block(input_block);
     frame.render_widget(input, area);
+    view.record_click(area, ClickTarget::FilterInput);
 
     if is_typing {
         let cursor_x = area.x + 1 + view.genres_filter_input.len() as u16;
@@ -102,4 +103,11 @@ fn draw_genres_table(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let mut table_state = TableState::default().with_selected(Some(view.genres_selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        2, // title + header
+        table_state.offset(),
+        filtered.len(),
+        RowsKind::Tab,
+    );
 }

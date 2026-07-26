@@ -2,7 +2,97 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use crate::client::{ClickTarget, ViewState};
 use crate::theme::Theme;
+
+/// Blank columns drawn between two category labels.
+const CATEGORY_GAP: u16 = 2;
+
+/// Draw the centered row of category chips shared by the tab pages, and record
+/// each label as clickable.
+pub fn draw_category_menu(
+    frame: &mut Frame,
+    view: &ViewState,
+    area: Rect,
+    labels: &[&str],
+    current: usize,
+) {
+    draw_chip_menu(frame, view, area, labels, current, ClickTarget::Category);
+}
+
+/// Draw a centered row of chips, recording each one as clickable. `target` maps
+/// a chip's index to the click it stands for.
+pub fn draw_chip_menu(
+    frame: &mut Frame,
+    view: &ViewState,
+    area: Rect,
+    labels: &[&str],
+    current: usize,
+    target: fn(usize) -> ClickTarget,
+) {
+    let active = Style::default()
+        .fg(Theme::primary())
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
+
+    let mut spans = Vec::with_capacity(labels.len() * 2);
+    for (i, label) in labels.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(
+                " ".repeat(CATEGORY_GAP as usize),
+                Theme::dim(),
+            ));
+        }
+        spans.push(Span::styled(
+            *label,
+            if i == current { active } else { Theme::dim() },
+        ));
+    }
+
+    let line = Line::from(spans);
+    let total = line.width() as u16;
+    frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+
+    // Mirror the centering ratatui applies, so the recorded rects line up with
+    // what was drawn. A menu too wide for the area is truncated, not centered.
+    if total > area.width {
+        return;
+    }
+    let mut x = area.x + (area.width - total) / 2;
+    for (i, label) in labels.iter().enumerate() {
+        let width = Span::raw(*label).width() as u16;
+        let rect = Rect {
+            x,
+            y: area.y,
+            width,
+            height: 1,
+        };
+        view.record_click(rect, target(i));
+        x += width + CATEGORY_GAP;
+    }
+}
+
+/// Clickable rects of a `Tabs` widget's titles, in render order: ratatui pads
+/// every title with one space on each side and separates them by a one-cell
+/// divider.
+pub fn tab_rects(area: Rect, titles: &[&str]) -> Vec<Rect> {
+    let mut rects = Vec::with_capacity(titles.len());
+    let mut x = area.x;
+    for title in titles {
+        if x >= area.right() {
+            break;
+        }
+        // A tab clipped by the area's edge stays clickable over what shows of it.
+        let width = (Span::raw(*title).width() as u16 + 2).min(area.right() - x);
+        rects.push(Rect {
+            x,
+            y: area.y,
+            width,
+            height: 1,
+        });
+        x += width + 1; // divider
+    }
+    rects
+}
 
 /// Render a `[key] label` (or bare `key label`) hint string with the key on a
 /// "chip" (brackets stripped) and the label dimmed. Keeps inline shortcut hints

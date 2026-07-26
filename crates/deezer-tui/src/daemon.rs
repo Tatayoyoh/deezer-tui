@@ -129,6 +129,14 @@ enum AsyncResult {
         album: AlbumDetail,
     },
     OfflineAlbumSaveError(String),
+    OfflinePlaylistSaved {
+        playlist: PlaylistDetail,
+    },
+    OfflinePlaylistSaveError(String),
+    /// Progress of an ongoing offline playlist download, 0-100.
+    OfflineDownloadProgress {
+        percent: u8,
+    },
 }
 
 pub struct Daemon {
@@ -568,6 +576,112 @@ impl Daemon {
         Ok(())
     }
 
+    /// Selection cursor of the list currently shown by the active tab.
+    fn selection_mut(&mut self) -> &mut usize {
+        match self.active_tab {
+            ActiveTab::Search => &mut self.search_selected,
+            ActiveTab::Favorites => &mut self.favorites_selected,
+            ActiveTab::Explore => match self.explore_category {
+                ExploreCategory::Moods => &mut self.moods_selected,
+                ExploreCategory::Categories => &mut self.genres_selected,
+                ExploreCategory::Radios => &mut self.radios_selected,
+            },
+            ActiveTab::Downloads => &mut self.offline_selected,
+        }
+    }
+
+    /// Item count of the list currently shown by the active tab.
+    fn current_list_len(&self) -> usize {
+        match self.active_tab {
+            ActiveTab::Search => self.search_display.len(),
+            ActiveTab::Favorites => self.favorites_display.len(),
+            ActiveTab::Explore => match self.explore_category {
+                ExploreCategory::Moods => self.moods.len(),
+                ExploreCategory::Categories => self.genres.len(),
+                ExploreCategory::Radios => self.radios.len(),
+            },
+            ActiveTab::Downloads => match self.offline_category {
+                OfflineCategory::Tracks => self.offline_index.tracks.len(),
+                OfflineCategory::Albums => self.offline_index.albums.len(),
+                OfflineCategory::Playlists => self.offline_index.playlists.len(),
+            },
+        }
+    }
+
+    /// Position of the active tab's category within its `ALL` list, and that
+    /// list's length.
+    fn category_position(&self) -> (usize, usize) {
+        fn pos<T: PartialEq>(all: &[T], current: &T) -> (usize, usize) {
+            (
+                all.iter().position(|c| c == current).unwrap_or(0),
+                all.len(),
+            )
+        }
+        match self.active_tab {
+            ActiveTab::Search => pos(&SearchCategory::ALL, &self.search_category),
+            ActiveTab::Favorites => pos(&FavoritesCategory::ALL, &self.favorites_category),
+            ActiveTab::Explore => pos(&ExploreCategory::ALL, &self.explore_category),
+            ActiveTab::Downloads => pos(&OfflineCategory::ALL, &self.offline_category),
+        }
+    }
+
+    /// Switch the active tab's category to `index` in its `ALL` list, resetting
+    /// the selection and kicking off whatever load the new category needs.
+    /// Out-of-range indices and no-op switches are ignored.
+    fn set_category_index(&mut self, index: usize) {
+        match self.active_tab {
+            ActiveTab::Search => {
+                let Some(&cat) = SearchCategory::ALL.get(index) else {
+                    return;
+                };
+                if cat == self.search_category {
+                    return;
+                }
+                self.search_category = cat;
+                self.search_selected = 0;
+                if !self.last_search_query.is_empty() {
+                    self.start_search(self.last_search_query.clone());
+                }
+            }
+            ActiveTab::Favorites => {
+                let Some(&cat) = FavoritesCategory::ALL.get(index) else {
+                    return;
+                };
+                if cat == self.favorites_category {
+                    return;
+                }
+                self.favorites_category = cat;
+                self.favorites_selected = 0;
+                self.start_load_favorites_category();
+            }
+            ActiveTab::Explore => {
+                let Some(&cat) = ExploreCategory::ALL.get(index) else {
+                    return;
+                };
+                if cat == self.explore_category {
+                    return;
+                }
+                self.explore_category = cat;
+                if cat == ExploreCategory::Categories
+                    && self.genres.is_empty()
+                    && !self.genres_loading
+                {
+                    self.start_load_genres();
+                }
+            }
+            ActiveTab::Downloads => {
+                let Some(&cat) = OfflineCategory::ALL.get(index) else {
+                    return;
+                };
+                if cat == self.offline_category {
+                    return;
+                }
+                self.offline_category = cat;
+                self.offline_selected = 0;
+            }
+        }
+    }
+
     fn handle_command(&mut self, cmd: Command) {
         match cmd {
             Command::GetSnapshot => {} // Snapshot is sent after every command anyway
@@ -702,71 +816,17 @@ impl Daemon {
             Command::LoadFavorites => {
                 self.start_load_favorites();
             }
-            Command::SelectUp => match self.active_tab {
-                ActiveTab::Search => {
-                    self.search_selected = self.search_selected.saturating_sub(1);
+            Command::SelectUp => {
+                let sel = self.selection_mut();
+                *sel = sel.saturating_sub(1);
+            }
+            Command::SelectDown => {
+                let len = self.current_list_len();
+                let sel = self.selection_mut();
+                if len > 0 {
+                    *sel = (*sel + 1).min(len - 1);
                 }
-                ActiveTab::Favorites => {
-                    self.favorites_selected = self.favorites_selected.saturating_sub(1);
-                }
-                ActiveTab::Explore => match self.explore_category {
-                    ExploreCategory::Moods => {
-                        self.moods_selected = self.moods_selected.saturating_sub(1);
-                    }
-                    ExploreCategory::Categories => {
-                        self.genres_selected = self.genres_selected.saturating_sub(1);
-                    }
-                    ExploreCategory::Radios => {
-                        self.radios_selected = self.radios_selected.saturating_sub(1);
-                    }
-                },
-                ActiveTab::Downloads => {
-                    self.offline_selected = self.offline_selected.saturating_sub(1);
-                }
-            },
-            Command::SelectDown => match self.active_tab {
-                ActiveTab::Search => {
-                    if !self.search_display.is_empty() {
-                        self.search_selected =
-                            (self.search_selected + 1).min(self.search_display.len() - 1);
-                    }
-                }
-                ActiveTab::Favorites => {
-                    if !self.favorites_display.is_empty() {
-                        self.favorites_selected =
-                            (self.favorites_selected + 1).min(self.favorites_display.len() - 1);
-                    }
-                }
-                ActiveTab::Explore => match self.explore_category {
-                    ExploreCategory::Moods => {
-                        if !self.moods.is_empty() {
-                            self.moods_selected =
-                                (self.moods_selected + 1).min(self.moods.len() - 1);
-                        }
-                    }
-                    ExploreCategory::Categories => {
-                        if !self.genres.is_empty() {
-                            self.genres_selected =
-                                (self.genres_selected + 1).min(self.genres.len() - 1);
-                        }
-                    }
-                    ExploreCategory::Radios => {
-                        if !self.radios.is_empty() {
-                            self.radios_selected =
-                                (self.radios_selected + 1).min(self.radios.len() - 1);
-                        }
-                    }
-                },
-                ActiveTab::Downloads => {
-                    let len = match self.offline_category {
-                        OfflineCategory::Tracks => self.offline_index.tracks.len(),
-                        OfflineCategory::Albums => self.offline_index.albums.len(),
-                    };
-                    if len > 0 {
-                        self.offline_selected = (self.offline_selected + 1).min(len - 1);
-                    }
-                }
-            },
+            }
             Command::NextTab => {
                 self.active_tab = match self.active_tab {
                     ActiveTab::Search => ActiveTab::Favorites,
@@ -783,60 +843,23 @@ impl Daemon {
                     ActiveTab::Downloads => ActiveTab::Explore,
                 };
             }
-            Command::NextCategory => match self.active_tab {
-                ActiveTab::Search => {
-                    self.search_category = self.search_category.next();
-                    self.search_selected = 0;
-                    if !self.last_search_query.is_empty() {
-                        self.start_search(self.last_search_query.clone());
-                    }
+            Command::NextCategory => {
+                let (idx, count) = self.category_position();
+                self.set_category_index((idx + 1) % count);
+            }
+            Command::PrevCategory => {
+                let (idx, count) = self.category_position();
+                self.set_category_index((idx + count - 1) % count);
+            }
+            Command::SetCategory { index } => self.set_category_index(index),
+            Command::SetTab { tab } => self.active_tab = tab,
+            Command::SelectIndex { index } => {
+                let len = self.current_list_len();
+                let sel = self.selection_mut();
+                if len > 0 {
+                    *sel = index.min(len - 1);
                 }
-                ActiveTab::Favorites => {
-                    self.favorites_category = self.favorites_category.next();
-                    self.favorites_selected = 0;
-                    self.start_load_favorites_category();
-                }
-                ActiveTab::Explore => {
-                    self.explore_category = self.explore_category.next();
-                    if self.explore_category == ExploreCategory::Categories
-                        && self.genres.is_empty()
-                        && !self.genres_loading
-                    {
-                        self.start_load_genres();
-                    }
-                }
-                ActiveTab::Downloads => {
-                    self.offline_category = self.offline_category.next();
-                    self.offline_selected = 0;
-                }
-            },
-            Command::PrevCategory => match self.active_tab {
-                ActiveTab::Search => {
-                    self.search_category = self.search_category.prev();
-                    self.search_selected = 0;
-                    if !self.last_search_query.is_empty() {
-                        self.start_search(self.last_search_query.clone());
-                    }
-                }
-                ActiveTab::Favorites => {
-                    self.favorites_category = self.favorites_category.prev();
-                    self.favorites_selected = 0;
-                    self.start_load_favorites_category();
-                }
-                ActiveTab::Explore => {
-                    self.explore_category = self.explore_category.prev();
-                    if self.explore_category == ExploreCategory::Categories
-                        && self.genres.is_empty()
-                        && !self.genres_loading
-                    {
-                        self.start_load_genres();
-                    }
-                }
-                ActiveTab::Downloads => {
-                    self.offline_category = self.offline_category.prev();
-                    self.offline_selected = 0;
-                }
-            },
+            }
             Command::ShuffleFavorites => {
                 if !self.favorites.is_empty() {
                     // Set queue from favorites with shuffle enabled
@@ -1101,6 +1124,9 @@ impl Daemon {
             Command::DownloadAlbumOffline { album_id } => {
                 self.start_download_album_offline(album_id);
             }
+            Command::DownloadPlaylistOffline { playlist_id } => {
+                self.start_download_playlist_offline(playlist_id);
+            }
             Command::RemoveOfflineTrack { track_id } => {
                 self.offline_index.remove_track(&track_id);
                 let _ = self.offline_index.save();
@@ -1108,6 +1134,11 @@ impl Daemon {
             }
             Command::RemoveOfflineAlbum { album_id } => {
                 self.offline_index.remove_album(&album_id);
+                let _ = self.offline_index.save();
+                self.status_msg = Some(t().status_removed_offline.into());
+            }
+            Command::RemoveOfflinePlaylist { playlist_id } => {
+                self.offline_index.remove_playlist(&playlist_id);
                 let _ = self.offline_index.save();
                 self.status_msg = Some(t().status_removed_offline.into());
             }
@@ -1139,6 +1170,28 @@ impl Daemon {
                     .find(|a| a.album_id == album_id)
                 {
                     let tracks = album.tracks.clone();
+                    if let Some(track) = tracks.get(track_index).cloned() {
+                        self.flow_active = false;
+                        self.active_mood = None;
+                        if let Ok(mut state) = self.player_state.lock() {
+                            state.queue = tracks;
+                            state.queue_index = track_index;
+                        }
+                        self.start_play_offline_track(track);
+                    }
+                }
+            }
+            Command::PlayOfflinePlaylist {
+                playlist_id,
+                track_index,
+            } => {
+                if let Some(playlist) = self
+                    .offline_index
+                    .playlists
+                    .iter()
+                    .find(|p| p.playlist_id == playlist_id)
+                {
+                    let tracks = playlist.tracks.clone();
                     if let Some(track) = tracks.get(track_index).cloned() {
                         self.flow_active = false;
                         self.active_mood = None;
@@ -1198,20 +1251,29 @@ impl Daemon {
             favorite_album_ids: self.favorite_album_ids.clone(),
             offline_category: self.offline_category,
             offline_tracks: {
-                let album_track_ids: std::collections::HashSet<&str> = self
+                // Tracks listed on their own: those not covered by a downloaded
+                // album or playlist.
+                let grouped_track_ids: std::collections::HashSet<&str> = self
                     .offline_index
                     .albums
                     .iter()
                     .flat_map(|a| a.tracks.iter().map(|t| t.track_id.as_str()))
+                    .chain(
+                        self.offline_index
+                            .playlists
+                            .iter()
+                            .flat_map(|p| p.tracks.iter().map(|t| t.track_id.as_str())),
+                    )
                     .collect();
                 self.offline_index
                     .tracks
                     .iter()
-                    .filter(|t| !album_track_ids.contains(t.track.track_id.as_str()))
+                    .filter(|t| !grouped_track_ids.contains(t.track.track_id.as_str()))
                     .cloned()
                     .collect()
             },
             offline_albums: self.offline_index.albums.clone(),
+            offline_playlists: self.offline_index.playlists.clone(),
             offline_selected: self.offline_selected,
             offline_loading: self.offline_loading,
             offline_track_ids: self.offline_index.track_ids(),
@@ -2987,6 +3049,26 @@ impl Daemon {
                     self.offline_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_offline_download_error, &err));
                 }
+                AsyncResult::OfflinePlaylistSaved { playlist } => {
+                    self.offline_loading = false;
+                    // Add individual tracks to the index
+                    for track in &playlist.tracks {
+                        if !self.offline_index.has_track(&track.track_id) {
+                            self.offline_index
+                                .add_track(track.clone(), self.config.quality);
+                        }
+                    }
+                    self.offline_index.add_playlist(playlist);
+                    let _ = self.offline_index.save();
+                    self.status_msg = Some(t().status_playlist_saved_offline.into());
+                }
+                AsyncResult::OfflinePlaylistSaveError(err) => {
+                    self.offline_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_offline_download_error, &err));
+                }
+                AsyncResult::OfflineDownloadProgress { percent } => {
+                    self.status_msg = Some(t().fmt_download_progress(percent));
+                }
                 AsyncResult::TrackReady {
                     audio_data,
                     track,
@@ -3205,6 +3287,79 @@ impl Daemon {
             }
 
             let _ = tx.send(AsyncResult::OfflineAlbumSaved { album: detail });
+        });
+    }
+
+    fn start_download_playlist_offline(&mut self, playlist_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+
+        let Some(master_key) = self.master_key else {
+            self.status_msg = Some(t().status_player_not_ready.into());
+            return;
+        };
+
+        self.offline_loading = true;
+        self.status_msg = Some(t().fmt_download_progress(0));
+
+        let client = Arc::clone(&self.client);
+        let cdn_http = self.cdn_http.clone();
+        let tx = self.async_tx.clone();
+        let quality = self.config.quality;
+
+        tokio::spawn(async move {
+            // First fetch playlist detail (tracks list)
+            let detail = {
+                let client = client.lock().await;
+                match client.get_playlist_detail(&playlist_id).await {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::OfflinePlaylistSaveError(e.to_string()));
+                        return;
+                    }
+                }
+            };
+
+            // Download each track, reporting progress as a percentage. Tracks
+            // that fail are skipped but still count towards progress.
+            let total = detail.tracks.len();
+            for (i, track) in detail.tracks.iter().enumerate() {
+                'track: {
+                    let track = {
+                        let client = client.lock().await;
+                        match client.ensure_track_token(track).await {
+                            Ok(t) => t,
+                            Err(_) => break 'track,
+                        }
+                    };
+
+                    let (url, _actual_quality) = {
+                        let client = client.lock().await;
+                        match client.get_stream_url(&track, quality).await {
+                            Ok(r) => r,
+                            Err(_) => break 'track,
+                        }
+                    };
+
+                    if let Ok(audio_data) = deezer_core::player::stream::download_and_decrypt(
+                        &url,
+                        &track.track_id,
+                        &master_key,
+                        &cdn_http,
+                    )
+                    .await
+                    {
+                        let _ = OfflineIndex::save_track_audio(&track.track_id, &audio_data);
+                    }
+                }
+
+                let percent = ((i + 1) * 100 / total.max(1)) as u8;
+                let _ = tx.send(AsyncResult::OfflineDownloadProgress { percent });
+            }
+
+            let _ = tx.send(AsyncResult::OfflinePlaylistSaved { playlist: detail });
         });
     }
 

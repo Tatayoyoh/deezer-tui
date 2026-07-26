@@ -1,10 +1,11 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::ViewState;
+use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::protocol::FavoritesCategory;
 use crate::theme::Theme;
+use crate::ui::common;
 use crate::ui::common::shortcut_line;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
@@ -19,10 +20,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .split(area);
 
     // Category menu
-    draw_category_menu(frame, view.favorites_category, chunks[0]);
+    draw_category_menu(frame, view, chunks[0]);
 
     // Shuffle button
-    draw_shuffle_button(frame, chunks[1]);
+    draw_shuffle_button(frame, view, chunks[1]);
 
     // Filter input
     draw_filter_input(frame, view, chunks[2]);
@@ -31,48 +32,43 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     draw_favorites_table(frame, view, chunks[3]);
 }
 
-fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect) {
+fn draw_category_menu(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
-    let spans: Vec<Span> = FavoritesCategory::ALL
+    let labels: Vec<&str> = FavoritesCategory::ALL
         .iter()
-        .enumerate()
-        .flat_map(|(i, cat)| {
-            let mut parts = Vec::new();
-            if i > 0 {
-                parts.push(Span::styled("  ", Theme::dim()));
-            }
-            if *cat == current {
-                parts.push(Span::styled(
-                    s.favorites_category_label(*cat),
-                    Style::default()
-                        .fg(Theme::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ));
-            } else {
-                parts.push(Span::styled(s.favorites_category_label(*cat), Theme::dim()));
-            }
-            parts
-        })
+        .map(|cat| s.favorites_category_label(*cat))
         .collect();
-
-    let line = Line::from(spans);
-    let menu = Paragraph::new(line).alignment(Alignment::Center);
-    frame.render_widget(menu, area);
+    let current = FavoritesCategory::ALL
+        .iter()
+        .position(|cat| *cat == view.favorites_category)
+        .unwrap_or(0);
+    common::draw_category_menu(frame, view, area, &labels, current);
 }
 
-fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
-    let button = Paragraph::new(Line::from(vec![
+fn draw_shuffle_button(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let label = t().shuffle_favorites;
+    let line = Line::from(vec![
         Span::raw("  "),
         Span::styled("g", Theme::shortcut_key()),
         Span::raw(" "),
         Span::styled(
-            t().shuffle_favorites,
+            label,
             Style::default()
                 .fg(Theme::text_color())
                 .add_modifier(Modifier::BOLD),
         ),
-    ]));
-    frame.render_widget(button, area);
+    ]);
+    let width = line.width() as u16;
+    frame.render_widget(Paragraph::new(line), area);
+    view.record_click(
+        Rect {
+            x: area.x + 2,
+            y: area.y,
+            width: width.saturating_sub(2).min(area.width),
+            height: 1,
+        },
+        ClickTarget::ShuffleFavorites,
+    );
 }
 
 fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
@@ -100,6 +96,7 @@ fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let input = Paragraph::new(input_text).block(input_block);
     frame.render_widget(input, area);
+    view.record_click(area, ClickTarget::FilterInput);
 
     if is_typing {
         let cursor_x = area.x + 1 + view.favorites_filter_input.len() as u16;
@@ -191,4 +188,11 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        2, // title + header
+        table_state.offset(),
+        items.len(),
+        RowsKind::Tab,
+    );
 }

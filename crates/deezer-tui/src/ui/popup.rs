@@ -4,7 +4,7 @@ use ratatui::widgets::{
     ScrollbarOrientation, ScrollbarState, Table, TableState,
 };
 
-use crate::client::{fuzzy_match, Overlay, PopupMenu, SubMenu, ViewState};
+use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
 use crate::ui::common::{shortcut_hint, shortcut_line};
@@ -48,31 +48,34 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
     }
 
     // Clamp help scroll in-place so it doesn't exceed visible area
-    if let Some(Overlay::Help { scroll }) = &mut view.overlay {
-        draw_help_overlay(frame, scroll);
+    if let Some(Overlay::Help { scroll }) = &view.overlay {
+        let clamped = draw_help_overlay(frame, view, *scroll);
+        if let Some(Overlay::Help { scroll }) = &mut view.overlay {
+            *scroll = clamped;
+        }
         return;
     }
 
     // Overlays take priority over track popups
     match &view.overlay {
         Some(Overlay::Settings { selected }) => {
-            draw_settings_overlay(frame, *selected);
+            draw_settings_overlay(frame, view, *selected);
             return;
         }
         Some(Overlay::ThemePicker { selected }) => {
-            draw_theme_picker(frame, *selected);
+            draw_theme_picker(frame, view, *selected);
             return;
         }
         Some(Overlay::LanguagePicker { selected }) => {
-            draw_language_picker(frame, *selected);
+            draw_language_picker(frame, view, *selected);
             return;
         }
         Some(Overlay::QualityPicker { selected }) => {
-            draw_quality_picker(frame, *selected);
+            draw_quality_picker(frame, view, *selected);
             return;
         }
         Some(Overlay::Info) => {
-            draw_info_overlay(frame);
+            draw_info_overlay(frame, view);
             return;
         }
         Some(Overlay::UpdateAvailable {
@@ -80,7 +83,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             download_url: _,
             selected,
         }) => {
-            draw_update_available(frame, version, *selected);
+            draw_update_available(frame, view, version, *selected);
             return;
         }
         Some(Overlay::Updating {
@@ -124,6 +127,18 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_waiting_list(frame, view, sel);
             // Don't return — let the popup (context menu) render on top if open
         }
+        Some(Overlay::OfflineDetail {
+            playlist,
+            index,
+            selected,
+        }) => {
+            let (playlist, index, selected) = (*playlist, *index, *selected);
+            if view.popup.is_none() {
+                draw_backdrop(frame, protect);
+            }
+            draw_offline_detail(frame, view, playlist, index, selected);
+            // Don't return — let the popup (context menu) render on top if open
+        }
         Some(Overlay::Help { .. }) => unreachable!(),
         None => {}
     }
@@ -149,22 +164,22 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             let picker_title = popup.track().map(|t| t.title.as_str()).unwrap_or("");
             draw_playlist_picker(
                 frame,
+                view,
                 playlists,
                 *selected,
                 *loading,
-                filter_input,
-                *filter_typing,
+                (filter_input, *filter_typing),
                 picker_title,
             );
         }
         Some(SubMenu::TrackInfo) => {
-            draw_track_info(frame, popup);
+            draw_track_info(frame, view, popup);
         }
         Some(SubMenu::CreatePlaylistInput { name, cursor }) => {
-            draw_text_input_modal(frame, t().create_playlist_prompt, name, *cursor);
+            draw_text_input_modal(frame, view, t().create_playlist_prompt, name, *cursor);
         }
         Some(SubMenu::RenamePlaylistInput { name, cursor }) => {
-            draw_text_input_modal(frame, t().rename_playlist_prompt, name, *cursor);
+            draw_text_input_modal(frame, view, t().rename_playlist_prompt, name, *cursor);
         }
         Some(SubMenu::ConfirmDeletePlaylist { confirm_yes }) => {
             let (title, nb_songs) = match &popup.target {
@@ -173,15 +188,15 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
                 } => (title.as_str(), *nb_songs),
                 _ => ("", 0),
             };
-            draw_confirm_delete_playlist(frame, title, nb_songs, *confirm_yes);
+            draw_confirm_delete_playlist(frame, view, title, nb_songs, *confirm_yes);
         }
         None => {
-            draw_main_menu(frame, popup);
+            draw_main_menu(frame, view, popup);
         }
     }
 }
 
-fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
+fn draw_main_menu(frame: &mut Frame, view: &ViewState, popup: &PopupMenu) {
     let area = frame.area();
     let popup_area = centered_rect(40, popup.items.len() as u16 + 4, area);
 
@@ -217,6 +232,8 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+    view.record_modal(popup_area);
+    view.record_rows(inner, 0, 0, popup.items.len(), RowsKind::Modal);
 
     // Build list items
     let items: Vec<ListItem> = popup
@@ -255,13 +272,14 @@ fn draw_main_menu(frame: &mut Frame, popup: &PopupMenu) {
 
 fn draw_playlist_picker(
     frame: &mut Frame,
+    view: &ViewState,
     playlists: &[deezer_core::api::models::PlaylistData],
     selected: usize,
     loading: bool,
-    filter_input: &str,
-    filter_typing: bool,
+    filter: (&str, bool),
     track_title: &str,
 ) {
+    let (filter_input, filter_typing) = filter;
     let area = frame.area();
     let max_height = area.height.saturating_sub(4).max(10);
     let filtered: Vec<&deezer_core::api::models::PlaylistData> = if filter_input.is_empty() {
@@ -295,6 +313,7 @@ fn draw_playlist_picker(
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+    view.record_modal(popup_area);
 
     if loading {
         let loading_text = Paragraph::new(t().loading_playlists)
@@ -310,6 +329,7 @@ fn draw_playlist_picker(
         .split(inner);
 
     draw_playlist_filter_input(frame, filter_input, filter_typing, chunks[0]);
+    view.record_click(chunks[0], ClickTarget::PlaylistFilterInput);
 
     let s = t();
     let mut rows: Vec<Row> = Vec::with_capacity(filtered.len() + 1);
@@ -345,6 +365,13 @@ fn draw_playlist_picker(
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
+    view.record_rows(
+        chunks[1],
+        0,
+        table_state.offset(),
+        filtered.len() + 1,
+        RowsKind::Modal,
+    );
 
     let total = filtered.len() + 1;
     if total as u16 > chunks[1].height {
@@ -389,13 +416,20 @@ fn draw_playlist_filter_input(frame: &mut Frame, filter_input: &str, is_typing: 
 }
 
 /// Render a yes/no confirmation modal for deleting a non-empty playlist.
-fn draw_confirm_delete_playlist(frame: &mut Frame, title: &str, nb_songs: u64, confirm_yes: bool) {
+fn draw_confirm_delete_playlist(
+    frame: &mut Frame,
+    view: &ViewState,
+    title: &str,
+    nb_songs: u64,
+    confirm_yes: bool,
+) {
     let s = t();
     let area = frame.area();
     let width = 60u16.min(area.width.saturating_sub(4));
     let popup_area = centered_rect_abs(width, 8, area);
 
     frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -429,16 +463,43 @@ fn draw_confirm_delete_playlist(frame: &mut Frame, title: &str, nb_songs: u64, c
     } else {
         Theme::dim()
     };
+    let yes_label = format!("  [ {} ]  ", s.yes);
+    let no_label = format!("  [ {} ]  ", s.no);
+    let yes_width = Span::raw(yes_label.as_str()).width() as u16;
+    let no_width = Span::raw(no_label.as_str()).width() as u16;
     let buttons = Line::from(vec![
-        Span::styled(format!("  [ {} ]  ", s.yes), yes_style),
-        Span::styled(format!("  [ {} ]  ", s.no), no_style),
+        Span::styled(yes_label, yes_style),
+        Span::styled(no_label, no_style),
     ]);
     let para = Paragraph::new(buttons).alignment(Alignment::Center);
     frame.render_widget(para, chunks[1]);
+
+    // Mirror the centering so each button is clickable where it was drawn.
+    let total = yes_width + no_width;
+    if total <= chunks[1].width {
+        let x = chunks[1].x + (chunks[1].width - total) / 2;
+        let button = |x: u16, width: u16| Rect {
+            x,
+            y: chunks[1].y,
+            width,
+            height: 1,
+        };
+        view.record_click(button(x, yes_width), ClickTarget::ConfirmChoice(true));
+        view.record_click(
+            button(x + yes_width, no_width),
+            ClickTarget::ConfirmChoice(false),
+        );
+    }
 }
 
 /// Render a small modal with a single-line text input and a title.
-fn draw_text_input_modal(frame: &mut Frame, title: &str, value: &str, _cursor: usize) {
+fn draw_text_input_modal(
+    frame: &mut Frame,
+    view: &ViewState,
+    title: &str,
+    value: &str,
+    _cursor: usize,
+) {
     let area = frame.area();
     let width = 60u16.min(area.width.saturating_sub(4));
     let popup_area = centered_rect_abs(width, 5, area);
@@ -455,17 +516,20 @@ fn draw_text_input_modal(frame: &mut Frame, title: &str, value: &str, _cursor: u
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
+    view.record_modal(popup_area);
+
     // Rough cursor representation: append "│" at end of input.
     let display = format!(" {}│", value);
     let para = Paragraph::new(display).style(Theme::text());
     frame.render_widget(para, inner);
 }
 
-fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
+fn draw_track_info(frame: &mut Frame, view: &ViewState, popup: &PopupMenu) {
     let area = frame.area();
     let popup_area = centered_rect(50, 12, area);
 
     frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -522,7 +586,7 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
 }
 
 /// Draw the help overlay showing all keyboard shortcuts grouped by section.
-fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
+fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usize {
     let s = t();
     // (Option<key>, label) — None key = section header
     let shortcuts: Vec<(Option<&str>, &str)> = vec![
@@ -577,6 +641,7 @@ fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+    view.record_modal(popup_area);
 
     let items: Vec<ListItem> = shortcuts
         .iter()
@@ -602,24 +667,24 @@ fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
 
     let item_count = items.len();
     let max_scroll = item_count.saturating_sub(inner.height as usize);
-    if *scroll > max_scroll {
-        *scroll = max_scroll;
-    }
-    let mut state = ListState::default().with_offset(*scroll);
+    let scroll = scroll.min(max_scroll);
+    let mut state = ListState::default().with_offset(scroll);
     let list = List::new(items);
     frame.render_stateful_widget(list, inner, &mut state);
 
     // Scrollbar (only when content overflows)
     if item_count as u16 > inner.height {
-        let mut scrollbar_state = ScrollbarState::new(max_scroll).position(*scroll);
+        let mut scrollbar_state = ScrollbarState::new(max_scroll).position(scroll);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .style(Style::default().fg(Theme::primary()));
         frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
     }
+
+    scroll
 }
 
 /// Draw the application info modal.
-fn draw_info_overlay(frame: &mut Frame) {
+fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
     let s = t();
 
     let version = env!("CARGO_PKG_VERSION");
@@ -666,6 +731,7 @@ fn draw_info_overlay(frame: &mut Frame) {
     let popup_area = centered_rect(60, height, area);
 
     frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -682,7 +748,7 @@ fn draw_info_overlay(frame: &mut Frame) {
 }
 
 /// Draw the settings overlay with selectable entries.
-fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
+fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
     let s = t();
     let entries: &[(&str, &str)] = &[
         (s.settings_shortcuts, "?"),
@@ -709,6 +775,9 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    view.record_modal(popup_area);
+    view.record_rows(inner, 0, 0, entries.len(), RowsKind::Modal);
 
     let items: Vec<ListItem> = entries
         .iter()
@@ -749,7 +818,7 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
 }
 
 /// Draw the theme picker overlay.
-fn draw_theme_picker(frame: &mut Frame, selected: usize) {
+fn draw_theme_picker(frame: &mut Frame, view: &ViewState, selected: usize) {
     let s = t();
     let themes = ThemeId::ALL;
     let current = Theme::current();
@@ -834,6 +903,15 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     }
 
     frame.render_widget(List::new(items), chunks[2]);
+    view.record_modal(popup_area);
+    view.record_rows(
+        chunks[2],
+        2, // section header + blank line
+        0,
+        themes.len(),
+        RowsKind::Modal,
+    );
+    view.record_click(chunks[0], ClickTarget::TransparencyToggle);
 
     // ── Shortcut hints ───────────────────────────────────────────
     let mut hint_spans = shortcut_hint(s.theme_picker_hint_transparency).spans;
@@ -844,7 +922,7 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
 }
 
 /// Draw the language picker overlay.
-fn draw_language_picker(frame: &mut Frame, selected: usize) {
+fn draw_language_picker(frame: &mut Frame, view: &ViewState, selected: usize) {
     use crate::i18n::{current_locale, Locale};
 
     let locales = Locale::ALL;
@@ -865,6 +943,9 @@ fn draw_language_picker(frame: &mut Frame, selected: usize) {
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    view.record_modal(popup_area);
+    view.record_rows(inner, 0, 0, locales.len(), RowsKind::Modal);
 
     let items: Vec<ListItem> = locales
         .iter()
@@ -891,7 +972,7 @@ fn draw_language_picker(frame: &mut Frame, selected: usize) {
 }
 
 /// Draw the audio quality picker overlay.
-fn draw_quality_picker(frame: &mut Frame, selected: usize) {
+fn draw_quality_picker(frame: &mut Frame, view: &ViewState, selected: usize) {
     use deezer_core::api::models::AudioQuality;
 
     let qualities = AudioQuality::ALL;
@@ -911,6 +992,9 @@ fn draw_quality_picker(frame: &mut Frame, selected: usize) {
 
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
+
+    view.record_modal(popup_area);
+    view.record_rows(inner, 0, 0, qualities.len(), RowsKind::Modal);
 
     let items: Vec<ListItem> = qualities
         .iter()
@@ -941,6 +1025,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
             // Loading state
             let popup_area = centered_rect(60, 5, area);
             frame.render_widget(Clear, popup_area);
+            view.record_modal(popup_area);
             let block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(Theme::border_focused())
@@ -961,6 +1046,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
     let popup_area = centered_rect(80, height, area);
 
     frame.render_widget(Clear, popup_area);
+
+    view.record_modal(popup_area);
 
     let title = format!(" {} ", detail.title);
     let block = Block::default()
@@ -1068,6 +1155,13 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
+    view.record_rows(
+        chunks[1],
+        1, // header
+        table_state.offset(),
+        tracks.len(),
+        RowsKind::PlaylistDetail,
+    );
 
     // Footer hints
     let hints = Line::from(vec![
@@ -1075,6 +1169,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         Span::styled(s.hint_play, Theme::dim()),
         Span::styled("x", Theme::shortcut_key()),
         Span::styled(s.hint_menu, Theme::dim()),
+        Span::styled("d", Theme::shortcut_key()),
+        Span::styled(s.hint_download_album, Theme::dim()),
         Span::styled("Esc", Theme::shortcut_key()),
         Span::styled(s.hint_close, Theme::dim()),
     ]);
@@ -1096,6 +1192,8 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let popup_area = centered_rect(80, height, area);
 
     frame.render_widget(Clear, popup_area);
+
+    view.record_modal(popup_area);
 
     let title = s.waiting_list_title(queue.len());
     let block = Block::default()
@@ -1200,6 +1298,13 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
+    view.record_rows(
+        chunks[0],
+        1, // header
+        table_state.offset(),
+        queue.len(),
+        RowsKind::WaitingList,
+    );
 
     // Footer hints
     let hints = Line::from(vec![
@@ -1214,6 +1319,160 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[1]);
+}
+
+/// Draw the track list of a downloaded album or playlist, with its own filter.
+fn draw_offline_detail(
+    frame: &mut Frame,
+    view: &ViewState,
+    playlist: bool,
+    index: usize,
+    selected: usize,
+) {
+    let s = t();
+    let area = frame.area();
+    let tracks = view.offline_detail_tracks(playlist, index);
+
+    let visible_count = (tracks.len() as u16).min(area.height.saturating_sub(11));
+    let height = visible_count + 9; // borders + title + filter box + header + footer
+    let popup_area = centered_rect(80, height, area);
+
+    frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(view.offline_detail_title(playlist, index))
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3), // Filter input
+            Constraint::Min(1),    // Track table
+            Constraint::Length(1), // Footer hints
+        ])
+        .split(inner);
+
+    // Filter input
+    let is_typing = view.offline_detail_filter_typing;
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(if is_typing {
+            Theme::border_focused()
+        } else {
+            Theme::border()
+        })
+        .title(shortcut_line(if is_typing {
+            s.favorites_filter_typing
+        } else {
+            s.favorites_filter_normal
+        }))
+        .title_style(Theme::title());
+    let input_text = if view.offline_detail_filter_input.is_empty() && !is_typing {
+        Span::styled(s.offline_filter_placeholder, Theme::dim())
+    } else {
+        Span::styled(&view.offline_detail_filter_input, Theme::text())
+    };
+    frame.render_widget(Paragraph::new(input_text).block(input_block), chunks[0]);
+    view.record_click(chunks[0], crate::client::ClickTarget::FilterInput);
+    if is_typing {
+        let cursor_x = chunks[0].x + 1 + view.offline_detail_filter_input.len() as u16;
+        frame.set_cursor_position(Position::new(cursor_x, chunks[0].y + 1));
+    }
+
+    if tracks.is_empty() {
+        let empty = Paragraph::new(Span::styled(s.offline_empty, Theme::dim()))
+            .alignment(Alignment::Center);
+        frame.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    let header = Row::new(vec![
+        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::styled(s.header_title, Theme::dim())),
+        Cell::from(Span::styled(s.header_artist, Theme::dim())),
+        Cell::from(Span::styled(s.header_duration, Theme::dim())),
+    ])
+    .height(1);
+
+    let rows: Vec<Row> = tracks
+        .iter()
+        .map(|(track_index, track)| {
+            let dur = track.duration_secs();
+            let is_current = view
+                .current_track
+                .as_ref()
+                .is_some_and(|ct| ct.track_id == track.track_id);
+            let num_style = if is_current {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Theme::dim()
+            };
+            let prefix = if is_current { "▶" } else { "" };
+
+            Row::new(vec![
+                Cell::from(Span::styled(
+                    format!("{}{:>3}", prefix, track_index + 1),
+                    num_style,
+                )),
+                Cell::from(Span::styled(&track.title, Theme::text())),
+                Cell::from(Span::styled(
+                    &track.artist,
+                    Style::default().fg(Theme::primary()),
+                )),
+                Cell::from(Span::styled(
+                    format!("{}:{:02}", dur / 60, dur % 60),
+                    Theme::dim(),
+                )),
+            ])
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(5),
+            Constraint::Percentage(45),
+            Constraint::Percentage(35),
+            Constraint::Length(6),
+        ],
+    )
+    .header(header)
+    .row_highlight_style(Theme::highlight())
+    .highlight_symbol("> ");
+
+    let mut table_state = TableState::default().with_selected(Some(selected));
+    frame.render_stateful_widget(table, chunks[1], &mut table_state);
+    view.record_rows(
+        chunks[1],
+        1, // header
+        table_state.offset(),
+        tracks.len(),
+        RowsKind::OfflineDetail,
+    );
+
+    let hints = Line::from(vec![
+        Span::styled("Enter", Theme::shortcut_key()),
+        Span::styled(s.hint_play, Theme::dim()),
+        Span::styled("/", Theme::shortcut_key()),
+        Span::styled(s.hint_filter, Theme::dim()),
+        Span::styled("x", Theme::shortcut_key()),
+        Span::styled(s.hint_menu, Theme::dim()),
+        Span::styled("Esc", Theme::shortcut_key()),
+        Span::styled(s.hint_close, Theme::dim()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(hints).alignment(Alignment::Center),
+        chunks[2],
+    );
 }
 
 /// Draw a temporary toast notification at the bottom center of the screen.
@@ -1317,7 +1576,7 @@ fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
 }
 
 /// Draw the "Update Available" overlay with version info and 3 options.
-fn draw_update_available(frame: &mut Frame, version: &str, selected: usize) {
+fn draw_update_available(frame: &mut Frame, view: &ViewState, version: &str, selected: usize) {
     let s = t();
     let area = frame.area();
     let popup_area = centered_rect(50, 10, area);
@@ -1336,6 +1595,15 @@ fn draw_update_available(frame: &mut Frame, version: &str, selected: usize) {
 
     let current = env!("CARGO_PKG_VERSION");
     let options = [s.update_now, s.update_later, s.update_never];
+
+    view.record_modal(popup_area);
+    view.record_rows(
+        inner,
+        3, // two version lines + separator
+        0,
+        options.len(),
+        RowsKind::Modal,
+    );
 
     let mut lines: Vec<Line> = Vec::new();
 

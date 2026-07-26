@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::models::{AlbumDetail, AudioQuality, DeezerError, TrackData};
+use crate::api::models::{AlbumDetail, AudioQuality, DeezerError, PlaylistDetail, TrackData};
 use crate::Config;
 
 /// Metadata for a single offline track.
@@ -20,6 +20,8 @@ pub struct OfflineIndex {
     pub tracks: Vec<OfflineTrack>,
     #[serde(default)]
     pub albums: Vec<AlbumDetail>,
+    #[serde(default)]
+    pub playlists: Vec<PlaylistDetail>,
 }
 
 impl OfflineIndex {
@@ -104,10 +106,20 @@ impl OfflineIndex {
         }
     }
 
-    /// Remove a track from the index and delete its audio file.
+    /// Remove a track from the index and delete its audio file. Downloaded
+    /// albums and playlists drop it too, so they never list a track whose audio
+    /// is gone.
     pub fn remove_track(&mut self, track_id: &str) {
         Self::remove_track_file(track_id);
         self.tracks.retain(|t| t.track.track_id != track_id);
+        for album in &mut self.albums {
+            album.tracks.retain(|t| t.track_id != track_id);
+            album.nb_tracks = album.tracks.len() as u64;
+        }
+        for playlist in &mut self.playlists {
+            playlist.tracks.retain(|t| t.track_id != track_id);
+            playlist.nb_tracks = playlist.tracks.len() as u64;
+        }
     }
 
     /// Check if an album is in the offline index.
@@ -124,13 +136,61 @@ impl OfflineIndex {
 
     /// Remove an album and all its tracks from the index and disk.
     pub fn remove_album(&mut self, album_id: &str) {
-        if let Some(album) = self.albums.iter().find(|a| a.album_id == album_id) {
-            for track in &album.tracks {
-                Self::remove_track_file(&track.track_id);
-                self.tracks.retain(|t| t.track.track_id != track.track_id);
-            }
-        }
+        let track_ids = self
+            .albums
+            .iter()
+            .find(|a| a.album_id == album_id)
+            .map(|a| a.tracks.iter().map(|t| t.track_id.clone()).collect())
+            .unwrap_or_else(Vec::new);
         self.albums.retain(|a| a.album_id != album_id);
+        for track_id in &track_ids {
+            self.remove_orphan_track(track_id);
+        }
+    }
+
+    /// Check if a playlist is in the offline index.
+    pub fn has_playlist(&self, playlist_id: &str) -> bool {
+        self.playlists.iter().any(|p| p.playlist_id == playlist_id)
+    }
+
+    /// Add a playlist to the index, replacing any previous copy so a re-download
+    /// picks up tracks added from another device.
+    pub fn add_playlist(&mut self, playlist: PlaylistDetail) {
+        self.playlists
+            .retain(|p| p.playlist_id != playlist.playlist_id);
+        self.playlists.push(playlist);
+    }
+
+    /// Remove a playlist and its tracks from the index and disk.
+    pub fn remove_playlist(&mut self, playlist_id: &str) {
+        let track_ids = self
+            .playlists
+            .iter()
+            .find(|p| p.playlist_id == playlist_id)
+            .map(|p| p.tracks.iter().map(|t| t.track_id.clone()).collect())
+            .unwrap_or_else(Vec::new);
+        self.playlists.retain(|p| p.playlist_id != playlist_id);
+        for track_id in &track_ids {
+            self.remove_orphan_track(track_id);
+        }
+    }
+
+    /// Drop a track from the index and disk unless another offline album or
+    /// playlist still needs it.
+    fn remove_orphan_track(&mut self, track_id: &str) {
+        let still_used = self
+            .albums
+            .iter()
+            .any(|a| a.tracks.iter().any(|t| t.track_id == track_id))
+            || self
+                .playlists
+                .iter()
+                .any(|p| p.tracks.iter().any(|t| t.track_id == track_id));
+        if still_used {
+            return;
+        }
+        Self::remove_track_file(track_id);
+        self.tracks.retain(|t| t.track.track_id != track_id);
     }
 
     /// Get all offline track IDs (for UI indicators).

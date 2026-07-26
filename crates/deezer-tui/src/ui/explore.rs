@@ -1,11 +1,9 @@
 use ratatui::prelude::*;
-use ratatui::widgets::Paragraph;
 
 use crate::client::ViewState;
 use crate::i18n::t;
 use crate::protocol::ExploreCategory;
-use crate::theme::Theme;
-use crate::ui::{categories, moods, radio};
+use crate::ui::{categories, common, moods, radio};
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -16,7 +14,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         ])
         .split(area);
 
-    draw_category_menu(frame, view.explore_category, chunks[0]);
+    draw_category_menu(frame, view, chunks[0]);
 
     match view.explore_category {
         ExploreCategory::Moods => moods::draw(frame, view, chunks[1]),
@@ -25,31 +23,15 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     }
 }
 
-fn draw_category_menu(frame: &mut Frame, current: ExploreCategory, area: Rect) {
+fn draw_category_menu(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
-    let spans: Vec<Span> = ExploreCategory::ALL
+    let labels: Vec<&str> = ExploreCategory::ALL
         .iter()
-        .enumerate()
-        .flat_map(|(i, cat)| {
-            let mut parts = Vec::new();
-            if i > 0 {
-                parts.push(Span::styled("  ", Theme::dim()));
-            }
-            if *cat == current {
-                parts.push(Span::styled(
-                    s.explore_category_label(*cat),
-                    Style::default()
-                        .fg(Theme::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ));
-            } else {
-                parts.push(Span::styled(s.explore_category_label(*cat), Theme::dim()));
-            }
-            parts
-        })
+        .map(|cat| s.explore_category_label(*cat))
         .collect();
-
-    let line = Line::from(spans);
-    let menu = Paragraph::new(line).alignment(Alignment::Center);
-    frame.render_widget(menu, area);
+    let current = ExploreCategory::ALL
+        .iter()
+        .position(|cat| *cat == view.explore_category)
+        .unwrap_or(0);
+    common::draw_category_menu(frame, view, area, &labels, current);
 }

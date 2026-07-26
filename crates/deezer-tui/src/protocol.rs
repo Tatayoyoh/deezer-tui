@@ -58,6 +58,13 @@ pub enum Command {
     NextCategory,
     /// Switch to previous category within current tab.
     PrevCategory,
+    /// Switch directly to a tab (mouse click on the tab bar).
+    SetTab { tab: ActiveTab },
+    /// Switch directly to a category of the current tab, by index into its
+    /// `ALL` list (mouse click on the category menu).
+    SetCategory { index: usize },
+    /// Set the current tab's list selection directly (mouse click on a row).
+    SelectIndex { index: usize },
     /// Play favorites in shuffle mode.
     ShuffleFavorites,
     /// Add a track to favorites.
@@ -143,15 +150,24 @@ pub enum Command {
     DownloadOffline { track: TrackData },
     /// Download an entire album for offline mode.
     DownloadAlbumOffline { album_id: String },
+    /// Download an entire playlist for offline mode.
+    DownloadPlaylistOffline { playlist_id: String },
     /// Remove a track from offline storage.
     RemoveOfflineTrack { track_id: String },
     /// Remove an album from offline storage.
     RemoveOfflineAlbum { album_id: String },
+    /// Remove a playlist from offline storage.
+    RemoveOfflinePlaylist { playlist_id: String },
     /// Play a track from offline storage.
     PlayFromOffline { index: usize },
     /// Play a track from an offline album (queue = album tracks).
     PlayOfflineAlbum {
         album_id: String,
+        track_index: usize,
+    },
+    /// Play a track from an offline playlist (queue = playlist tracks).
+    PlayOfflinePlaylist {
+        playlist_id: String,
         track_index: usize,
     },
     /// Push a navigation overlay onto the daemon-side stack.
@@ -248,22 +264,6 @@ pub enum ExploreCategory {
 
 impl ExploreCategory {
     pub const ALL: [Self; 3] = [Self::Moods, Self::Categories, Self::Radios];
-
-    pub fn next(&self) -> Self {
-        match self {
-            Self::Moods => Self::Categories,
-            Self::Categories => Self::Radios,
-            Self::Radios => Self::Moods,
-        }
-    }
-
-    pub fn prev(&self) -> Self {
-        match self {
-            Self::Moods => Self::Radios,
-            Self::Categories => Self::Moods,
-            Self::Radios => Self::Categories,
-        }
-    }
 }
 
 /// A music genre/category for display.
@@ -337,18 +337,6 @@ impl SearchCategory {
             ],
         }
     }
-
-    pub fn next(&self) -> Self {
-        let all = Self::ALL;
-        let idx = all.iter().position(|c| c == self).unwrap_or(0);
-        all[(idx + 1) % all.len()]
-    }
-
-    pub fn prev(&self) -> Self {
-        let all = Self::ALL;
-        let idx = all.iter().position(|c| c == self).unwrap_or(0);
-        all[(idx + all.len() - 1) % all.len()]
-    }
 }
 
 /// Favorites category filter.
@@ -372,18 +360,6 @@ impl FavoritesCategory {
         Self::Playlists,
         Self::Following,
     ];
-
-    pub fn next(&self) -> Self {
-        let all = Self::ALL;
-        let idx = all.iter().position(|c| c == self).unwrap_or(0);
-        all[(idx + 1) % all.len()]
-    }
-
-    pub fn prev(&self) -> Self {
-        let all = Self::ALL;
-        let idx = all.iter().position(|c| c == self).unwrap_or(0);
-        all[(idx + all.len() - 1) % all.len()]
-    }
 }
 
 /// Offline content category filter.
@@ -392,21 +368,11 @@ pub enum OfflineCategory {
     #[default]
     Tracks,
     Albums,
+    Playlists,
 }
 
 impl OfflineCategory {
-    pub const ALL: [Self; 2] = [Self::Tracks, Self::Albums];
-
-    pub fn next(&self) -> Self {
-        match self {
-            Self::Tracks => Self::Albums,
-            Self::Albums => Self::Tracks,
-        }
-    }
-
-    pub fn prev(&self) -> Self {
-        self.next() // Only 2 variants, prev == next
-    }
+    pub const ALL: [Self; 3] = [Self::Tracks, Self::Albums, Self::Playlists];
 }
 
 /// A radio station item for display.
@@ -498,6 +464,8 @@ pub struct DaemonSnapshot {
     pub offline_tracks: Vec<OfflineTrack>,
     #[serde(default)]
     pub offline_albums: Vec<AlbumDetail>,
+    #[serde(default)]
+    pub offline_playlists: Vec<PlaylistDetail>,
     #[serde(default)]
     pub offline_selected: usize,
     #[serde(default)]
@@ -623,6 +591,7 @@ impl Default for DaemonSnapshot {
             offline_category: OfflineCategory::default(),
             offline_tracks: Vec::new(),
             offline_albums: Vec::new(),
+            offline_playlists: Vec::new(),
             offline_selected: 0,
             offline_loading: false,
             offline_track_ids: Vec::new(),

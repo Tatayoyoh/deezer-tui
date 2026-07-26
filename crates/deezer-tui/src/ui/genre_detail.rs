@@ -1,10 +1,11 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::{Overlay, ViewState};
+use crate::client::{ClickTarget, Overlay, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::protocol::GenreDetailSubTab;
 use crate::theme::Theme;
+use crate::ui::common;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
@@ -38,8 +39,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .split(area);
 
     draw_title(frame, &detail.name, chunks[0]);
-    draw_sub_tab_menu(frame, sub_tab, chunks[1]);
-    draw_content(frame, detail, sub_tab, selected, chunks[2]);
+    draw_sub_tab_menu(frame, view, sub_tab, chunks[1]);
+    draw_content(frame, detail, view, sub_tab, selected, chunks[2]);
 }
 
 fn draw_title(frame: &mut Frame, name: &str, area: Rect) {
@@ -52,40 +53,30 @@ fn draw_title(frame: &mut Frame, name: &str, area: Rect) {
     frame.render_widget(Paragraph::new(title_line), area);
 }
 
-fn draw_sub_tab_menu(frame: &mut Frame, current: GenreDetailSubTab, area: Rect) {
+fn draw_sub_tab_menu(frame: &mut Frame, view: &ViewState, current: GenreDetailSubTab, area: Rect) {
     let s = t();
-    let spans: Vec<Span> = GenreDetailSubTab::ALL
+    let labels: Vec<&str> = GenreDetailSubTab::ALL
         .iter()
-        .enumerate()
-        .flat_map(|(i, tab)| {
-            let mut parts = Vec::new();
-            if i > 0 {
-                parts.push(Span::styled("  ", Theme::dim()));
-            }
-            if *tab == current {
-                parts.push(Span::styled(
-                    s.genre_detail_sub_tab_label(*tab),
-                    Style::default()
-                        .fg(Theme::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ));
-            } else {
-                parts.push(Span::styled(
-                    s.genre_detail_sub_tab_label(*tab),
-                    Theme::dim(),
-                ));
-            }
-            parts
-        })
+        .map(|tab| s.genre_detail_sub_tab_label(*tab))
         .collect();
-
-    let menu = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
-    frame.render_widget(menu, area);
+    let current = GenreDetailSubTab::ALL
+        .iter()
+        .position(|tab| *tab == current)
+        .unwrap_or(0);
+    common::draw_chip_menu(
+        frame,
+        view,
+        area,
+        &labels,
+        current,
+        ClickTarget::GenreSubTab,
+    );
 }
 
 fn draw_content(
     frame: &mut Frame,
     detail: &deezer_core::api::models::GenreDetail,
+    view: &ViewState,
     sub_tab: GenreDetailSubTab,
     selected: usize,
     area: Rect,
@@ -244,4 +235,11 @@ fn draw_content(
 
     let mut state = TableState::default().with_selected(Some(selected.min(count - 1)));
     frame.render_stateful_widget(table, area, &mut state);
+    view.record_rows(
+        area,
+        2, // title + header
+        state.offset(),
+        count,
+        RowsKind::GenreDetail,
+    );
 }
