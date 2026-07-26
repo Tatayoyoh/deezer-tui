@@ -65,6 +65,7 @@ Set Shell "bash"
 Set FontSize 18
 Set Width 1000
 Set Height 800
+Set Margin 0
 
 Set CaptionMaxKeys 15
 Set CaptionFontColor "#FF893E"
@@ -81,19 +82,10 @@ Sleep 1s
 Type "Rammstein" Sleep 910ms  Enter
 Sleep 1s
 CaptionOff
-Sleep 0.3s
+Sleep 0.8s
 Down
-Sleep 0.3s
+Sleep 0.8s
 Down
-Sleep 0.3s
+Sleep 0.8s
 Enter
-Sleep 3s
-CaptionOn
-Ctrl+Right
-Sleep 0.6s
-Ctrl+Right
-Sleep 0.6s
-Ctrl+Right
-Sleep 0.6s
-Ctrl+Right
-Sleep 3s
+Sleep 8s
