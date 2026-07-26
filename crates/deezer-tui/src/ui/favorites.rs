@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::FavoritesCategory;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::shortcut_line;
+use crate::ui::common::{shortcut_line, track_number};
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -152,8 +152,12 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, item)| {
+            let is_playing = item
+                .track
+                .as_ref()
+                .is_some_and(|t| view.is_playing_track(&t.track_id));
             Row::new(vec![
-                Cell::from(Span::styled(format!("{:>3}", i + 1), Theme::dim())),
+                Cell::from(track_number(i, is_playing)),
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,

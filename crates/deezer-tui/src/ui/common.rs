@@ -94,6 +94,27 @@ pub fn tab_rects(area: Rect, titles: &[&str]) -> Vec<Rect> {
     rects
 }
 
+/// Marker placed in front of the row number of the track being played.
+/// A filled bullet, deliberately unlike the `>` selection cursor — the two used
+/// to be `▶` and `>`, which read as the same arrow at a glance.
+const PLAYING_MARKER: &str = "●";
+
+/// Number cell of a track row: `● 12` for the playing track, ` 12` otherwise.
+/// The marker column is always one cell wide, so numbers stay aligned.
+pub fn track_number(index: usize, is_playing: bool) -> Span<'static> {
+    let (marker, style) = if is_playing {
+        (
+            PLAYING_MARKER,
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        (" ", Theme::dim())
+    };
+    Span::styled(format!("{marker}{:>3}", index + 1), style)
+}
+
 /// Render a `[key] label` (or bare `key label`) hint string with the key on a
 /// "chip" (brackets stripped) and the label dimmed. Keeps inline shortcut hints
 /// consistent with the rest of the app.
@@ -225,4 +246,26 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
         height: LOGO_H.min(area.height),
     };
     frame.render_widget(deezer_logo(), logo_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn track_number_marks_only_the_playing_row() {
+        assert_eq!(track_number(0, true).content, "●  1");
+        assert_eq!(track_number(0, false).content, "   1");
+    }
+
+    /// Numbers must not shift when a row starts playing.
+    #[test]
+    fn track_number_keeps_a_fixed_width() {
+        for index in [0, 9, 99] {
+            assert_eq!(
+                track_number(index, true).content.chars().count(),
+                track_number(index, false).content.chars().count(),
+            );
+        }
+    }
 }

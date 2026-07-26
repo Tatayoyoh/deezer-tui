@@ -11,7 +11,7 @@ use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::shortcut_hint;
+use crate::ui::common::{shortcut_hint, track_number};
 
 /// Draw the artist detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect, as_background: bool) {
@@ -342,7 +342,7 @@ fn draw_top_tracks(
         .map(|(i, track)| {
             let dur = track.duration_secs();
             Row::new(vec![
-                Cell::from(Span::styled(format!("{:>3}", i + 1), Theme::dim())),
+                Cell::from(track_number(i, view.is_playing_track(&track.track_id))),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.album,
