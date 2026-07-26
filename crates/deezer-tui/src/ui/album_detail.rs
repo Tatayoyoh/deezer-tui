@@ -7,7 +7,7 @@ use ratatui_image::{Resize, StatefulImage};
 
 use deezer_core::api::models::AlbumDetail;
 
-use crate::client::ViewState;
+use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
 use crate::ui::common::shortcut_hint;
@@ -37,6 +37,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
         .split(area);
 
     let detail = detail.clone();
+    view.record_click(columns[0], ClickTarget::DetailLeftPanel);
     draw_album_info(frame, &detail, view, columns[0]);
     // Auto-switch focus to right if left column lost its scrollbar (e.g. on resize)
     if !view.album_detail_left_scrollable && view.album_detail_left_focused {
@@ -45,6 +46,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     draw_track_list(
         frame,
         &detail,
+        view,
         view.album_detail_selected,
         view.album_detail_left_focused,
         columns[1],
@@ -260,6 +262,7 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect, scro
 fn draw_track_list(
     frame: &mut Frame,
     detail: &AlbumDetail,
+    view: &ViewState,
     selected: usize,
     left_focused: bool,
     area: Rect,
@@ -327,4 +330,11 @@ fn draw_track_list(
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        2, // title + header
+        table_state.offset(),
+        detail.tracks.len(),
+        RowsKind::AlbumDetail,
+    );
 }

@@ -16,7 +16,7 @@ pub mod search;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Tabs};
 
-use crate::client::{Overlay, ViewState};
+use crate::client::{ClickTarget, Overlay, ViewState};
 use crate::i18n::t;
 use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
@@ -26,6 +26,8 @@ pub const PLAYER_BAR_HEIGHT: u16 = 4;
 
 /// Root draw function — dispatches to the correct screen.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
+    // Clickable regions are rebuilt by this pass.
+    view.clear_click_areas();
     match view.screen {
         Screen::Login => login::draw(frame, view),
         Screen::Main => draw_main(frame, view),
@@ -183,21 +185,25 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
             Span::styled("Esc", Theme::shortcut_key()),
             Span::styled(format!(" {} {} ", s.back_to, dest), Theme::dim()),
         ]);
+        let width = (back_line.width() as u16).min(area.width);
         let paragraph = Paragraph::new(back_line).block(block);
         frame.render_widget(paragraph, area);
+        view.record_click(
+            Rect {
+                width,
+                height: 1,
+                ..area
+            },
+            ClickTarget::Back,
+        );
         return;
     }
 
-    let (tab_titles, selected) = if view.is_offline {
-        (vec![Line::from(s.tab_offline_downloads)], 0)
+    let (titles, selected) = if view.is_offline {
+        (vec![s.tab_offline_downloads], 0)
     } else {
         (
-            vec![
-                Line::from(s.tab_search),
-                Line::from(s.tab_favorites),
-                Line::from(s.tab_explore),
-                Line::from(s.tab_offline),
-            ],
+            vec![s.tab_search, s.tab_favorites, s.tab_explore, s.tab_offline],
             match view.active_tab {
                 ActiveTab::Search => 0,
                 ActiveTab::Favorites => 1,
@@ -207,6 +213,19 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
         )
     };
 
+    if !view.is_offline {
+        const TABS: [ActiveTab; 4] = [
+            ActiveTab::Search,
+            ActiveTab::Favorites,
+            ActiveTab::Explore,
+            ActiveTab::Downloads,
+        ];
+        for (rect, tab) in common::tab_rects(area, &titles).into_iter().zip(TABS) {
+            view.record_click(rect, ClickTarget::Tab(tab));
+        }
+    }
+
+    let tab_titles: Vec<Line> = titles.iter().map(|t| Line::from(*t)).collect();
     let tabs = Tabs::new(tab_titles)
         .block(block)
         .select(selected)

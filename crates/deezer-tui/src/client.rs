@@ -1,11 +1,12 @@
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEventKind,
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
 };
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
@@ -42,6 +43,12 @@ use deezer_core::api::models::GenreDetail;
 
 const TICK_RATE: Duration = Duration::from_millis(50);
 
+/// Two left clicks on the same row within this delay count as a double click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+
+/// Upper bound on the steps taken to walk a modal's cursor to a clicked option.
+const MAX_MODAL_OPTIONS: usize = 64;
+
 /// Input mode for the client (typing in search/login vs normal navigation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -69,6 +76,10 @@ pub enum PopupAction {
     AddToPlaylist,
     RemoveFromPlaylist,
     DownloadOffline,
+    /// Download a whole album/playlist for offline mode.
+    DownloadContainerOffline,
+    /// Drop the targeted track/album/playlist from offline storage.
+    RemoveOffline,
     DislikeTrack,
     PlayNext,
     AddToQueue,
@@ -412,6 +423,11 @@ impl PopupMenu {
                 action: PopupAction::DeletePlaylist,
                 is_header: false,
             },
+            PopupMenuItem {
+                label: s.download_for_offline.into(),
+                action: PopupAction::DownloadContainerOffline,
+                is_header: false,
+            },
         ];
         Self {
             title: Some(format!(" {} ", title)),
@@ -422,6 +438,39 @@ impl PopupMenu {
                 title,
                 nb_songs,
             },
+            is_favorite: false,
+            sub_menu: None,
+            playlist_context: None,
+        }
+    }
+
+    /// Menu shown in offline mode: the only thing that can be done to a
+    /// downloaded track, album or playlist is dropping it from storage.
+    fn remove_offline_only(target: PopupTarget) -> Self {
+        let s = t();
+        let title = match &target {
+            PopupTarget::Track(track) => format!(" {} — {} ", track.title, track.artist),
+            PopupTarget::Album { title, artist, .. } => format!(" {title} — {artist} "),
+            PopupTarget::Playlist { title, .. } => format!(" {title} "),
+            PopupTarget::Artist { name, .. } => format!(" {name} "),
+        };
+        let items = vec![
+            PopupMenuItem {
+                label: s.menu_manage.into(),
+                action: PopupAction::Header,
+                is_header: true,
+            },
+            PopupMenuItem {
+                label: s.remove_from_offline.into(),
+                action: PopupAction::RemoveOffline,
+                is_header: false,
+            },
+        ];
+        Self {
+            title: Some(title),
+            items,
+            selected: 1,
+            target,
             is_favorite: false,
             sub_menu: None,
             playlist_context: None,
@@ -488,6 +537,15 @@ pub enum Overlay {
     },
     /// Waiting list (upcoming tracks in queue).
     WaitingList { selected: usize },
+    /// Track list of a downloaded album or playlist (Offline tab), as a modal.
+    OfflineDetail {
+        /// True when the target is a playlist, false for an album.
+        playlist: bool,
+        /// Index into `offline_playlists` / `offline_albums`.
+        index: usize,
+        /// Cursor within the modal's (filtered) track list.
+        selected: usize,
+    },
     /// Application info modal.
     Info,
     /// Update available dialog with 3 options.
@@ -533,13 +591,101 @@ impl Overlay {
     }
 }
 
-/// An item in the offline albums tree view.
-#[derive(Debug, Clone)]
-pub enum OfflineTreeItem {
-    /// Album header node (index into offline_albums).
-    Album(usize),
-    /// Track node (album index, track index within album).
-    Track(usize, usize),
+/// A clickable widget recorded by the draw pass.
+#[derive(Debug, Clone, Copy)]
+pub enum ClickTarget {
+    /// Tab in the top tab bar.
+    Tab(ActiveTab),
+    /// Category chip of the active tab, by index in the category's `ALL` list.
+    Category(usize),
+    /// Sub-tab of the artist detail page, by index in `ArtistSubTab::ALL`.
+    ArtistSubTab(usize),
+    /// Sub-tab of the genre detail page, by index in `GenreDetailSubTab::ALL`.
+    GenreSubTab(usize),
+    /// Search / filter text input of the active tab.
+    FilterInput,
+    /// "f Flow" chip in the player bar.
+    FlowChip,
+    /// Playing track's name / progress bar in the player bar.
+    CurrentTrack,
+    /// "g Shuffle" button on the Favorites tab.
+    ShuffleFavorites,
+    /// "Esc Back to …" hint at the top of a detail page.
+    Back,
+    /// Cover + metadata column of the album / artist detail pages.
+    DetailLeftPanel,
+    /// Filter input of the "Add to playlist" picker.
+    PlaylistFilterInput,
+    /// Transparency switch of the theme picker.
+    TransparencyToggle,
+    /// Yes / no button of the delete-playlist confirmation.
+    ConfirmChoice(bool),
+}
+
+/// Which list the rows recorded by the draw pass belong to — a click selects
+/// the row in that list's own cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowsKind {
+    /// Main list of the active tab (and its category).
+    Tab,
+    AlbumDetail,
+    ArtistDetail,
+    GenreDetail,
+    PlaylistDetail,
+    WaitingList,
+    /// Track list of the offline album/playlist detail modal.
+    OfflineDetail,
+    /// Option list of the open modal (menus, pickers, settings).
+    Modal,
+}
+
+/// The visible rows of the topmost list, as laid out by the last draw pass.
+#[derive(Debug, Clone, Copy)]
+pub struct RowsArea {
+    /// Data rows only — title, header and footer lines excluded.
+    area: Rect,
+    /// Index of the list's first visible row.
+    offset: usize,
+    /// Item count, so clicks past the last row are ignored.
+    len: usize,
+    kind: RowsKind,
+}
+
+impl RowsArea {
+    /// Index of the list item drawn at this cell, if any.
+    fn index_at(&self, col: u16, row: u16) -> Option<usize> {
+        if !contains(self.area, col, row) {
+            return None;
+        }
+        let index = self.offset + (row - self.area.y) as usize;
+        (index < self.len).then_some(index)
+    }
+}
+
+/// Screen regions recorded by the draw pass so mouse clicks can be routed to
+/// the widget under the cursor. Rebuilt from scratch on every frame.
+#[derive(Debug, Default)]
+pub struct ClickAreas {
+    targets: Vec<(Rect, ClickTarget)>,
+    rows: Option<RowsArea>,
+    /// Outline of the topmost modal, if one is open: clicking outside it closes
+    /// the modal, and nothing drawn behind it is clickable.
+    modal: Option<Rect>,
+}
+
+impl ClickAreas {
+    /// Topmost target under this cell — later draws win, as they render on top.
+    fn hit(&self, col: u16, row: u16) -> Option<ClickTarget> {
+        self.targets
+            .iter()
+            .rev()
+            .find(|(rect, _)| contains(*rect, col, row))
+            .map(|(_, target)| *target)
+    }
+}
+
+fn contains(rect: Rect, col: u16, row: u16) -> bool {
+    col >= rect.x && col < rect.right() && row >= rect.y && row < rect.bottom()
 }
 
 /// View state used by UI rendering functions.
@@ -577,6 +723,7 @@ pub struct ViewState {
     pub offline_category: OfflineCategory,
     pub offline_tracks: Vec<OfflineTrack>,
     pub offline_albums: Vec<AlbumDetail>,
+    pub offline_playlists: Vec<PlaylistDetail>,
     pub offline_selected: usize,
     pub offline_loading: bool,
     pub offline_track_ids: Vec<String>,
@@ -623,9 +770,15 @@ pub struct ViewState {
     pub user_name: Option<String>,
     pub is_offline: bool,
 
-    // Local client state — offline albums tree
-    pub offline_tree_selected: usize,
-    pub offline_expanded: Vec<String>,
+    // Local client state — Offline tab
+    /// Fuzzy filter applied to the Offline tab (all three categories).
+    pub offline_filter_input: String,
+    pub offline_filter_typing: bool,
+    /// Selection within the filtered list of the active offline category.
+    pub offline_filter_selected: usize,
+    /// Fuzzy filter of the offline album/playlist detail modal.
+    pub offline_detail_filter_input: String,
+    pub offline_detail_filter_typing: bool,
 
     pub input_mode: InputMode,
     pub search_input: String,
@@ -656,6 +809,8 @@ pub struct ViewState {
 
     /// Button area set by the UI draw pass, used for mouse hit-testing.
     pub login_button_area: Cell<Option<Rect>>,
+    /// Clickable regions of the last drawn frame.
+    pub click: RefCell<ClickAreas>,
 }
 
 /// How long a status notification stays visible before hiding itself.
@@ -750,6 +905,7 @@ impl ViewState {
             offline_category: snap.offline_category,
             offline_tracks: snap.offline_tracks.clone(),
             offline_albums: snap.offline_albums.clone(),
+            offline_playlists: snap.offline_playlists.clone(),
             offline_selected: snap.offline_selected,
             offline_loading: snap.offline_loading,
             offline_track_ids: snap.offline_track_ids.clone(),
@@ -794,8 +950,11 @@ impl ViewState {
             user_name: snap.user_name.clone(),
             is_offline: snap.is_offline,
 
-            offline_tree_selected: 0,
-            offline_expanded: Vec::new(),
+            offline_filter_input: String::new(),
+            offline_filter_typing: false,
+            offline_filter_selected: 0,
+            offline_detail_filter_input: String::new(),
+            offline_detail_filter_typing: false,
 
             input_mode: InputMode::Normal,
             search_input: String::new(),
@@ -817,6 +976,7 @@ impl ViewState {
             cover_image_url: String::new(),
             cover_image_area: None,
             login_button_area: Cell::new(None),
+            click: RefCell::default(),
         }
     }
 
@@ -881,6 +1041,123 @@ impl ViewState {
     }
 
     /// Update from a new daemon snapshot, preserving local-only state.
+    /// True while a returning modal (help, settings, pickers, dialogs) is open.
+    /// Detail pages and the waiting list are not modals — they render as page
+    /// content and register their own clickable rows.
+    pub fn has_modal_overlay(&self) -> bool {
+        matches!(
+            self.overlay,
+            Some(
+                Overlay::Help { .. }
+                    | Overlay::Settings { .. }
+                    | Overlay::ThemePicker { .. }
+                    | Overlay::QualityPicker { .. }
+                    | Overlay::LanguagePicker { .. }
+                    | Overlay::Info
+                    | Overlay::UpdateAvailable { .. }
+                    | Overlay::Updating { .. }
+            )
+        )
+    }
+
+    /// Drop the previous frame's clickable regions. Called once per draw pass,
+    /// and again by each modal so the page behind it stops being clickable.
+    pub fn clear_click_areas(&self) {
+        let mut click = self.click.borrow_mut();
+        click.targets.clear();
+        click.rows = None;
+        click.modal = None;
+    }
+
+    /// Record the outline of a modal being drawn: clicks outside it close it.
+    /// Also clears what was recorded behind, which the modal covers.
+    pub fn record_modal(&self, area: Rect) {
+        self.clear_click_areas();
+        self.click.borrow_mut().modal = Some(area);
+    }
+
+    /// Record a clickable widget drawn at `rect`.
+    pub fn record_click(&self, rect: Rect, target: ClickTarget) {
+        self.click.borrow_mut().targets.push((rect, target));
+    }
+
+    /// Record the list drawn in `area` as clickable. `top` is how many lines the
+    /// table spends on its title and header before the first data row; `offset`
+    /// is the scroll offset ratatui laid the table out with this frame.
+    pub fn record_rows(&self, area: Rect, top: u16, offset: usize, len: usize, kind: RowsKind) {
+        let rows = Rect {
+            y: area.y + top,
+            height: area.height.saturating_sub(top),
+            ..area
+        };
+        self.click.borrow_mut().rows = Some(RowsArea {
+            area: rows,
+            offset,
+            len,
+            kind,
+        });
+    }
+
+    /// Focus the active tab's search or filter input — the `/` and `Ctrl+F`
+    /// shortcuts, and clicking the input bar.
+    pub fn focus_filter_input(&mut self, clear: bool) {
+        match self.active_tab {
+            ActiveTab::Search => {
+                self.input_mode = InputMode::Typing;
+                if clear {
+                    self.search_input.clear();
+                }
+            }
+            ActiveTab::Favorites => {
+                self.favorites_filter_typing = true;
+                if clear {
+                    self.favorites_filter_input.clear();
+                }
+                self.apply_favorites_filter();
+            }
+            ActiveTab::Explore => match self.explore_category {
+                ExploreCategory::Moods => {}
+                ExploreCategory::Categories => {
+                    self.genres_filter_typing = true;
+                    if clear {
+                        self.genres_filter_input.clear();
+                    }
+                    self.apply_genres_filter();
+                }
+                ExploreCategory::Radios => {
+                    self.radio_filter_typing = true;
+                    if clear {
+                        self.radio_filter_input.clear();
+                    }
+                    self.apply_radio_filter();
+                }
+            },
+            ActiveTab::Downloads => {
+                self.offline_filter_typing = true;
+                if clear {
+                    self.offline_filter_input.clear();
+                    self.offline_filter_selected = 0;
+                }
+            }
+        }
+    }
+
+    /// Leave every text input: the mouse moved the focus somewhere else.
+    pub fn blur_inputs(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.favorites_filter_typing = false;
+        self.radio_filter_typing = false;
+        self.genres_filter_typing = false;
+        self.offline_filter_typing = false;
+        if let Some(SubMenu::PlaylistPicker { filter_typing, .. }) = self
+            .popup
+            .as_mut()
+            .and_then(|popup| popup.sub_menu.as_mut())
+        {
+            *filter_typing = false;
+        }
+    }
+
     fn update_from_snapshot(&mut self, snap: DaemonSnapshot) {
         let prev_screen = self.screen;
 
@@ -917,6 +1194,8 @@ impl ViewState {
         self.offline_category = snap.offline_category;
         self.offline_tracks = snap.offline_tracks;
         self.offline_albums = snap.offline_albums;
+        self.offline_playlists = snap.offline_playlists;
+        self.clamp_offline_selection();
         self.offline_selected = snap.offline_selected;
         self.offline_loading = snap.offline_loading;
         self.offline_track_ids = snap.offline_track_ids;
@@ -1150,18 +1429,168 @@ impl ViewState {
         }
     }
 
-    /// Build the flattened tree items for the offline albums view.
-    pub fn offline_tree_items(&self) -> Vec<OfflineTreeItem> {
-        let mut items = Vec::new();
-        for (i, album) in self.offline_albums.iter().enumerate() {
-            items.push(OfflineTreeItem::Album(i));
-            if self.offline_expanded.contains(&album.album_id) {
-                for j in 0..album.tracks.len() {
-                    items.push(OfflineTreeItem::Track(i, j));
-                }
+    /// Offline tracks matching the filter, paired with their daemon-side index.
+    pub fn offline_tracks_filtered(&self) -> Vec<(usize, &OfflineTrack)> {
+        self.offline_tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, ot)| {
+                self.offline_filter_matches(&[&ot.track.title, &ot.track.artist, &ot.track.album])
+            })
+            .collect()
+    }
+
+    /// Downloaded albums matching the filter, paired with their index.
+    pub fn offline_albums_filtered(&self) -> Vec<(usize, &AlbumDetail)> {
+        self.offline_albums
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| self.offline_filter_matches(&[&a.title, &a.artist]))
+            .collect()
+    }
+
+    /// Downloaded playlists matching the filter, paired with their index.
+    pub fn offline_playlists_filtered(&self) -> Vec<(usize, &PlaylistDetail)> {
+        self.offline_playlists
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| self.offline_filter_matches(&[&p.title, &p.creator]))
+            .collect()
+    }
+
+    /// Number of rows currently shown by the Offline tab.
+    pub fn offline_list_len(&self) -> usize {
+        match self.offline_category {
+            OfflineCategory::Tracks => self.offline_tracks_filtered().len(),
+            OfflineCategory::Albums => self.offline_albums_filtered().len(),
+            OfflineCategory::Playlists => self.offline_playlists_filtered().len(),
+        }
+    }
+
+    /// Cursor position within the rows the Offline tab currently shows.
+    pub fn offline_list_selected(&self) -> usize {
+        if self.offline_filter_active() {
+            self.offline_filter_selected
+        } else {
+            self.offline_selected
+        }
+    }
+
+    /// Whether the Offline tab filter is active (typed into, or has content).
+    pub fn offline_filter_active(&self) -> bool {
+        self.offline_filter_typing || !self.offline_filter_input.is_empty()
+    }
+
+    /// True when any of `fields` fuzzy-matches the Offline tab filter.
+    fn offline_filter_matches(&self, fields: &[&str]) -> bool {
+        if self.offline_filter_input.is_empty() {
+            return true;
+        }
+        let query = self.offline_filter_input.to_lowercase();
+        fields
+            .iter()
+            .any(|f| fuzzy_match(&query, &f.to_lowercase()))
+    }
+
+    /// Daemon-side index of the selected offline track, respecting the filter.
+    pub fn offline_selected_track_index(&self) -> usize {
+        if self.offline_filter_active() {
+            self.offline_tracks_filtered()
+                .get(self.offline_filter_selected)
+                .map(|(i, _)| *i)
+                .unwrap_or(0)
+        } else {
+            self.offline_selected
+        }
+    }
+
+    /// The offline track under the cursor in the Tracks category.
+    pub fn offline_selected_track(&self) -> Option<&OfflineTrack> {
+        if self.offline_filter_active() {
+            self.offline_tracks_filtered()
+                .get(self.offline_filter_selected)
+                .map(|(_, ot)| *ot)
+        } else {
+            self.offline_tracks.get(self.offline_selected)
+        }
+    }
+
+    /// The album under the cursor in the Albums category, with its index.
+    pub fn offline_selected_album(&self) -> Option<(usize, &AlbumDetail)> {
+        self.offline_albums_filtered()
+            .get(self.offline_list_selected())
+            .copied()
+    }
+
+    /// The playlist under the cursor in the Playlists category, with its index.
+    pub fn offline_selected_playlist(&self) -> Option<(usize, &PlaylistDetail)> {
+        self.offline_playlists_filtered()
+            .get(self.offline_list_selected())
+            .copied()
+    }
+
+    /// Tracks of the album/playlist shown in the detail modal, matching its own
+    /// filter, paired with their index inside that album/playlist.
+    pub fn offline_detail_tracks(&self, playlist: bool, index: usize) -> Vec<(usize, &TrackData)> {
+        let tracks: &[TrackData] = if playlist {
+            match self.offline_playlists.get(index) {
+                Some(p) => &p.tracks,
+                None => return Vec::new(),
+            }
+        } else {
+            match self.offline_albums.get(index) {
+                Some(a) => &a.tracks,
+                None => return Vec::new(),
+            }
+        };
+        let query = self.offline_detail_filter_input.to_lowercase();
+        tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                query.is_empty()
+                    || fuzzy_match(&query, &t.title.to_lowercase())
+                    || fuzzy_match(&query, &t.artist.to_lowercase())
+            })
+            .collect()
+    }
+
+    /// Title shown by the offline detail modal.
+    pub fn offline_detail_title(&self, playlist: bool, index: usize) -> String {
+        if playlist {
+            self.offline_playlists
+                .get(index)
+                .map(|p| format!(" {} — {} ", p.title, p.creator))
+                .unwrap_or_default()
+        } else {
+            self.offline_albums
+                .get(index)
+                .map(|a| format!(" {} — {} ", a.title, a.artist))
+                .unwrap_or_default()
+        }
+    }
+
+    /// Keep the offline cursors inside their lists after a snapshot changed them.
+    fn clamp_offline_selection(&mut self) {
+        let len = self.offline_list_len();
+        self.offline_filter_selected = self.offline_filter_selected.min(len.saturating_sub(1));
+        let detail = match self.overlay {
+            Some(Overlay::OfflineDetail {
+                playlist, index, ..
+            }) => Some((playlist, index)),
+            _ => None,
+        };
+        if let Some((playlist, index)) = detail {
+            let count = if playlist {
+                self.offline_playlists.get(index).map(|p| p.tracks.len())
+            } else {
+                self.offline_albums.get(index).map(|a| a.tracks.len())
+            }
+            .unwrap_or(0);
+            if let Some(Overlay::OfflineDetail { selected, .. }) = self.overlay.as_mut() {
+                *selected = (*selected).min(count.saturating_sub(1));
             }
         }
-        items
     }
 
     /// Progress ratio for the progress bar.
@@ -1194,6 +1623,8 @@ pub struct Client {
     image_rx: mpsc::UnboundedReceiver<(String, image::DynamicImage)>,
     /// Cache of downloaded images by URL, cleared when leaving overlay pages.
     image_cache: HashMap<String, image::DynamicImage>,
+    /// Cell and time of the last left click, for double-click detection.
+    last_click: Option<(u16, u16, Instant)>,
 }
 
 impl Client {
@@ -1215,6 +1646,7 @@ impl Client {
             image_tx,
             image_rx,
             image_cache: HashMap::new(),
+            last_click: None,
         })
     }
 
@@ -1413,12 +1845,7 @@ impl Client {
             if event::poll(TICK_RATE)? {
                 let action = match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => self.handle_key(key),
-                    Event::Mouse(mouse)
-                        if mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
-                    {
-                        self.handle_mouse_click(mouse.column, mouse.row)
-                            .unwrap_or(KeyAction::Continue)
-                    }
+                    Event::Mouse(mouse) => self.handle_mouse(mouse),
                     _ => KeyAction::Continue,
                 };
 
@@ -1664,6 +2091,7 @@ impl Client {
             && !self.view.radio_filter_typing
             && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
+            && !self.view.offline_filter_typing
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
@@ -1681,6 +2109,7 @@ impl Client {
             && !self.view.radio_filter_typing
             && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
+            && !self.view.offline_filter_typing
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Info)) {
@@ -1704,31 +2133,7 @@ impl Client {
         // Ctrl+F: enter search/filter mode (same as /)
         if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
             if self.view.screen == Screen::Main {
-                match self.view.active_tab {
-                    ActiveTab::Search => {
-                        self.view.input_mode = InputMode::Typing;
-                        self.view.search_input.clear();
-                    }
-                    ActiveTab::Explore => match self.view.explore_category {
-                        ExploreCategory::Moods => {}
-                        ExploreCategory::Categories => {
-                            self.view.genres_filter_typing = true;
-                            self.view.genres_filter_input.clear();
-                            self.view.apply_genres_filter();
-                        }
-                        ExploreCategory::Radios => {
-                            self.view.radio_filter_typing = true;
-                            self.view.radio_filter_input.clear();
-                            self.view.apply_radio_filter();
-                        }
-                    },
-                    ActiveTab::Favorites => {
-                        self.view.favorites_filter_typing = true;
-                        self.view.favorites_filter_input.clear();
-                        self.view.apply_favorites_filter();
-                    }
-                    _ => {}
-                }
+                self.view.focus_filter_input(true);
             }
             return KeyAction::Continue;
         }
@@ -1895,6 +2300,33 @@ impl Client {
             }
         }
 
+        // Downloads filter typing mode
+        if self.view.offline_filter_typing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.view.offline_filter_typing = false;
+                    self.view.offline_filter_input.clear();
+                    self.view.offline_filter_selected = 0;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Enter => {
+                    self.view.offline_filter_typing = false;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Char(c) => {
+                    self.view.offline_filter_input.push(c);
+                    self.view.offline_filter_selected = 0;
+                    return KeyAction::Continue;
+                }
+                KeyCode::Backspace => {
+                    self.view.offline_filter_input.pop();
+                    self.view.offline_filter_selected = 0;
+                    return KeyAction::Continue;
+                }
+                _ => return KeyAction::Continue,
+            }
+        }
+
         // Radio filter typing mode
         if self.view.radio_filter_typing {
             match key.code {
@@ -1950,31 +2382,7 @@ impl Client {
 
             // Enter search/filter typing mode
             KeyCode::Char('/') => {
-                match self.view.active_tab {
-                    ActiveTab::Search => {
-                        self.view.input_mode = InputMode::Typing;
-                        self.view.search_input.clear();
-                    }
-                    ActiveTab::Explore => match self.view.explore_category {
-                        ExploreCategory::Moods => {}
-                        ExploreCategory::Categories => {
-                            self.view.genres_filter_typing = true;
-                            self.view.genres_filter_input.clear();
-                            self.view.apply_genres_filter();
-                        }
-                        ExploreCategory::Radios => {
-                            self.view.radio_filter_typing = true;
-                            self.view.radio_filter_input.clear();
-                            self.view.apply_radio_filter();
-                        }
-                    },
-                    ActiveTab::Favorites => {
-                        self.view.favorites_filter_typing = true;
-                        self.view.favorites_filter_input.clear();
-                        self.view.apply_favorites_filter();
-                    }
-                    _ => {}
-                }
+                self.view.focus_filter_input(true);
                 KeyAction::Continue
             }
 
@@ -1998,14 +2406,7 @@ impl Client {
 
             // Category navigation (h/l or left/right)
             KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
-            KeyCode::Char('l') | KeyCode::Right => {
-                if self.view.active_tab == ActiveTab::Downloads
-                    && self.view.offline_category == OfflineCategory::Albums
-                {
-                    return self.handle_offline_tree_toggle();
-                }
-                KeyAction::SendCommand(Command::NextCategory)
-            }
+            KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
 
             // List navigation
             KeyCode::Up | KeyCode::Char('k') => {
@@ -2023,11 +2424,10 @@ impl Client {
                     }
                     return KeyAction::Continue;
                 }
-                if self.view.active_tab == ActiveTab::Downloads
-                    && self.view.offline_category == OfflineCategory::Albums
+                if self.view.active_tab == ActiveTab::Downloads && self.view.offline_filter_active()
                 {
-                    self.view.offline_tree_selected =
-                        self.view.offline_tree_selected.saturating_sub(1);
+                    self.view.offline_filter_selected =
+                        self.view.offline_filter_selected.saturating_sub(1);
                     return KeyAction::Continue;
                 }
                 if self.view.active_tab == ActiveTab::Favorites
@@ -2063,13 +2463,12 @@ impl Client {
                     }
                     return KeyAction::Continue;
                 }
-                if self.view.active_tab == ActiveTab::Downloads
-                    && self.view.offline_category == OfflineCategory::Albums
+                if self.view.active_tab == ActiveTab::Downloads && self.view.offline_filter_active()
                 {
-                    let tree_len = self.view.offline_tree_items().len();
-                    if tree_len > 0 {
-                        self.view.offline_tree_selected =
-                            (self.view.offline_tree_selected + 1).min(tree_len - 1);
+                    let len = self.view.offline_list_len();
+                    if len > 0 {
+                        self.view.offline_filter_selected =
+                            (self.view.offline_filter_selected + 1).min(len - 1);
                     }
                     return KeyAction::Continue;
                 }
@@ -2174,10 +2573,12 @@ impl Client {
                     ActiveTab::Downloads => match self.view.offline_category {
                         OfflineCategory::Tracks => {
                             KeyAction::SendCommand(Command::PlayFromOffline {
-                                index: self.view.offline_selected,
+                                index: self.view.offline_selected_track_index(),
                             })
                         }
-                        OfflineCategory::Albums => self.handle_offline_tree_enter(),
+                        OfflineCategory::Albums | OfflineCategory::Playlists => {
+                            self.open_offline_detail()
+                        }
                     },
                 }
             }
@@ -2370,6 +2771,7 @@ impl Client {
             Overlay::PlaylistDetail { .. } => self.handle_playlist_detail_key(key),
             Overlay::GenreDetail { .. } => self.handle_genre_detail_key(key),
             Overlay::WaitingList { .. } => self.handle_waiting_list_key(key),
+            Overlay::OfflineDetail { .. } => self.handle_offline_detail_key(key),
             Overlay::ThemePicker { selected } => {
                 let count = ThemeId::ALL.len();
                 match key.code {
@@ -2459,57 +2861,164 @@ impl Client {
     }
 
     /// Open the full track context menu for the selected track in the current list.
-    /// Handle Enter key in the offline albums tree view.
-    fn handle_offline_tree_enter(&mut self) -> KeyAction {
-        let items = self.view.offline_tree_items();
-        let Some(item) = items.get(self.view.offline_tree_selected) else {
+    /// Open the track list of the selected downloaded album/playlist as a modal.
+    fn open_offline_detail(&mut self) -> KeyAction {
+        let target = match self.view.offline_category {
+            OfflineCategory::Playlists => self
+                .view
+                .offline_selected_playlist()
+                .map(|(i, _)| (true, i)),
+            _ => self.view.offline_selected_album().map(|(i, _)| (false, i)),
+        };
+        let Some((playlist, index)) = target else {
             return KeyAction::Continue;
         };
-        match item {
-            OfflineTreeItem::Album(album_idx) => {
-                let Some(album) = self.view.offline_albums.get(*album_idx) else {
-                    return KeyAction::Continue;
-                };
-                KeyAction::SendCommand(Command::PlayOfflineAlbum {
-                    album_id: album.album_id.clone(),
-                    track_index: 0,
-                })
-            }
-            OfflineTreeItem::Track(album_idx, track_idx) => {
-                let Some(album) = self.view.offline_albums.get(*album_idx) else {
-                    return KeyAction::Continue;
-                };
-                KeyAction::SendCommand(Command::PlayOfflineAlbum {
-                    album_id: album.album_id.clone(),
-                    track_index: *track_idx,
-                })
-            }
-        }
-    }
-
-    fn handle_offline_tree_toggle(&mut self) -> KeyAction {
-        let items = self.view.offline_tree_items();
-        let Some(item) = items.get(self.view.offline_tree_selected) else {
-            return KeyAction::Continue;
-        };
-        match item {
-            OfflineTreeItem::Album(album_idx) => {
-                let Some(album) = self.view.offline_albums.get(*album_idx) else {
-                    return KeyAction::Continue;
-                };
-                let album_id = album.album_id.clone();
-                if self.view.offline_expanded.contains(&album_id) {
-                    self.view.offline_expanded.retain(|id| id != &album_id);
-                } else {
-                    self.view.offline_expanded.push(album_id);
-                }
-            }
-            OfflineTreeItem::Track(..) => {}
-        }
+        self.view.offline_detail_filter_input.clear();
+        self.view.offline_detail_filter_typing = false;
+        self.view.push_overlay(Overlay::OfflineDetail {
+            playlist,
+            index,
+            selected: 0,
+        });
         KeyAction::Continue
     }
 
+    /// Handle key events in the offline album/playlist detail modal.
+    fn handle_offline_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        let (playlist, index, selected) = match self.view.overlay {
+            Some(Overlay::OfflineDetail {
+                playlist,
+                index,
+                selected,
+            }) => (playlist, index, selected),
+            _ => return KeyAction::Continue,
+        };
+
+        // Filter typing mode swallows most keys.
+        if self.view.offline_detail_filter_typing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.view.offline_detail_filter_typing = false;
+                    self.view.offline_detail_filter_input.clear();
+                    self.set_offline_detail_selected(0);
+                }
+                KeyCode::Enter => self.view.offline_detail_filter_typing = false,
+                KeyCode::Char(c) => {
+                    self.view.offline_detail_filter_input.push(c);
+                    self.set_offline_detail_selected(0);
+                }
+                KeyCode::Backspace => {
+                    self.view.offline_detail_filter_input.pop();
+                    self.set_offline_detail_selected(0);
+                }
+                _ => {}
+            }
+            return KeyAction::Continue;
+        }
+
+        let tracks: Vec<(usize, String)> = self
+            .view
+            .offline_detail_tracks(playlist, index)
+            .iter()
+            .map(|(i, t)| (*i, t.track_id.clone()))
+            .collect();
+
+        match key.code {
+            KeyCode::Esc => {
+                self.view.offline_detail_filter_input.clear();
+                self.view.pop_overlay();
+                KeyAction::Continue
+            }
+            KeyCode::Char('/') => {
+                self.view.offline_detail_filter_typing = true;
+                self.view.offline_detail_filter_input.clear();
+                self.set_offline_detail_selected(0);
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.set_offline_detail_selected(selected.saturating_sub(1));
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = tracks.len().saturating_sub(1);
+                self.set_offline_detail_selected((selected + 1).min(max));
+                KeyAction::Continue
+            }
+            KeyCode::Enter => {
+                let Some((track_index, _)) = tracks.get(selected) else {
+                    return KeyAction::Continue;
+                };
+                if playlist {
+                    let Some(p) = self.view.offline_playlists.get(index) else {
+                        return KeyAction::Continue;
+                    };
+                    KeyAction::SendCommand(Command::PlayOfflinePlaylist {
+                        playlist_id: p.playlist_id.clone(),
+                        track_index: *track_index,
+                    })
+                } else {
+                    let Some(a) = self.view.offline_albums.get(index) else {
+                        return KeyAction::Continue;
+                    };
+                    KeyAction::SendCommand(Command::PlayOfflineAlbum {
+                        album_id: a.album_id.clone(),
+                        track_index: *track_index,
+                    })
+                }
+            }
+            KeyCode::Char('x') => {
+                if let Some((track_index, _)) = tracks.get(selected) {
+                    let track = if playlist {
+                        self.view
+                            .offline_playlists
+                            .get(index)
+                            .and_then(|p| p.tracks.get(*track_index))
+                    } else {
+                        self.view
+                            .offline_albums
+                            .get(index)
+                            .and_then(|a| a.tracks.get(*track_index))
+                    };
+                    if let Some(track) = track.cloned() {
+                        self.view.popup =
+                            Some(PopupMenu::remove_offline_only(PopupTarget::Track(track)));
+                    }
+                }
+                KeyAction::Continue
+            }
+            // Player controls stay live behind the modal
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Move the cursor of the offline detail modal.
+    fn set_offline_detail_selected(&mut self, index: usize) {
+        if let Some(Overlay::OfflineDetail { selected, .. }) = self.view.overlay.as_mut() {
+            *selected = index;
+        }
+    }
+
     fn open_item_popup(&mut self) {
+        // Downloads tab: everything listed is already stored locally, so the
+        // only action offered is dropping it from offline storage.
+        if self.view.active_tab == ActiveTab::Downloads {
+            if let Some(target) = self.offline_popup_target() {
+                self.view.popup = Some(PopupMenu::remove_offline_only(target));
+            }
+            return;
+        }
+
         // Try to get a DisplayItem from the current tab
         let display_item = match self.view.active_tab {
             ActiveTab::Search => self
@@ -2567,30 +3076,39 @@ impl Client {
         // Fall back to track popup
         let track = match self.view.active_tab {
             ActiveTab::Search | ActiveTab::Favorites => display_item.and_then(|d| d.track),
-            ActiveTab::Downloads => match self.view.offline_category {
-                OfflineCategory::Tracks => self
-                    .view
-                    .offline_tracks
-                    .get(self.view.offline_selected)
-                    .map(|ot| ot.track.clone()),
-                OfflineCategory::Albums => {
-                    let items = self.view.offline_tree_items();
-                    match items.get(self.view.offline_tree_selected) {
-                        Some(OfflineTreeItem::Track(ai, ti)) => self
-                            .view
-                            .offline_albums
-                            .get(*ai)
-                            .and_then(|a| a.tracks.get(*ti).cloned()),
-                        _ => None,
-                    }
-                }
-            },
             _ => None,
         };
 
         if let Some(track) = track {
             let is_fav = self.view.is_track_favorite(&track.track_id);
             self.view.popup = Some(PopupMenu::full(track, is_fav));
+        }
+    }
+
+    /// What the Downloads tab cursor is pointing at: a stand-alone track, a
+    /// downloaded album/playlist, or a track inside one of them.
+    fn offline_popup_target(&self) -> Option<PopupTarget> {
+        match self.view.offline_category {
+            OfflineCategory::Tracks => self
+                .view
+                .offline_selected_track()
+                .map(|ot| PopupTarget::Track(ot.track.clone())),
+            OfflineCategory::Albums => {
+                let (_, album) = self.view.offline_selected_album()?;
+                Some(PopupTarget::Album {
+                    album_id: album.album_id.clone(),
+                    title: album.title.clone(),
+                    artist: album.artist.clone(),
+                })
+            }
+            OfflineCategory::Playlists => {
+                let (_, playlist) = self.view.offline_selected_playlist()?;
+                Some(PopupTarget::Playlist {
+                    playlist_id: playlist.playlist_id.clone(),
+                    title: playlist.title.clone(),
+                    nb_songs: playlist.nb_tracks,
+                })
+            }
         }
     }
 
@@ -2936,6 +3454,16 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
+            // Download the whole playlist for offline mode (same as `d` on an album)
+            KeyCode::Char('d') => {
+                if let Some(ref detail) = self.view.playlist_detail {
+                    KeyAction::SendCommand(Command::DownloadPlaylistOffline {
+                        playlist_id: detail.playlist_id.clone(),
+                    })
+                } else {
+                    KeyAction::Continue
+                }
+            }
             // Open waiting list on top of playlist detail
             KeyCode::Char('w') => {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
@@ -3531,6 +4059,35 @@ impl Client {
                     KeyAction::Continue
                 }
             }
+            PopupAction::DownloadContainerOffline => {
+                self.view.popup = None;
+                match target {
+                    PopupTarget::Playlist { playlist_id, .. } => {
+                        KeyAction::SendCommand(Command::DownloadPlaylistOffline { playlist_id })
+                    }
+                    PopupTarget::Album { album_id, .. } => {
+                        KeyAction::SendCommand(Command::DownloadAlbumOffline { album_id })
+                    }
+                    _ => KeyAction::Continue,
+                }
+            }
+            PopupAction::RemoveOffline => {
+                self.view.popup = None;
+                match target {
+                    PopupTarget::Track(track) => {
+                        KeyAction::SendCommand(Command::RemoveOfflineTrack {
+                            track_id: track.track_id,
+                        })
+                    }
+                    PopupTarget::Album { album_id, .. } => {
+                        KeyAction::SendCommand(Command::RemoveOfflineAlbum { album_id })
+                    }
+                    PopupTarget::Playlist { playlist_id, .. } => {
+                        KeyAction::SendCommand(Command::RemoveOfflinePlaylist { playlist_id })
+                    }
+                    PopupTarget::Artist { .. } => KeyAction::Continue,
+                }
+            }
             PopupAction::DislikeTrack => {
                 if let PopupTarget::Track(track) = target {
                     self.view.popup = None;
@@ -3688,23 +4245,368 @@ impl Client {
         }
     }
 
-    fn handle_mouse_click(&mut self, col: u16, row: u16) -> Option<KeyAction> {
-        // Only handle clicks on the login button
-        if self.view.screen == Screen::Login
-            && self.view.login_mode == LoginMode::Button
-            && !self.view.login_loading
-        {
-            if let Some(rect) = self.view.login_button_area.get() {
-                if col >= rect.x
-                    && col < rect.x + rect.width
-                    && row >= rect.y
-                    && row < rect.y + rect.height
-                {
-                    return Some(KeyAction::WebLogin);
+    /// Route a mouse event. The wheel reuses the arrow-key handlers, so it
+    /// scrolls whatever list or panel has focus — except over a detail page's
+    /// left column, which scrolls under the cursor whether focused or not.
+    fn handle_mouse(&mut self, mouse: MouseEvent) -> KeyAction {
+        let (col, row) = (mouse.column, mouse.row);
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.handle_left_click(col, row),
+            MouseEventKind::Down(MouseButton::Right) => self.handle_right_click(col, row),
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let up = mouse.kind == MouseEventKind::ScrollUp;
+                if self.scroll_detail_left_panel(col, row, up) {
+                    return KeyAction::Continue;
                 }
+                // A text input swallows the arrow keys, so let the wheel take
+                // the focus out of it and move the list instead.
+                self.view.blur_inputs();
+                self.handle_key(KeyEvent::from(if up { KeyCode::Up } else { KeyCode::Down }))
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Scroll the album / artist detail left column when the wheel turns over
+    /// it. Returns false when the cursor is elsewhere.
+    fn scroll_detail_left_panel(&mut self, col: u16, row: u16, up: bool) -> bool {
+        let over_panel = matches!(
+            self.view.click.borrow().hit(col, row),
+            Some(ClickTarget::DetailLeftPanel)
+        );
+        if !over_panel {
+            return false;
+        }
+        let step = |scroll: u16| {
+            if up {
+                scroll.saturating_sub(1)
+            } else {
+                scroll.saturating_add(1)
+            }
+        };
+        // The draw pass clamps the scroll to the panel's content height.
+        match self.view.overlay {
+            Some(Overlay::AlbumDetail { .. }) => {
+                self.view.album_detail_left_scroll = step(self.view.album_detail_left_scroll);
+            }
+            Some(Overlay::ArtistDetail) => {
+                self.view.artist_detail_left_scroll = step(self.view.artist_detail_left_scroll);
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// Hit-test a left click against the widgets the last draw pass recorded.
+    /// A second click on the same row within [`DOUBLE_CLICK`] acts as `Enter`.
+    fn handle_left_click(&mut self, col: u16, row: u16) -> KeyAction {
+        if self.view.screen == Screen::Login {
+            let on_button = self.view.login_button_area.get().is_some_and(|rect| {
+                col >= rect.x && col < rect.right() && row >= rect.y && row < rect.bottom()
+            });
+            if on_button && self.view.login_mode == LoginMode::Button && !self.view.login_loading {
+                return KeyAction::WebLogin;
+            }
+            return KeyAction::Continue;
+        }
+
+        let double = self.last_click.is_some_and(|(c, r, at)| {
+            r == row && c.abs_diff(col) <= 2 && at.elapsed() < DOUBLE_CLICK
+        });
+        self.last_click = Some((col, row, Instant::now()));
+
+        let (target, rows, modal) = {
+            let click = self.view.click.borrow();
+            (click.hit(col, row), click.rows, click.modal)
+        };
+
+        match modal {
+            // Clicking the dimmed backdrop closes the modal on top.
+            Some(modal) if !contains(modal, col, row) => {
+                return self.handle_key(KeyEvent::from(KeyCode::Esc))
+            }
+            // A modal that records no outline (an update in progress) is inert.
+            None if self.view.popup.is_some() || self.view.has_modal_overlay() => {
+                return KeyAction::Continue
+            }
+            _ => {}
+        }
+
+        // Clicking anywhere but a text input takes the focus out of it, so the
+        // click (and the Enter a double click sends) reaches the list, not the
+        // input that was being typed in.
+        if !matches!(
+            target,
+            Some(ClickTarget::FilterInput | ClickTarget::PlaylistFilterInput)
+        ) {
+            self.view.blur_inputs();
+        }
+
+        if let Some(target) = target {
+            return self.activate_click_target(target);
+        }
+
+        let Some((rows, index)) = rows.and_then(|rows| Some((rows, rows.index_at(col, row)?)))
+        else {
+            return KeyAction::Continue;
+        };
+        // A modal's options act on a single click, like any menu.
+        if rows.kind == RowsKind::Modal {
+            return self.click_modal_row(index);
+        }
+        let select = self.select_row(rows.kind, index);
+        if !double {
+            return select.map_or(KeyAction::Continue, KeyAction::SendCommand);
+        }
+        // Double click: select, then act on the row as Enter would.
+        let action = self.handle_key(KeyEvent::from(KeyCode::Enter));
+        with_selection(select, action)
+    }
+
+    /// Activate the clicked option of the open modal. The cursor is walked there
+    /// with the same keys the keyboard uses, so per-modal side effects (the
+    /// theme picker's live preview, for one) still run.
+    fn click_modal_row(&mut self, index: usize) -> KeyAction {
+        // Section titles inside a context menu are not selectable.
+        if let Some(popup) = &self.view.popup {
+            if popup.sub_menu.is_none() && popup.items.get(index).is_some_and(|i| i.is_header) {
+                return KeyAction::Continue;
             }
         }
-        None
+        let mut guard = 0;
+        while let Some(current) = self.modal_selection() {
+            if current == index || guard > MAX_MODAL_OPTIONS {
+                break;
+            }
+            guard += 1;
+            let key = if current < index {
+                KeyCode::Down
+            } else {
+                KeyCode::Up
+            };
+            self.handle_key(KeyEvent::from(key));
+            // The cursor hit an end of the list: stop rather than spin.
+            if self.modal_selection() == Some(current) {
+                break;
+            }
+        }
+        self.handle_key(KeyEvent::from(KeyCode::Enter))
+    }
+
+    /// Cursor position within the open modal's option list.
+    fn modal_selection(&self) -> Option<usize> {
+        if let Some(popup) = &self.view.popup {
+            return match &popup.sub_menu {
+                Some(SubMenu::PlaylistPicker { selected, .. }) => Some(*selected),
+                Some(_) => None,
+                None => Some(popup.selected),
+            };
+        }
+        match self.view.overlay {
+            Some(Overlay::Settings { selected })
+            | Some(Overlay::ThemePicker { selected })
+            | Some(Overlay::LanguagePicker { selected })
+            | Some(Overlay::QualityPicker { selected })
+            | Some(Overlay::UpdateAvailable { selected, .. }) => Some(selected),
+            _ => None,
+        }
+    }
+
+    /// Right click opens the context menu of whatever sits under the cursor: the
+    /// playing track when clicked in the player bar, otherwise the clicked row.
+    fn handle_right_click(&mut self, col: u16, row: u16) -> KeyAction {
+        if self.view.screen != Screen::Main
+            || self.view.popup.is_some()
+            || self.view.has_modal_overlay()
+        {
+            return KeyAction::Continue;
+        }
+
+        let (target, rows) = {
+            let click = self.view.click.borrow();
+            (click.hit(col, row), click.rows)
+        };
+
+        if let Some(target) = target {
+            // Same as Ctrl+Space: manage menu for the playing track.
+            if matches!(target, ClickTarget::CurrentTrack) {
+                self.view.blur_inputs();
+                return self.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL));
+            }
+            return KeyAction::Continue;
+        }
+
+        let Some((rows, index)) = rows.and_then(|rows| Some((rows, rows.index_at(col, row)?)))
+        else {
+            return KeyAction::Continue;
+        };
+        // Select the row, then open its menu as `x` would.
+        let select = self.select_row(rows.kind, index);
+        let action = self.handle_key(KeyEvent::from(KeyCode::Char('x')));
+        with_selection(select, action)
+    }
+
+    /// Perform the action of a clicked widget (tab, category chip, button…).
+    fn activate_click_target(&mut self, target: ClickTarget) -> KeyAction {
+        match target {
+            // Offline mode shows a single tab — there is nothing to switch to.
+            ClickTarget::Tab(_) if self.view.is_offline => KeyAction::Continue,
+            ClickTarget::Tab(tab) => KeyAction::SendCommand(Command::SetTab { tab }),
+            ClickTarget::Category(index) => KeyAction::SendCommand(Command::SetCategory { index }),
+            ClickTarget::ArtistSubTab(index) => {
+                if let Some(&sub_tab) = ArtistSubTab::ALL.get(index) {
+                    self.view.artist_detail_sub_tab = sub_tab;
+                    self.view.artist_detail_selected = 0;
+                    self.view.artist_detail_left_focused = false;
+                }
+                KeyAction::Continue
+            }
+            ClickTarget::GenreSubTab(index) => {
+                if let (Some(&new_tab), Some(Overlay::GenreDetail { sub_tab, selected })) = (
+                    GenreDetailSubTab::ALL.get(index),
+                    self.view.overlay.as_mut(),
+                ) {
+                    *sub_tab = new_tab;
+                    *selected = 0;
+                }
+                KeyAction::Continue
+            }
+            ClickTarget::FilterInput => {
+                self.view.focus_filter_input(false);
+                KeyAction::Continue
+            }
+            ClickTarget::FlowChip => KeyAction::SendCommand(Command::StartFlow),
+            ClickTarget::ShuffleFavorites => KeyAction::SendCommand(Command::ShuffleFavorites),
+            // Player bar: right click only.
+            ClickTarget::CurrentTrack => KeyAction::Continue,
+            ClickTarget::Back => self.handle_key(KeyEvent::from(KeyCode::Esc)),
+            // Focus the left column, as `h` does — only when it has something to
+            // scroll, otherwise focus there means nothing.
+            ClickTarget::DetailLeftPanel => {
+                match self.view.overlay {
+                    Some(Overlay::AlbumDetail { .. }) => {
+                        self.view.album_detail_left_focused =
+                            self.view.album_detail_left_scrollable;
+                    }
+                    Some(Overlay::ArtistDetail) => {
+                        self.view.artist_detail_left_focused =
+                            self.view.artist_detail_left_scrollable;
+                    }
+                    _ => {}
+                }
+                KeyAction::Continue
+            }
+            ClickTarget::PlaylistFilterInput => {
+                if let Some(SubMenu::PlaylistPicker { filter_typing, .. }) = self
+                    .view
+                    .popup
+                    .as_mut()
+                    .and_then(|popup| popup.sub_menu.as_mut())
+                {
+                    *filter_typing = true;
+                }
+                KeyAction::Continue
+            }
+            // Left/Right flip the switch; aim at the side that changes it.
+            ClickTarget::TransparencyToggle => {
+                let key = if Theme::is_transparent() {
+                    KeyCode::Left
+                } else {
+                    KeyCode::Right
+                };
+                self.handle_key(KeyEvent::from(key))
+            }
+            ClickTarget::ConfirmChoice(yes) => {
+                self.handle_key(KeyEvent::from(KeyCode::Char(if yes { 'y' } else { 'n' })))
+            }
+        }
+    }
+
+    /// Move a list's cursor to a clicked row. Returns the command that syncs the
+    /// daemon's cursor, for the lists the daemon owns.
+    fn select_row(&mut self, kind: RowsKind, index: usize) -> Option<Command> {
+        match kind {
+            RowsKind::Tab => match self.view.active_tab {
+                ActiveTab::Search => {
+                    self.view.search_selected = index;
+                    Some(Command::SelectIndex { index })
+                }
+                ActiveTab::Favorites => {
+                    if self.view.favorites_filter_active() {
+                        self.view.favorites_filter_selected = index;
+                        return None;
+                    }
+                    self.view.favorites_selected = index;
+                    Some(Command::SelectIndex { index })
+                }
+                ActiveTab::Explore => {
+                    match self.view.explore_category {
+                        ExploreCategory::Moods => self.view.moods_selected = index,
+                        ExploreCategory::Categories => self.view.genres_selected = index,
+                        ExploreCategory::Radios => self.view.radios_selected = index,
+                    }
+                    None
+                }
+                ActiveTab::Downloads => {
+                    if self.view.offline_filter_active() {
+                        self.view.offline_filter_selected = index;
+                        return None;
+                    }
+                    self.view.offline_selected = index;
+                    Some(Command::SelectIndex { index })
+                }
+            },
+            RowsKind::AlbumDetail => {
+                self.view.album_detail_left_focused = false;
+                self.view.album_detail_selected = index;
+                None
+            }
+            RowsKind::ArtistDetail => {
+                self.view.artist_detail_left_focused = false;
+                self.view.artist_detail_selected = index;
+                None
+            }
+            RowsKind::GenreDetail => {
+                if let Some(Overlay::GenreDetail { selected, .. }) = self.view.overlay.as_mut() {
+                    *selected = index;
+                }
+                None
+            }
+            RowsKind::PlaylistDetail => {
+                if let Some(Overlay::PlaylistDetail { selected }) = self.view.overlay.as_mut() {
+                    *selected = index;
+                }
+                None
+            }
+            RowsKind::WaitingList => {
+                if let Some(Overlay::WaitingList { selected }) = self.view.overlay.as_mut() {
+                    *selected = index;
+                }
+                None
+            }
+            RowsKind::OfflineDetail => {
+                if let Some(Overlay::OfflineDetail { selected, .. }) = self.view.overlay.as_mut() {
+                    *selected = index;
+                }
+                None
+            }
+            // Handled by `click_modal_row`, which walks the modal's own cursor.
+            RowsKind::Modal => None,
+        }
+    }
+}
+
+/// Combine the command that syncs a clicked row's selection with the action the
+/// synthesized key produced, so both reach the daemon in order.
+fn with_selection(select: Option<Command>, action: KeyAction) -> KeyAction {
+    match (select, action) {
+        (Some(cmd), KeyAction::SendCommand(next)) => KeyAction::MultiCommand(vec![cmd, next]),
+        (Some(cmd), KeyAction::MultiCommand(mut cmds)) => {
+            cmds.insert(0, cmd);
+            KeyAction::MultiCommand(cmds)
+        }
+        (Some(cmd), KeyAction::Continue) => KeyAction::SendCommand(cmd),
+        (_, action) => action,
     }
 }
 
@@ -3892,4 +4794,71 @@ async fn perform_update(download_url: &str) -> Result<std::path::PathBuf> {
     }
 
     Ok(current_exe)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::common::tab_rects;
+
+    fn rows(y: u16, height: u16, offset: usize, len: usize) -> RowsArea {
+        RowsArea {
+            area: Rect {
+                x: 0,
+                y,
+                width: 40,
+                height,
+            },
+            offset,
+            len,
+            kind: RowsKind::Tab,
+        }
+    }
+
+    #[test]
+    fn row_index_accounts_for_scroll_offset() {
+        let rows = rows(5, 4, 10, 20);
+        assert_eq!(rows.index_at(0, 4), None, "above the first row");
+        assert_eq!(rows.index_at(0, 5), Some(10));
+        assert_eq!(rows.index_at(0, 8), Some(13));
+        assert_eq!(rows.index_at(0, 9), None, "below the last visible row");
+    }
+
+    #[test]
+    fn row_index_ignores_clicks_past_the_last_item() {
+        // Three items drawn in a four-row area: the empty row is not clickable.
+        let rows = rows(0, 4, 0, 3);
+        assert_eq!(rows.index_at(0, 2), Some(2));
+        assert_eq!(rows.index_at(0, 3), None);
+    }
+
+    #[test]
+    fn tab_rects_match_ratatui_padding_and_dividers() {
+        // Ratatui draws " Aa | Bbb | C ": one space each side, one-cell divider.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 1,
+        };
+        let rects = tab_rects(area, &["Aa", "Bbb", "C"]);
+        assert_eq!(rects.len(), 3);
+        assert_eq!((rects[0].x, rects[0].width), (0, 4));
+        assert_eq!((rects[1].x, rects[1].width), (5, 5));
+        assert_eq!((rects[2].x, rects[2].width), (11, 3));
+    }
+
+    #[test]
+    fn tab_rects_clip_the_last_visible_tab() {
+        // " Aa " then "|", leaving 1 cell of " Bbb " on screen — still clickable.
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 1,
+        };
+        let rects = tab_rects(area, &["Aa", "Bbb", "C"]);
+        assert_eq!(rects.len(), 2);
+        assert_eq!((rects[1].x, rects[1].width), (5, 1));
+    }
 }

@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Mouse support: 
+    * click on menus, tabs, search bar...
+    * scroll lists
+    * can click `Flow` and `Shuffle play my favorite`
+    * escape modales clicking background
+    * right click to open track context menu
+    * right click on bottom bar to open playing track's context menu
+- Download a whole playlist for offline mode (from context menu `x`) with % progression (#13)
+- New Playlists Offline tab 
+- Offline filters for tracks, albums and playlists
+- Offline context menu : can now remove a track, album or playlist from offline storage
+
 ### Changed
 - Keyboard shortcut indicators now share same color and style everywhere in the app
 - Background transparency is now a simple on/off toggle
@@ -11,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - Modals no longer overlap the player bar
 - Status notifications moved to the player bar's top and auto disappear after 7 seconds
 - Removed the top header line (app title + status area)
+- Offline albums and playlists tracks are now displayed in modals
 
 ### Fixed
 - Opening a modal/overlay now dims the background

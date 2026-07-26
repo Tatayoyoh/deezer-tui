@@ -88,6 +88,7 @@ pub struct Strings {
     pub favorites_filter_typing: &'static str,
     pub favorites_filter_normal: &'static str,
     pub favorites_filter_placeholder: &'static str,
+    pub offline_filter_placeholder: &'static str,
 
     // --- Player ---
     pub no_track_loaded: &'static str,
@@ -235,6 +236,7 @@ pub struct Strings {
 
     // --- Footer hints ---
     pub hint_play: &'static str,
+    pub hint_filter: &'static str,
     pub hint_menu: &'static str,
     pub hint_close: &'static str,
     pub hint_remove: &'static str,
@@ -277,13 +279,15 @@ pub struct Strings {
     // --- Offline ---
     pub offline_empty: &'static str,
     pub download_for_offline: &'static str,
+    pub remove_from_offline: &'static str,
     pub status_downloading_track: &'static str,
     pub status_track_saved_offline: &'static str,
     pub status_album_saved_offline: &'static str,
+    pub status_playlist_saved_offline: &'static str,
     pub status_offline_download_error: &'static str,
     pub status_removed_offline: &'static str,
     pub hint_download_album: &'static str,
-    pub hint_expand_collapse: &'static str,
+    pub hint_open_tracks: &'static str,
     pub offline_indicator: &'static str,
     pub no_internet: &'static str,
 
@@ -355,6 +359,7 @@ pub struct Strings {
     // --- Table headers ---
     pub header_title: &'static str,
     pub header_artist: &'static str,
+    pub header_creator: &'static str,
     pub header_album: &'static str,
     pub header_duration: &'static str,
     pub header_fans: &'static str,
@@ -485,6 +490,7 @@ impl Strings {
         match cat {
             OfflineCategory::Tracks => self.cat_tracks,
             OfflineCategory::Albums => self.cat_albums,
+            OfflineCategory::Playlists => self.cat_playlists,
         }
     }
 
@@ -570,6 +576,11 @@ impl Strings {
     /// Format "{N} results"
     pub fn fmt_results(&self, count: usize) -> String {
         format!("{} {}", count, self.status_results)
+    }
+
+    /// Format "Downloading for offline... 42%"
+    pub fn fmt_download_progress(&self, percent: u8) -> String {
+        format!("{} {}%", self.status_downloading_track, percent)
     }
 
     /// Format "{N} loaded"
@@ -661,6 +672,7 @@ static EN: Strings = Strings {
     favorites_filter_typing: " Filter - [Enter] to confirm, [Esc] to cancel ",
     favorites_filter_normal: " Filter - [Ctrl+F] or [/] ",
     favorites_filter_placeholder: " filter favorites...",
+    offline_filter_placeholder: " filter downloads...",
 
     no_track_loaded: "No track loaded",
     play_pause: "Play/Pause",
@@ -794,6 +806,7 @@ static EN: Strings = Strings {
     queue_empty_subtitle: "No music playing",
 
     hint_play: " play  ",
+    hint_filter: " filter  ",
     hint_menu: " menu  ",
     hint_close: " close",
     hint_remove: " remove  ",
@@ -831,13 +844,15 @@ static EN: Strings = Strings {
 
     offline_empty: "No offline content yet",
     download_for_offline: "Download for offline mode",
+    remove_from_offline: "Remove from offline",
     status_downloading_track: "Downloading for offline...",
     status_track_saved_offline: "Track saved for offline",
     status_album_saved_offline: "Album saved for offline",
+    status_playlist_saved_offline: "Playlist saved for offline",
     status_offline_download_error: "Offline download error",
     status_removed_offline: "Removed from offline",
     hint_download_album: " download  ",
-    hint_expand_collapse: "→ expand/collapse",
+    hint_open_tracks: "Enter open tracks",
     offline_indicator: "● Offline mode ",
     no_internet: "No internet connection",
 
@@ -908,6 +923,7 @@ static EN: Strings = Strings {
 
     header_title: "Title",
     header_artist: "Artist",
+    header_creator: "Creator",
     header_album: "Album",
     header_duration: "Duration",
     header_fans: "Fans",
@@ -970,6 +986,7 @@ static FR: Strings = Strings {
     favorites_filter_typing: " Filtre - [Entrée] pour valider, [Esc] pour annuler ",
     favorites_filter_normal: " Filtre - [Ctrl+F] ou [/] ",
     favorites_filter_placeholder: " filtrer les favoris...",
+    offline_filter_placeholder: " filtrer les téléchargements...",
 
     no_track_loaded: "Aucun titre chargé",
     play_pause: "Lecture/Pause",
@@ -1103,6 +1120,7 @@ static FR: Strings = Strings {
     queue_empty_subtitle: "Aucune musique jouée",
 
     hint_play: " lire  ",
+    hint_filter: " filtrer  ",
     hint_menu: " menu  ",
     hint_close: " fermer",
     hint_remove: " supprimer  ",
@@ -1140,13 +1158,15 @@ static FR: Strings = Strings {
 
     offline_empty: "Aucun contenu hors-ligne",
     download_for_offline: "Télécharger hors-ligne",
+    remove_from_offline: "Retirer des hors ligne",
     status_downloading_track: "Téléchargement hors-ligne...",
     status_track_saved_offline: "Titre sauvegardé hors-ligne",
     status_album_saved_offline: "Album sauvegardé hors-ligne",
+    status_playlist_saved_offline: "Playlist sauvegardée hors-ligne",
     status_offline_download_error: "Erreur de téléchargement hors-ligne",
     status_removed_offline: "Supprimé du mode hors-ligne",
     hint_download_album: " télécharger  ",
-    hint_expand_collapse: "→ déplier/replier",
+    hint_open_tracks: "Entrée ouvrir les titres",
     offline_indicator: "● Mode hors-ligne ",
     no_internet: "Pas de connexion internet",
 
@@ -1216,6 +1236,7 @@ static FR: Strings = Strings {
 
     header_title: "Titre",
     header_artist: "Artiste",
+    header_creator: "Créateur",
     header_album: "Album",
     header_duration: "Durée",
     header_fans: "Fans",
@@ -1278,6 +1299,7 @@ static ES: Strings = Strings {
     favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
     favorites_filter_normal: " Filtro - [Ctrl+F] o [/] ",
     favorites_filter_placeholder: " filtrar favoritos...",
+    offline_filter_placeholder: " filtrar descargas...",
 
     no_track_loaded: "Sin canción cargada",
     play_pause: "Reproducir/Pausa",
@@ -1411,6 +1433,7 @@ static ES: Strings = Strings {
     queue_empty_subtitle: "Sin música en reproducción",
 
     hint_play: " reproducir  ",
+    hint_filter: " filtrar  ",
     hint_menu: " menú  ",
     hint_close: " cerrar",
     hint_remove: " quitar  ",
@@ -1448,13 +1471,15 @@ static ES: Strings = Strings {
 
     offline_empty: "Sin contenido sin conexión",
     download_for_offline: "Descargar para modo sin conexión",
+    remove_from_offline: "Quitar de sin conexión",
     status_downloading_track: "Descargando sin conexión...",
     status_track_saved_offline: "Pista guardada sin conexión",
     status_album_saved_offline: "Álbum guardado sin conexión",
+    status_playlist_saved_offline: "Playlist guardada sin conexión",
     status_offline_download_error: "Error de descarga sin conexión",
     status_removed_offline: "Eliminado del modo sin conexión",
     hint_download_album: " descargar  ",
-    hint_expand_collapse: "→ expandir/contraer",
+    hint_open_tracks: "Enter abrir pistas",
     offline_indicator: "● Modo sin conexión ",
     no_internet: "Sin conexión a internet",
 
@@ -1524,6 +1549,7 @@ static ES: Strings = Strings {
 
     header_title: "Título",
     header_artist: "Artista",
+    header_creator: "Creador",
     header_album: "Álbum",
     header_duration: "Duración",
     header_fans: "Fans",
@@ -1586,6 +1612,7 @@ static PT: Strings = Strings {
     favorites_filter_typing: " Filtro - [Enter] para confirmar, [Esc] para cancelar ",
     favorites_filter_normal: " Filtro - [Ctrl+F] ou [/] ",
     favorites_filter_placeholder: " filtrar favoritos...",
+    offline_filter_placeholder: " filtrar downloads...",
 
     no_track_loaded: "Nenhuma música carregada",
     play_pause: "Play/Pausa",
@@ -1719,6 +1746,7 @@ static PT: Strings = Strings {
     queue_empty_subtitle: "Nenhuma música tocando",
 
     hint_play: " reproduzir  ",
+    hint_filter: " filtrar  ",
     hint_menu: " menu  ",
     hint_close: " fechar",
     hint_remove: " remover  ",
@@ -1756,13 +1784,15 @@ static PT: Strings = Strings {
 
     offline_empty: "Sem conteúdo offline",
     download_for_offline: "Baixar para modo offline",
+    remove_from_offline: "Remover do offline",
     status_downloading_track: "Baixando para offline...",
     status_track_saved_offline: "Faixa salva para offline",
     status_album_saved_offline: "Álbum salvo para offline",
+    status_playlist_saved_offline: "Playlist salva para offline",
     status_offline_download_error: "Erro ao baixar para offline",
     status_removed_offline: "Removido do modo offline",
     hint_download_album: " baixar  ",
-    hint_expand_collapse: "→ expandir/recolher",
+    hint_open_tracks: "Enter abrir faixas",
     offline_indicator: "● Modo offline ",
     no_internet: "Sem conexão com a internet",
 
@@ -1832,6 +1862,7 @@ static PT: Strings = Strings {
 
     header_title: "Título",
     header_artist: "Artista",
+    header_creator: "Criador",
     header_album: "Álbum",
     header_duration: "Duração",
     header_fans: "Fãs",
@@ -1894,6 +1925,7 @@ static DE: Strings = Strings {
     favorites_filter_typing: " Filter - [Enter] bestätigen, [Esc] abbrechen ",
     favorites_filter_normal: " Filter - [Ctrl+F] oder [/] ",
     favorites_filter_placeholder: " Favoriten filtern...",
+    offline_filter_placeholder: " Downloads filtern...",
 
     no_track_loaded: "Kein Titel geladen",
     play_pause: "Play/Pause",
@@ -2027,6 +2059,7 @@ static DE: Strings = Strings {
     queue_empty_subtitle: "Keine Musik wird abgespielt",
 
     hint_play: " abspielen  ",
+    hint_filter: " filtern  ",
     hint_menu: " Menü  ",
     hint_close: " schließen",
     hint_remove: " entfernen  ",
@@ -2064,13 +2097,15 @@ static DE: Strings = Strings {
 
     offline_empty: "Keine Offline-Inhalte",
     download_for_offline: "Für Offline-Modus herunterladen",
+    remove_from_offline: "Aus Offline entfernen",
     status_downloading_track: "Offline wird heruntergeladen...",
     status_track_saved_offline: "Titel offline gespeichert",
     status_album_saved_offline: "Album offline gespeichert",
+    status_playlist_saved_offline: "Playlist offline gespeichert",
     status_offline_download_error: "Offline-Download-Fehler",
     status_removed_offline: "Aus Offline entfernt",
     hint_download_album: " herunterladen  ",
-    hint_expand_collapse: "→ auf-/zuklappen",
+    hint_open_tracks: "Enter Titel öffnen",
     offline_indicator: "● Offline-Modus ",
     no_internet: "Keine Internetverbindung",
 
@@ -2140,6 +2175,7 @@ static DE: Strings = Strings {
 
     header_title: "Titel",
     header_artist: "Künstler",
+    header_creator: "Ersteller",
     header_album: "Album",
     header_duration: "Dauer",
     header_fans: "Fans",

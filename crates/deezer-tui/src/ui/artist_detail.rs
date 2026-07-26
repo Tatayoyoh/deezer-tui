@@ -7,9 +7,10 @@ use ratatui_image::{Resize, StatefulImage};
 
 use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab, SimilarArtistEntry};
 
-use crate::client::ViewState;
+use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
+use crate::ui::common;
 use crate::ui::common::shortcut_hint;
 
 /// Draw the artist detail overlay (replaces the content area).
@@ -37,6 +38,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
         .split(area);
 
     let detail = detail.clone();
+    view.record_click(columns[0], ClickTarget::DetailLeftPanel);
     draw_artist_info(frame, &detail, view, columns[0]);
     // Auto-switch focus to right if left column lost its scrollbar (e.g. on resize)
     if !view.artist_detail_left_scrollable && view.artist_detail_left_focused {
@@ -227,13 +229,20 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
         .split(area);
 
     // Sub-tab bar
-    let tab_titles = vec![
-        Line::from(s.artist_top_tracks),
-        Line::from(s.artist_albums),
-        Line::from(s.artist_lives),
-        Line::from(s.artist_other),
-        Line::from(s.artist_similar),
+    let titles = [
+        s.artist_top_tracks,
+        s.artist_albums,
+        s.artist_lives,
+        s.artist_other,
+        s.artist_similar,
     ];
+    for (i, rect) in common::tab_rects(chunks[0], &titles)
+        .into_iter()
+        .enumerate()
+    {
+        view.record_click(rect, ClickTarget::ArtistSubTab(i));
+    }
+    let tab_titles: Vec<Line> = titles.iter().map(|t| Line::from(*t)).collect();
 
     let selected_tab = match view.artist_detail_sub_tab {
         ArtistSubTab::TopTracks => 0,
@@ -265,12 +274,13 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
     // Content based on sub-tab
     match view.artist_detail_sub_tab {
         ArtistSubTab::TopTracks => {
-            draw_top_tracks(frame, detail, view.artist_detail_selected, chunks[1]);
+            draw_top_tracks(frame, detail, view, view.artist_detail_selected, chunks[1]);
         }
         ArtistSubTab::Similar => {
             draw_similar_artists(
                 frame,
                 &detail.similar_artists,
+                view,
                 view.artist_detail_selected,
                 chunks[1],
             );
@@ -281,6 +291,7 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
             draw_album_list(
                 frame,
                 &albums,
+                view,
                 view.artist_detail_selected,
                 show_type,
                 chunks[1],
@@ -290,7 +301,13 @@ fn draw_right_panel(frame: &mut Frame, detail: &ArtistDetail, view: &ViewState, 
 }
 
 /// Draw the top tracks list.
-fn draw_top_tracks(frame: &mut Frame, detail: &ArtistDetail, selected: usize, area: Rect) {
+fn draw_top_tracks(
+    frame: &mut Frame,
+    detail: &ArtistDetail,
+    view: &ViewState,
+    selected: usize,
+    area: Rect,
+) {
     let s = t();
     if detail.top_tracks.is_empty() {
         let msg =
@@ -347,12 +364,20 @@ fn draw_top_tracks(frame: &mut Frame, detail: &ArtistDetail, selected: usize, ar
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        1, // header (this table has no title line)
+        table_state.offset(),
+        detail.top_tracks.len(),
+        RowsKind::ArtistDetail,
+    );
 }
 
 /// Draw the album list for Albums/Lives/Other sub-tabs.
 fn draw_album_list(
     frame: &mut Frame,
     albums: &[&ArtistAlbumEntry],
+    view: &ViewState,
     selected: usize,
     show_type: bool,
     area: Rect,
@@ -429,12 +454,20 @@ fn draw_album_list(
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        1, // header (this table has no title line)
+        table_state.offset(),
+        albums.len(),
+        RowsKind::ArtistDetail,
+    );
 }
 
 /// Draw the similar artists list for the Similar sub-tab.
 fn draw_similar_artists(
     frame: &mut Frame,
     artists: &[SimilarArtistEntry],
+    view: &ViewState,
     selected: usize,
     area: Rect,
 ) {
@@ -483,6 +516,13 @@ fn draw_similar_artists(
 
     let mut table_state = TableState::default().with_selected(Some(selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        1, // header (this table has no title line)
+        table_state.offset(),
+        artists.len(),
+        RowsKind::ArtistDetail,
+    );
 }
 
 fn format_fans(n: u64) -> String {

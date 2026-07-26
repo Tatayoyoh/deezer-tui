@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
-use crate::client::{InputMode, ViewState};
+use crate::client::{ClickTarget, InputMode, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::protocol::SearchCategory;
 use crate::theme::Theme;
@@ -21,7 +21,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
             .split(area);
 
         draw_search_input(frame, view, chunks[0]);
-        draw_category_menu(frame, view.search_category, chunks[1]);
+        draw_category_menu(frame, view, chunks[1]);
         draw_results_table(frame, view, chunks[2]);
     } else {
         let chunks = Layout::default()
@@ -62,6 +62,7 @@ fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let input = Paragraph::new(input_text).block(input_block);
     frame.render_widget(input, area);
+    view.record_click(area, ClickTarget::FilterInput);
 
     if is_typing {
         let cursor_x = area.x + 1 + view.search_input.len() as u16;
@@ -70,33 +71,17 @@ fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
     }
 }
 
-fn draw_category_menu(frame: &mut Frame, current: SearchCategory, area: Rect) {
+fn draw_category_menu(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
-    let spans: Vec<Span> = SearchCategory::ALL
+    let labels: Vec<&str> = SearchCategory::ALL
         .iter()
-        .enumerate()
-        .flat_map(|(i, cat)| {
-            let mut parts = Vec::new();
-            if i > 0 {
-                parts.push(Span::styled("  ", Theme::dim()));
-            }
-            if *cat == current {
-                parts.push(Span::styled(
-                    s.search_category_label(*cat),
-                    Style::default()
-                        .fg(Theme::primary())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ));
-            } else {
-                parts.push(Span::styled(s.search_category_label(*cat), Theme::dim()));
-            }
-            parts
-        })
+        .map(|cat| s.search_category_label(*cat))
         .collect();
-
-    let line = Line::from(spans);
-    let menu = Paragraph::new(line).alignment(Alignment::Center);
-    frame.render_widget(menu, area);
+    let current = SearchCategory::ALL
+        .iter()
+        .position(|cat| *cat == view.search_category)
+        .unwrap_or(0);
+    common::draw_category_menu(frame, view, area, &labels, current);
 }
 
 fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
@@ -163,4 +148,11 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 
     let mut table_state = TableState::default().with_selected(Some(view.search_selected));
     frame.render_stateful_widget(table, area, &mut table_state);
+    view.record_rows(
+        area,
+        2, // title + header
+        table_state.offset(),
+        view.search_display.len(),
+        RowsKind::Tab,
+    );
 }
