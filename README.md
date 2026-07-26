@@ -55,8 +55,12 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Auto update<br>
 ✅ MPRIS support for Linux desktops environments : play/next track/previous track<br>
 
+## In action
+
+Simple search
 ![search](assets/search.gif)
 
+Theme selection
 ![themes](assets/themes.gif)
 
 ## Build on your system
