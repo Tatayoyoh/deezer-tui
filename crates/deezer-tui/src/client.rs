@@ -615,6 +615,9 @@ pub struct ViewState {
     pub genre_detail: Option<GenreDetail>,
     pub genre_detail_loading: bool,
     pub status_msg: Option<String>,
+    /// When `status_msg` last changed — the notification auto-hides after
+    /// [`STATUS_MSG_TTL`], even though the daemon keeps the text in snapshots.
+    pub status_msg_at: Option<Instant>,
     pub login_error: Option<String>,
     pub login_loading: bool,
     pub user_name: Option<String>,
@@ -646,10 +649,17 @@ pub struct ViewState {
     pub cover_image: Option<StatefulProtocol>,
     /// URL of the currently loaded cover image (to avoid re-fetching).
     pub cover_image_url: String,
+    /// Screen rect where the real cover image was last drawn, so overlays can
+    /// dim the background around it without touching the image cells (dimming
+    /// sixel/kitty image cells corrupts the artwork). `None` when no image.
+    pub cover_image_area: Option<Rect>,
 
     /// Button area set by the UI draw pass, used for mouse hit-testing.
     pub login_button_area: Cell<Option<Rect>>,
 }
+
+/// How long a status notification stays visible before hiding itself.
+pub const STATUS_MSG_TTL: Duration = Duration::from_secs(7);
 
 /// A temporary notification message that auto-dismisses.
 #[derive(Debug, Clone)]
@@ -778,6 +788,7 @@ impl ViewState {
             genre_detail: snap.genre_detail.clone(),
             genre_detail_loading: snap.genre_detail_loading,
             status_msg: snap.status_msg.clone(),
+            status_msg_at: snap.status_msg.as_ref().map(|_| Instant::now()),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
             user_name: snap.user_name.clone(),
@@ -804,7 +815,23 @@ impl ViewState {
             toast: None,
             cover_image: None,
             cover_image_url: String::new(),
+            cover_image_area: None,
             login_button_area: Cell::new(None),
+        }
+    }
+
+    /// Set the transient status notification and restart its display timer.
+    pub fn set_status_msg(&mut self, msg: Option<String>) {
+        self.status_msg_at = msg.as_ref().map(|_| Instant::now());
+        self.status_msg = msg;
+    }
+
+    /// The status notification, or `None` once it has been on screen for
+    /// [`STATUS_MSG_TTL`].
+    pub fn visible_status_msg(&self) -> Option<&str> {
+        match self.status_msg_at {
+            Some(at) if at.elapsed() < STATUS_MSG_TTL => self.status_msg.as_deref(),
+            _ => None,
         }
     }
 
@@ -980,7 +1007,9 @@ impl ViewState {
                 .collect();
             self.nav_synced_from_daemon = true;
         }
-        self.status_msg = snap.status_msg;
+        if snap.status_msg != self.status_msg {
+            self.set_status_msg(snap.status_msg);
+        }
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
         self.user_name = snap.user_name;
@@ -1350,12 +1379,31 @@ impl Client {
         let mut running = true;
         let mut send_shutdown = false;
         let mut update_check_done = config.skip_update_check;
+        let mut prev_over_image = false;
 
         while running {
             // Clear expired toast
             if self.view.toast.as_ref().is_some_and(|t| t.is_expired()) {
                 self.view.toast = None;
             }
+
+            // On image-capable terminals (sixel/kitty), a modal drawn over the
+            // cover image can leave remnants when it closes — the buffer diff
+            // skips re-emitting the image. Force a full redraw on the frame right
+            // after such a layer closes.
+            // On detail pages `overlay` is the detail itself, so only count
+            // layers drawn ON TOP of it: a popup, or a modal overlay that
+            // replaces the detail (which then sits in `overlay_stack`).
+            let over_image = self.view.cover_image.is_some()
+                && (self.view.popup.is_some()
+                    || !matches!(
+                        self.view.overlay,
+                        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
+                    ));
+            if prev_over_image && !over_image {
+                terminal.clear()?;
+            }
+            prev_over_image = over_image;
 
             terminal.draw(|frame| {
                 ui::draw(frame, &mut self.view);
@@ -1386,7 +1434,8 @@ impl Client {
                     KeyAction::SendCommand(cmd) => {
                         if let Err(e) = self.send_cmd(&cmd).await {
                             debug!("Send command error: {e}");
-                            self.view.status_msg = Some(t().daemon_disconnected.into());
+                            self.view
+                                .set_status_msg(Some(t().daemon_disconnected.into()));
                             running = false;
                         }
                     }
@@ -1394,7 +1443,8 @@ impl Client {
                         for cmd in &cmds {
                             if let Err(e) = self.send_cmd(cmd).await {
                                 debug!("Send command error: {e}");
-                                self.view.status_msg = Some(t().daemon_disconnected.into());
+                                self.view
+                                    .set_status_msg(Some(t().daemon_disconnected.into()));
                                 running = false;
                                 break;
                             }
@@ -1501,7 +1551,8 @@ impl Client {
             for cmd in &nav_cmds {
                 if let Err(e) = self.send_cmd(cmd).await {
                     debug!("Send nav command error: {e}");
-                    self.view.status_msg = Some(t().daemon_disconnected.into());
+                    self.view
+                        .set_status_msg(Some(t().daemon_disconnected.into()));
                     running = false;
                     break;
                 }
@@ -1523,17 +1574,19 @@ impl Client {
                     self.maybe_fetch_cover_image();
                 }
                 Ok(Ok(Some(ServerMessage::Error(err)))) => {
-                    self.view.status_msg = Some(format!("Error: {err}"));
+                    self.view.set_status_msg(Some(format!("Error: {err}")));
                 }
                 Ok(Ok(None)) => {
                     // Daemon disconnected
-                    self.view.status_msg = Some(t().daemon_disconnected.into());
+                    self.view
+                        .set_status_msg(Some(t().daemon_disconnected.into()));
                     running = false;
                 }
                 Ok(Err(e)) => {
                     // Read/parse error — log but don't crash immediately
                     debug!("Read error from daemon: {e}");
-                    self.view.status_msg = Some(format!("Communication error: {e}"));
+                    self.view
+                        .set_status_msg(Some(format!("Communication error: {e}")));
                 }
                 Err(_) => {
                     // Timeout — no data available, continue
@@ -2336,12 +2389,12 @@ impl Client {
                         Theme::set(ThemeId::ALL[*selected]);
                     }
                     KeyCode::Left => {
-                        let t = Theme::transparency().saturating_sub(10);
-                        Theme::set_transparency(t);
+                        // Transparency is a toggle: knob left = off.
+                        Theme::set_transparency(0);
                     }
                     KeyCode::Right => {
-                        let t = (Theme::transparency() + 10).min(100);
-                        Theme::set_transparency(t);
+                        // Transparency is a toggle: knob right = on.
+                        Theme::set_transparency(100);
                     }
                     KeyCode::Enter => {
                         // Confirm selection, save theme + transparency to config, back to settings

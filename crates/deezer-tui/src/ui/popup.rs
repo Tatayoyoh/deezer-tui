@@ -7,6 +7,7 @@ use ratatui::widgets::{
 use crate::client::{fuzzy_match, Overlay, PopupMenu, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
+use crate::ui::common::{shortcut_hint, shortcut_line};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
@@ -15,20 +16,35 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         draw_toast(frame, &toast.message, toast.is_error);
     }
 
-    // Dim backdrop behind modals (but NOT for detail views — they replace content, not overlay it).
-    // WaitingList manages its own backdrop after rendering any stacked background overlay.
-    // Also skip when a detail view is in the overlay stack (modal stacked on top of detail).
-    let is_detail_overlay = matches!(
+    // Overlays that render as background content (a sub-page: detail views,
+    // waiting list) dim themselves once something is drawn on top, in the popup
+    // section below. Everything else — returning modals (Settings, …) or a
+    // popup over a tab — dims the background here.
+    let is_bg_content_overlay = matches!(
+        view.overlay,
+        Some(Overlay::AlbumDetail { .. })
+            | Some(Overlay::ArtistDetail)
+            | Some(Overlay::GenreDetail { .. })
+            | Some(Overlay::PlaylistDetail { .. })
+            | Some(Overlay::WaitingList { .. })
+    );
+    // When an album/artist detail is the background, keep its cover image out of
+    // the dim pass — dimming sixel/kitty image cells corrupts the artwork.
+    let detail_in_view = matches!(
         view.overlay,
         Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
     ) || view
         .overlay_stack
         .iter()
         .any(|o| matches!(o, Overlay::AlbumDetail { .. } | Overlay::ArtistDetail));
-    let is_waiting_list = matches!(view.overlay, Some(Overlay::WaitingList { .. }));
+    let protect = if detail_in_view {
+        view.cover_image_area
+    } else {
+        None
+    };
     let has_modal = view.overlay.is_some() || view.popup.is_some();
-    if has_modal && !is_detail_overlay && !is_waiting_list {
-        draw_backdrop(frame);
+    if has_modal && !is_bg_content_overlay {
+        draw_backdrop(frame, protect);
     }
 
     // Clamp help scroll in-place so it doesn't exceed visible area
@@ -81,6 +97,11 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             // Don't return — let the popup (context menu) render on top if open
         }
         Some(Overlay::PlaylistDetail { selected }) => {
+            // Dim the tab behind this centered modal (like the waiting list).
+            // With a popup on top, the popup section below dims once instead.
+            if view.popup.is_none() {
+                draw_backdrop(frame, protect);
+            }
             draw_playlist_detail(frame, view, *selected);
             // Don't return — let the popup (context menu) render on top if open
         }
@@ -94,14 +115,11 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             if let Some(ps) = bg_ps {
                 draw_playlist_detail(frame, view, ps);
             }
-            // Dim whatever is behind, but skip when album/artist detail is in the stack —
-            // the backdrop overwrites image cells and causes pixelation.
-            let detail_in_stack = view
-                .overlay_stack
-                .iter()
-                .any(|o| matches!(o, Overlay::AlbumDetail { .. } | Overlay::ArtistDetail));
-            if !detail_in_stack {
-                draw_backdrop(frame);
+            // Dim whatever is behind (the cover image, if any, is left untouched).
+            // If a popup is also open, the popup section below applies a single
+            // uniform dim over everything, so skip this one to avoid double-dim.
+            if view.popup.is_none() {
+                draw_backdrop(frame, protect);
             }
             draw_waiting_list(frame, view, sel);
             // Don't return — let the popup (context menu) render on top if open
@@ -114,14 +132,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         return;
     };
 
-    // When a popup opens on top of an overlay, add a second backdrop.
-    // Skip for detail views (album/artist) — backdrop over the image area causes pixelation.
-    let is_content_overlay = matches!(
-        view.overlay,
-        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
-    );
-    if view.overlay.is_some() && !is_content_overlay {
-        draw_backdrop(frame);
+    // A popup on top of a background-content overlay dims that overlay here
+    // (the cover image, if any, is left untouched).
+    if view.overlay.is_some() {
+        draw_backdrop(frame, protect);
     }
 
     match &popup.sub_menu {
@@ -351,11 +365,11 @@ fn draw_playlist_filter_input(frame: &mut Frame, filter_input: &str, is_typing: 
         } else {
             Theme::border()
         })
-        .title(if is_typing {
+        .title(shortcut_line(if is_typing {
             s.playlist_filter_typing
         } else {
             s.playlist_filter_normal
-        })
+        }))
         .title_style(Theme::title());
 
     let input_text = if filter_input.is_empty() && !is_typing {
@@ -497,7 +511,10 @@ fn draw_track_info(frame: &mut Frame, popup: &PopupMenu) {
             Span::styled(&track.track_id, Theme::text()),
         ]),
         Line::from(""),
-        Line::from(Span::styled(s.press_esc_close, Theme::dim())),
+        Line::from(vec![
+            Span::styled("Esc", Theme::shortcut_key()),
+            Span::styled(s.hint_close, Theme::dim()),
+        ]),
     ];
 
     let paragraph = Paragraph::new(info_lines);
@@ -522,8 +539,8 @@ fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
         (Some("Space"), s.help_play_pause),
         (Some("n"), s.help_next_track),
         (Some("b"), s.help_prev_track),
-        (Some("C-→"), s.help_seek_forward),
-        (Some("C-←"), s.help_seek_backward),
+        (Some("Ctrl+→"), s.help_seek_forward),
+        (Some("Ctrl+←"), s.help_seek_backward),
         (Some("s"), s.help_toggle_shuffle),
         (Some("r"), s.help_cycle_repeat),
         (Some("+/-"), s.help_volume),
@@ -564,15 +581,18 @@ fn draw_help_overlay(frame: &mut Frame, scroll: &mut usize) {
     let items: Vec<ListItem> = shortcuts
         .iter()
         .map(|(key, desc)| match key {
-            Some(k) => ListItem::new(Line::from(vec![
-                Span::styled(
-                    format!("  {:<22}", k),
-                    Style::default()
-                        .fg(Theme::primary())
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(*desc, Theme::text()),
-            ])),
+            Some(k) => {
+                // Chip only the key text (not the alignment padding). All keys
+                // use the same style here — Flow's special chip is footer-only.
+                let key_style = Theme::shortcut_key();
+                let pad = 22usize.saturating_sub(k.chars().count());
+                ListItem::new(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(*k, key_style),
+                    Span::raw(" ".repeat(pad)),
+                    Span::styled(*desc, Theme::text()),
+                ]))
+            }
             None => ListItem::new(Line::from(Span::styled(
                 format!("  {}", desc),
                 Theme::dim(),
@@ -665,13 +685,13 @@ fn draw_info_overlay(frame: &mut Frame) {
 fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
     let s = t();
     let entries: &[(&str, &str)] = &[
-        (s.settings_shortcuts, "[?]"),
+        (s.settings_shortcuts, "?"),
         (s.settings_themes, ""),
         (s.settings_quality, ""),
         (s.settings_language, ""),
         (s.settings_logout, ""),
-        (s.settings_background, "[Ctrl+Z]"),
-        (s.settings_quit, "[Ctrl+Q]"),
+        (s.settings_background, "Ctrl+Z"),
+        (s.settings_quit, "Ctrl+Q"),
     ];
 
     let area = frame.area();
@@ -704,14 +724,21 @@ fn draw_settings_overlay(frame: &mut Frame, selected: usize) {
                 ListItem::new(Line::from(Span::styled(format!("{prefix}{label}"), style)))
             } else {
                 let text_part = format!("{prefix}{label}");
-                let pad = inner
-                    .width
-                    .saturating_sub(text_part.len() as u16 + shortcut.len() as u16)
-                    as usize;
+                // Count characters, not bytes: accented labels (e.g. "arrière")
+                // are multi-byte in UTF-8 but one column wide.
+                let used = (text_part.chars().count() + shortcut.chars().count()) as u16;
+                let pad = inner.width.saturating_sub(used) as usize;
                 ListItem::new(Line::from(vec![
                     Span::styled(text_part, style),
                     Span::styled(" ".repeat(pad), style),
-                    Span::styled(*shortcut, if i == selected { style } else { Theme::dim() }),
+                    Span::styled(
+                        *shortcut,
+                        if i == selected {
+                            style
+                        } else {
+                            Theme::shortcut_key()
+                        },
+                    ),
                 ]))
             }
         })
@@ -726,7 +753,7 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     let s = t();
     let themes = ThemeId::ALL;
     let current = Theme::current();
-    let opacity = Theme::transparency();
+    let transparent = Theme::is_transparent();
 
     let area = frame.area();
     // transparency (1) + blank (1) + header (1) + blank (1) + themes + blank (1) + hints (1) + borders (2)
@@ -757,19 +784,27 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
         ])
         .split(inner);
 
-    // ── Transparency slider ──────────────────────────────────────
-    let filled = (opacity / 10) as usize;
-    let empty = 10usize.saturating_sub(filled);
-    let bar: String = "█".repeat(filled) + &"░".repeat(empty);
-    let pct = format!("{opacity:>3}%");
-    let slider_line = Line::from(vec![
-        Span::styled(format!(" {} ", s.transparency_label), Theme::text()),
-        Span::styled("◀ ", Theme::dim()),
-        Span::styled(bar, Style::default().fg(Theme::primary())),
-        Span::styled(" ▶ ", Theme::dim()),
-        Span::styled(pct, Theme::text()),
+    // ── Transparency toggle ──────────────────────────────────────
+    // "Transparency <status> <toggle>": ON/OFF (untranslated, left-padded to 3
+    // so the knob stays put) then a knob switch (knob right = on, left = off).
+    // Left/Right flip it. Indent matches the theme list below.
+    let (status, switch, switch_style) = if transparent {
+        (
+            "ON",
+            "[ ●]",
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        ("OFF", "[● ]", Theme::dim())
+    };
+    let toggle_line = Line::from(vec![
+        Span::styled(format!("   {} ", s.transparency_label), Theme::text()),
+        Span::styled(format!("{status:<3} "), switch_style),
+        Span::styled(switch, switch_style),
     ]);
-    frame.render_widget(Paragraph::new(slider_line), chunks[0]);
+    frame.render_widget(Paragraph::new(toggle_line), chunks[0]);
 
     // ── Theme list ───────────────────────────────────────────────
     let mut items: Vec<ListItem> = Vec::with_capacity(themes.len() + 2);
@@ -801,11 +836,10 @@ fn draw_theme_picker(frame: &mut Frame, selected: usize) {
     frame.render_widget(List::new(items), chunks[2]);
 
     // ── Shortcut hints ───────────────────────────────────────────
-    let hint_line = Line::from(vec![
-        Span::styled(s.theme_picker_hint_transparency, Theme::dim()),
-        Span::styled("  ", Theme::dim()),
-        Span::styled(s.theme_picker_hint_navigate, Theme::dim()),
-    ]);
+    let mut hint_spans = shortcut_hint(s.theme_picker_hint_transparency).spans;
+    hint_spans.push(Span::styled("  ", Theme::dim()));
+    hint_spans.extend(shortcut_hint(s.theme_picker_hint_navigate).spans);
+    let hint_line = Line::from(hint_spans);
     frame.render_widget(Paragraph::new(hint_line), chunks[4]);
 }
 
@@ -1037,26 +1071,11 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     // Footer hints
     let hints = Line::from(vec![
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Enter", Theme::shortcut_key()),
         Span::styled(s.hint_play, Theme::dim()),
-        Span::styled(
-            "x",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("x", Theme::shortcut_key()),
         Span::styled(s.hint_menu, Theme::dim()),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Esc", Theme::shortcut_key()),
         Span::styled(s.hint_close, Theme::dim()),
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);
@@ -1184,33 +1203,13 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     // Footer hints
     let hints = Line::from(vec![
-        Span::styled(
-            "d",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("d", Theme::shortcut_key()),
         Span::styled(s.hint_remove, Theme::dim()),
-        Span::styled(
-            "f",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("f", Theme::shortcut_key()),
         Span::styled(s.hint_favorite, Theme::dim()),
-        Span::styled(
-            "x",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("x", Theme::shortcut_key()),
         Span::styled(s.hint_menu, Theme::dim()),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("Esc", Theme::shortcut_key()),
         Span::styled(s.hint_close, Theme::dim()),
     ]);
     let footer = Paragraph::new(hints).alignment(Alignment::Center);
@@ -1247,15 +1246,57 @@ fn draw_toast(frame: &mut Frame, message: &str, is_error: bool) {
     frame.render_widget(text, inner);
 }
 
-/// Render a dimmed full-screen backdrop behind modals.
-fn draw_backdrop(frame: &mut Frame) {
-    let area = frame.area();
-    let backdrop = Block::default().style(Style::default().bg(Theme::backdrop()));
-    frame.render_widget(backdrop, area);
+/// Dim the background behind modals, btop-style: darken the colors of the cells
+/// already drawn in the content area (excluding the bottom player bar) so the
+/// background stays visible but grayed, instead of covering it with a layer.
+/// With a transparent background the solid cells (text) dim while the terminal
+/// still shows through the `Reset` cells. `protect` (e.g. a cover image) is
+/// left untouched.
+fn draw_backdrop(frame: &mut Frame, protect: Option<Rect>) {
+    /// Percent of each RGB channel kept when dimming (lower = darker).
+    const KEEP: u16 = 40;
+    fn dim(c: Color) -> Color {
+        match c {
+            Color::Rgb(r, g, b) => Color::Rgb(
+                (r as u16 * KEEP / 100) as u8,
+                (g as u16 * KEEP / 100) as u8,
+                (b as u16 * KEEP / 100) as u8,
+            ),
+            // Reset / indexed / named colors can't be scaled; leave them as-is.
+            other => other,
+        }
+    }
+    let full = frame.area();
+    let y_end = full.bottom().saturating_sub(super::PLAYER_BAR_HEIGHT);
+    let buf = frame.buffer_mut();
+    for y in full.top()..y_end {
+        for x in full.left()..full.right() {
+            // Leave the cover image untouched — dimming its cells corrupts it.
+            if protect.is_some_and(|p| p.contains(Position::new(x, y))) {
+                continue;
+            }
+            if let Some(cell) = buf.cell_mut((x, y)) {
+                cell.fg = dim(cell.fg);
+                cell.bg = dim(cell.bg);
+            }
+        }
+    }
+}
+
+/// Area available to modals: the screen minus the bottom player bar. Keeping
+/// modals out of the player-bar rows keeps that bar visible below them, and
+/// stops the dim pass (which excludes those rows) from leaving a modal's bottom
+/// rows undimmed.
+fn modal_area(area: Rect) -> Rect {
+    Rect {
+        height: area.height.saturating_sub(super::PLAYER_BAR_HEIGHT),
+        ..area
+    }
 }
 
 /// Create a centered rectangle with a given percentage width and fixed height.
 fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
+    let area = modal_area(area);
     let popup_width = area.width * percent_x / 100;
     let popup_height = height.min(area.height.saturating_sub(2));
 
@@ -1267,6 +1308,7 @@ fn centered_rect(percent_x: u16, height: u16, area: Rect) -> Rect {
 
 /// Create a centered rectangle with absolute width and height.
 fn centered_rect_abs(width: u16, height: u16, area: Rect) -> Rect {
+    let area = modal_area(area);
     let popup_width = width.min(area.width);
     let popup_height = height.min(area.height.saturating_sub(2));
     let x = area.x + (area.width.saturating_sub(popup_width)) / 2;

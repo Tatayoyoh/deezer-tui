@@ -3,13 +3,14 @@ use ratatui::widgets::{
     Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
     TableState, Tabs, Wrap,
 };
-use ratatui_image::StatefulImage;
+use ratatui_image::{Resize, StatefulImage};
 
 use deezer_core::api::models::{ArtistAlbumEntry, ArtistDetail, ArtistSubTab, SimilarArtistEntry};
 
 use crate::client::ViewState;
 use crate::i18n::t;
 use crate::theme::Theme;
+use crate::ui::common::shortcut_hint;
 
 /// Draw the artist detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
@@ -72,13 +73,24 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
         ])
         .split(inner);
 
-    // Artist art: real image or placeholder
-    if let Some(ref mut proto) = view.cover_image {
+    // Artist art: real image or placeholder. Record the actual image sub-rect
+    // (not the letterbox padding) so overlays skip only it when dimming.
+    view.cover_image_area = if let Some(ref mut proto) = view.cover_image {
         let image_widget = StatefulImage::<ratatui_image::protocol::StatefulProtocol>::default();
         frame.render_stateful_widget(image_widget, chunks[0], proto);
+        // size_for gives the image size at origin; offset it onto chunks[0]
+        // (the image is drawn top-left, padding sits below it).
+        let sized = proto.size_for(Resize::Fit(None), chunks[0]);
+        Some(Rect {
+            x: chunks[0].x,
+            y: chunks[0].y,
+            width: sized.width,
+            height: sized.height,
+        })
     } else {
         draw_artist_art(frame, chunks[0]);
-    }
+        None
+    };
 
     // Artist metadata with scrollbar
     let meta_area = chunks[2];
@@ -101,9 +113,9 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
         Span::styled(format_fans(detail.nb_fan), value_style),
     ]));
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
-    lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
-    lines.push(Line::from(Span::styled("←/→  Switch tab", Theme::dim())));
+    lines.push(shortcut_hint(s.esc_back));
+    lines.push(shortcut_hint(s.enter_play_track));
+    lines.push(shortcut_hint("←/→  Switch tab"));
 
     view.artist_detail_left_scrollable = content_lines > visible_lines;
 

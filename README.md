@@ -37,16 +37,16 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ## Features
 
 ✅ Login through deezer.com<br>
-✅ Background player with [ctrl+z]<br>
-✅ Deezer Flow [f]<br>
+✅ Background player with `ctrl+z`<br>
+✅ Deezer Flow `f`<br>
 ✅ Search / favorites / radios pages<br>
-✅ Playing track context menu [ctrl+space]<br>
-✅ Focused element context menu [x]<br>
-✅ Album page [a]<br>
-✅ Artist page [t]<br>
-✅ Waiting list [w]<br>
-✅ Shortcut menu [?]<br>
-✅ Global app menu [ctrl+o] <br>
+✅ Playing track context menu `ctrl+space`<br>
+✅ Focused element context menu `x`<br>
+✅ Album page `a`<br>
+✅ Artist page `t`<br>
+✅ Waiting list `w`<br>
+✅ Shortcut menu `?`<br>
+✅ Global app menu `ctrl+o`<br>
 ✅ Themes, from official Deezer themes<br>
 ✅ Audio quality selection (MP3 64/128/320, FLAC)<br>
 ✅ Translations <br>

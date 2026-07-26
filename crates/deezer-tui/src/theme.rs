@@ -105,35 +105,34 @@ impl Theme {
         CURRENT_THEME.with(|c| c.get())
     }
 
-    /// Set background transparency (0–100, steps of 10). 0 = opaque, 100 = fully transparent.
+    /// Set the stored transparency value (the toggle writes 0 or 100).
+    /// Any 0–100 is accepted so configs saved by older (stepped) versions keep
+    /// deserializing; the value is interpreted as a toggle by `is_transparent`.
     pub fn set_transparency(transparency: u8) {
         BG_TRANSPARENCY.with(|c| c.set(transparency.min(100)));
     }
 
-    /// Get background transparency (0–100).
+    /// Get the stored transparency value (0–100).
     pub fn transparency() -> u8 {
         BG_TRANSPARENCY.with(|c| c.get())
     }
 
-    /// Effective background color given the current transparency setting.
-    /// At 0%: full `bg()`. At 100%: `Color::Reset` (terminal transparent background).
-    /// Intermediate values blend `bg()` RGB channels toward zero.
+    /// Whether background transparency is on. Transparency is a toggle: only a
+    /// fully transparent background (`Color::Reset`) actually reveals the
+    /// terminal — intermediate values just dim, so they aren't offered.
+    /// Any stored value ≥ 50 counts as on, mapping older stepped configs onto
+    /// the toggle.
+    pub fn is_transparent() -> bool {
+        Self::transparency() >= 50
+    }
+
+    /// Effective background color for the transparency toggle.
+    /// Off: solid `bg()`. On: `Color::Reset` (terminal transparent background).
     pub fn bg_with_opacity() -> Color {
-        let t = Self::transparency();
-        if t == 0 {
-            return Self::bg();
-        }
-        if t >= 100 {
-            return Color::Reset;
-        }
-        let opacity = (100 - t) as u32;
-        match Self::bg() {
-            Color::Rgb(r, g, b) => Color::Rgb(
-                (r as u32 * opacity / 100) as u8,
-                (g as u32 * opacity / 100) as u8,
-                (b as u32 * opacity / 100) as u8,
-            ),
-            other => other,
+        if Self::is_transparent() {
+            Color::Reset
+        } else {
+            Self::bg()
         }
     }
 
@@ -227,15 +226,6 @@ impl Theme {
         }
     }
 
-    /// Darkened backdrop color for modal overlays (simulates transparency).
-    pub fn backdrop() -> Color {
-        // Halve each RGB channel of bg() to create a dimming effect
-        match Self::bg() {
-            Color::Rgb(r, g, b) => Color::Rgb(r / 2, g / 2, b / 2),
-            other => other,
-        }
-    }
-
     pub fn border_focused_color() -> Color {
         Self::primary()
     }
@@ -303,5 +293,39 @@ impl Theme {
 
     pub fn tab_inactive() -> Style {
         Style::default().fg(Self::tab_inactive_color())
+    }
+
+    /// Shortcut-key "chip": secondary-colored text on a white pad (no brackets).
+    pub fn shortcut_key() -> Style {
+        Style::default()
+            .fg(Self::secondary())
+            // .bg(Color::Rgb(10, 10, 10))
+            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    }
+
+    /// Transient status notification: white text on the theme's primary color,
+    /// rendered on the last row of the content area, above the player bar.
+    pub fn notification() -> Style {
+        Style::default()
+            .fg(Color::White)
+            .bg(Self::primary())
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Flow's chip: white text on a secondary background, covering both the key
+    /// and its label, so the feature stands out.
+    pub fn shortcut_flow_chip() -> Style {
+        // Black text on themes whose secondary (the chip bg) is light; white
+        // otherwise, for readable contrast.
+        let fg = match Self::current() {
+            ThemeId::Emerald | ThemeId::Amber | ThemeId::DarkOrange | ThemeId::DarkYellow => {
+                Color::Rgb(30, 30, 30)
+            }
+            _ => Self::text_color(),
+        };
+        Style::default()
+            .fg(fg)
+            .bg(Self::secondary())
+            .add_modifier(Modifier::BOLD)
     }
 }

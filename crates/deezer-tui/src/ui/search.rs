@@ -47,11 +47,11 @@ fn draw_search_input(frame: &mut Frame, view: &ViewState, area: Rect) {
         } else {
             Theme::border()
         })
-        .title(if is_typing {
+        .title(common::shortcut_line(if is_typing {
             s.search_title_typing
         } else {
             s.search_title_normal
-        })
+        }))
         .title_style(Theme::title());
 
     let input_text = if view.search_input.is_empty() && !is_typing {

@@ -3,13 +3,14 @@ use ratatui::widgets::{
     Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
     TableState, Wrap,
 };
-use ratatui_image::StatefulImage;
+use ratatui_image::{Resize, StatefulImage};
 
 use deezer_core::api::models::AlbumDetail;
 
 use crate::client::ViewState;
 use crate::i18n::t;
 use crate::theme::Theme;
+use crate::ui::common::shortcut_hint;
 
 /// Draw the album detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
@@ -77,13 +78,24 @@ fn draw_album_info(frame: &mut Frame, detail: &AlbumDetail, view: &mut ViewState
         ])
         .split(inner);
 
-    // Album art: real image or placeholder
-    if let Some(ref mut proto) = view.cover_image {
+    // Album art: real image or placeholder. Record the actual image sub-rect
+    // (not the letterbox padding) so overlays skip only it when dimming.
+    view.cover_image_area = if let Some(ref mut proto) = view.cover_image {
         let image_widget = StatefulImage::<ratatui_image::protocol::StatefulProtocol>::default();
         frame.render_stateful_widget(image_widget, chunks[0], proto);
+        // size_for gives the image size at origin; offset it onto chunks[0]
+        // (the image is drawn top-left, padding sits below it).
+        let sized = proto.size_for(Resize::Fit(None), chunks[0]);
+        Some(Rect {
+            x: chunks[0].x,
+            y: chunks[0].y,
+            width: sized.width,
+            height: sized.height,
+        })
     } else {
         draw_album_art(frame, chunks[0]);
-    }
+        None
+    };
 
     // Album metadata with scrollbar
     let meta_area = chunks[2];
@@ -231,10 +243,10 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect, scro
     }
 
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(s.esc_back, Theme::dim())));
-    lines.push(Line::from(Span::styled(s.enter_play_track, Theme::dim())));
+    lines.push(shortcut_hint(s.esc_back));
+    lines.push(shortcut_hint(s.enter_play_track));
     lines.push(Line::from(vec![
-        Span::styled("[d]", Theme::dim()),
+        Span::styled("d", Theme::shortcut_key()),
         Span::styled(s.hint_download_album, Theme::dim()),
     ]));
 
