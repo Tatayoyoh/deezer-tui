@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
 - New Playlists Offline tab 
 - Offline filters for tracks, albums and playlists
 - Offline context menu : can now remove a track, album or playlist from offline storage
+- Search > Episodes, and Search > Podcasts is now working
 
 ### Changed
 - Keyboard shortcut indicators now share same color and style everywhere in the app

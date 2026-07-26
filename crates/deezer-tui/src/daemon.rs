@@ -101,6 +101,10 @@ enum AsyncResult {
         detail: PlaylistDetail,
         background: bool,
     },
+    /// Podcast show episodes. Shares the playlist detail view slot but is never
+    /// cached: show IDs and playlist IDs are unrelated ID spaces.
+    ShowDetailReady(PlaylistDetail),
+    ShowDetailError(String),
     PlaylistDetailError {
         err: String,
         background: bool,
@@ -1028,6 +1032,9 @@ impl Daemon {
             }
             Command::GetPlaylistDetail { playlist_id } => {
                 self.start_load_playlist_detail(playlist_id);
+            }
+            Command::GetShowDetail { show_id } => {
+                self.start_load_show_detail(show_id);
             }
             Command::PlayFromPlaylist { index } => {
                 if let Some(ref detail) = self.playlist_detail {
@@ -2011,6 +2018,42 @@ impl Daemon {
         });
     }
 
+    /// Load a podcast show's episodes into the playlist detail slot: episodes
+    /// are `TrackData`, so the detail overlay and playback work unchanged.
+    fn start_load_show_detail(&mut self, show_id: String) {
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+
+        self.playlist_detail_loading = true;
+        self.playlist_detail = None;
+        self.playlist_detail_selected = 0;
+        self.status_msg = Some(t().loading.into());
+
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_show_episodes(&show_id).await {
+                Ok((name, episodes)) => {
+                    let tracks: Vec<TrackData> = episodes.iter().map(|e| e.to_track()).collect();
+                    let detail = PlaylistDetail {
+                        playlist_id: show_id,
+                        title: name,
+                        creator: String::new(),
+                        nb_tracks: tracks.len() as u64,
+                        tracks,
+                    };
+                    let _ = tx.send(AsyncResult::ShowDetailReady(detail));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::ShowDetailError(e.to_string()));
+                }
+            }
+        });
+    }
+
     fn start_load_radios(&mut self) {
         if self.is_offline {
             return;
@@ -2189,10 +2232,14 @@ impl Daemon {
             self.status_msg = Some(t().no_internet.into());
             return;
         }
-        let Some(master_key) = self.master_key else {
+        // Podcast episodes streamed from the show's own host are not encrypted,
+        // so they need neither the master key nor the media API.
+        let direct_url = track.direct_stream_url().map(str::to_string);
+        let master_key = self.master_key;
+        if master_key.is_none() && direct_url.is_none() {
             self.status_msg = Some(t().status_player_not_ready.into());
             return;
-        };
+        }
 
         // Increment generation so any in-flight fetch for a previous track is ignored
         self.track_generation += 1;
@@ -2220,9 +2267,40 @@ impl Daemon {
         let cdn_http = self.cdn_http.clone();
         let tx = self.async_tx.clone();
         let quality = self.config.quality;
+        let not_ready_msg = t().status_player_not_ready;
 
         tokio::spawn(async move {
             let start = Instant::now();
+
+            // Externally hosted episode: fetch the audio as-is and skip the
+            // token / media API / decryption chain entirely.
+            if let Some(url) = direct_url {
+                match deezer_core::player::stream::download_direct(&url, &cdn_http).await {
+                    Ok(audio_data) => {
+                        info!(
+                            gen = generation,
+                            track_id = %track.track_id,
+                            bytes = audio_data.len(),
+                            total_ms = start.elapsed().as_millis(),
+                            "fetch_task: direct stream download OK"
+                        );
+                        let _ = tx.send(AsyncResult::TrackReady {
+                            audio_data,
+                            track,
+                            quality,
+                            generation,
+                        });
+                    }
+                    Err(e) => {
+                        warn!(gen = generation, track_id = %track.track_id, err = %e, "fetch_task: direct stream download FAILED");
+                        let _ = tx.send(AsyncResult::TrackFetchError {
+                            err: e.to_string(),
+                            generation,
+                        });
+                    }
+                }
+                return;
+            }
 
             // Lock the client only for the short API calls (token + stream URL),
             // then release it before the potentially long CDN download.
@@ -2323,6 +2401,13 @@ impl Daemon {
 
             // Download + decrypt without holding the client lock
             let dl_start = Instant::now();
+            let Some(master_key) = master_key else {
+                let _ = tx.send(AsyncResult::TrackFetchError {
+                    err: not_ready_msg.to_string(),
+                    generation,
+                });
+                return;
+            };
             match deezer_core::player::stream::download_and_decrypt(
                 &url,
                 &track.track_id,
@@ -2943,6 +3028,17 @@ impl Daemon {
                         self.status_msg = Some(t().fmt_error(t().status_playlist_error, &err));
                     }
                 }
+                AsyncResult::ShowDetailReady(detail) => {
+                    self.playlist_detail_loading = false;
+                    self.status_msg =
+                        Some(t().fmt_playlist_tracks_status(&detail.title, detail.tracks.len()));
+                    self.playlist_detail_selected = 0;
+                    self.playlist_detail = Some(detail);
+                }
+                AsyncResult::ShowDetailError(err) => {
+                    self.playlist_detail_loading = false;
+                    self.status_msg = Some(t().fmt_error(t().status_playlist_error, &err));
+                }
                 AsyncResult::RadiosReady(items) => {
                     self.radios_loading = false;
                     self.status_msg = Some(t().fmt_radios_loaded(items.len()));
@@ -3519,8 +3615,9 @@ impl Daemon {
             return;
         }
         // User-uploaded tracks (negative SNG_ID) aren't part of Deezer's catalog
-        // and can't be logged.
-        if track.is_user_uploaded() {
+        // and can't be logged. Neither are podcast episodes, whose IDs belong to
+        // a different namespace than songs.
+        if track.is_user_uploaded() || track.direct_stream_url().is_some() {
             return;
         }
         if self.listen_logged_for.as_ref() == Some(&track.track_id) {

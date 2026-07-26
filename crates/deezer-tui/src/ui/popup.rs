@@ -26,22 +26,13 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             | Some(Overlay::ArtistDetail)
             | Some(Overlay::GenreDetail { .. })
             | Some(Overlay::PlaylistDetail { .. })
+            | Some(Overlay::ShowDetail { .. })
             | Some(Overlay::WaitingList { .. })
     );
-    // When an album/artist detail is the background, keep its cover image out of
-    // the dim pass — dimming sixel/kitty image cells corrupts the artwork.
-    let detail_in_view = matches!(
-        view.overlay,
-        Some(Overlay::AlbumDetail { .. }) | Some(Overlay::ArtistDetail)
-    ) || view
-        .overlay_stack
-        .iter()
-        .any(|o| matches!(o, Overlay::AlbumDetail { .. } | Overlay::ArtistDetail));
-    let protect = if detail_in_view {
-        view.cover_image_area
-    } else {
-        None
-    };
+    // Keep the cover image (if one was drawn this frame) out of the dim pass —
+    // dimming sixel/kitty image cells corrupts the artwork. `cover_image_area`
+    // is set only when the detail actually rendered a real image.
+    let protect = view.cover_image_area;
     let has_modal = view.overlay.is_some() || view.popup.is_some();
     if has_modal && !is_bg_content_overlay {
         draw_backdrop(frame, protect);
@@ -99,24 +90,28 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             // Detail views are rendered in the main content area
             // Don't return — let the popup (context menu) render on top if open
         }
-        Some(Overlay::PlaylistDetail { selected }) => {
+        // A show's episode list uses the same modal as a playlist's tracks.
+        Some(Overlay::PlaylistDetail { selected }) | Some(Overlay::ShowDetail { selected }) => {
             // Dim the tab behind this centered modal (like the waiting list).
             // With a popup on top, the popup section below dims once instead.
             if view.popup.is_none() {
                 draw_backdrop(frame, protect);
             }
-            draw_playlist_detail(frame, view, *selected);
+            let is_show = matches!(view.overlay, Some(Overlay::ShowDetail { .. }));
+            draw_playlist_detail(frame, view, *selected, is_show);
             // Don't return — let the popup (context menu) render on top if open
         }
         Some(Overlay::WaitingList { selected }) => {
-            // If a playlist detail is stacked underneath, render it as background first
+            // If a playlist or show detail is stacked underneath, render it as
+            // background first
             let sel = *selected;
             let bg_ps = match view.overlay_stack.last() {
-                Some(Overlay::PlaylistDetail { selected: ps }) => Some(*ps),
+                Some(Overlay::PlaylistDetail { selected: ps }) => Some((*ps, false)),
+                Some(Overlay::ShowDetail { selected: ps }) => Some((*ps, true)),
                 _ => None,
             };
-            if let Some(ps) = bg_ps {
-                draw_playlist_detail(frame, view, ps);
+            if let Some((ps, is_show)) = bg_ps {
+                draw_playlist_detail(frame, view, ps, is_show);
             }
             // Dim whatever is behind (the cover image, if any, is left untouched).
             // If a popup is also open, the popup section below applies a single
@@ -1016,7 +1011,9 @@ fn draw_quality_picker(frame: &mut Frame, view: &ViewState, selected: usize) {
 }
 
 /// Draw the playlist detail modal.
-fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
+/// Renders the tracks of a playlist, or the episodes of a podcast show when
+/// `is_show` is set — both live in `view.playlist_detail`.
+fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is_show: bool) {
     let area = frame.area();
 
     let detail = match &view.playlist_detail {
@@ -1078,22 +1075,32 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         ])
         .split(inner);
 
-    // Subtitle: creator + track count
-    let subtitle = Line::from(vec![Span::styled(
-        s.playlist_subtitle(&detail.creator, detail.nb_tracks),
-        Theme::dim(),
-    )]);
+    // Subtitle: creator + track count (episode count for a show, which has no creator)
+    let subtitle_text = if is_show {
+        format!("{} {}", detail.nb_tracks, s.cat_episodes)
+    } else {
+        s.playlist_subtitle(&detail.creator, detail.nb_tracks)
+    };
+    let subtitle = Line::from(vec![Span::styled(subtitle_text, Theme::dim())]);
     frame.render_widget(
         Paragraph::new(subtitle).alignment(Alignment::Center),
         chunks[0],
     );
 
     // Table header
+    let (col_title, col_author) = if is_show {
+        (s.header_episode, s.header_podcast)
+    } else {
+        (s.header_title, s.header_artist)
+    };
     let header = Row::new(vec![
         Cell::from(Span::styled("#", Theme::dim())),
-        Cell::from(Span::styled(s.header_title, Theme::dim())),
-        Cell::from(Span::styled(s.header_artist, Theme::dim())),
-        Cell::from(Span::styled(s.header_album, Theme::dim())),
+        Cell::from(Span::styled(col_title, Theme::dim())),
+        Cell::from(Span::styled(col_author, Theme::dim())),
+        Cell::from(Span::styled(
+            if is_show { "" } else { s.header_album },
+            Theme::dim(),
+        )),
         Cell::from(Span::styled(s.header_duration, Theme::dim())),
     ])
     .height(1);
@@ -1163,18 +1170,24 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize) {
         RowsKind::PlaylistDetail,
     );
 
-    // Footer hints
-    let hints = Line::from(vec![
+    // Footer hints — a show has no context menu and no offline download
+    let mut hint_spans = vec![
         Span::styled("Enter", Theme::shortcut_key()),
         Span::styled(s.hint_play, Theme::dim()),
-        Span::styled("x", Theme::shortcut_key()),
-        Span::styled(s.hint_menu, Theme::dim()),
-        Span::styled("d", Theme::shortcut_key()),
-        Span::styled(s.hint_download_album, Theme::dim()),
+    ];
+    if !is_show {
+        hint_spans.extend([
+            Span::styled("x", Theme::shortcut_key()),
+            Span::styled(s.hint_menu, Theme::dim()),
+            Span::styled("d", Theme::shortcut_key()),
+            Span::styled(s.hint_download_album, Theme::dim()),
+        ]);
+    }
+    hint_spans.extend([
         Span::styled("Esc", Theme::shortcut_key()),
         Span::styled(s.hint_close, Theme::dim()),
     ]);
-    let footer = Paragraph::new(hints).alignment(Alignment::Center);
+    let footer = Paragraph::new(Line::from(hint_spans)).alignment(Alignment::Center);
     frame.render_widget(footer, chunks[2]);
 }
 

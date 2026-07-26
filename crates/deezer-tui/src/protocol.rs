@@ -128,6 +128,8 @@ pub enum Command {
     GetPlaylistDetail { playlist_id: String },
     /// Play a track from the playlist detail view.
     PlayFromPlaylist { index: usize },
+    /// Load a podcast show's episode list.
+    GetShowDetail { show_id: String },
     /// Logout — clear ARL, return to login screen.
     Logout,
     /// Load radio stations from Deezer.

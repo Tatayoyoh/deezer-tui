@@ -95,7 +95,8 @@ pub enum PopupAction {
 /// What the popup menu is operating on.
 #[derive(Debug, Clone)]
 pub enum PopupTarget {
-    Track(TrackData),
+    /// Boxed: `TrackData` dwarfs the other variants.
+    Track(Box<TrackData>),
     Artist {
         artist_id: String,
         name: String,
@@ -255,7 +256,7 @@ impl PopupMenu {
             title: None,
             items,
             selected: 1, // First selectable item
-            target: PopupTarget::Track(track),
+            target: PopupTarget::Track(Box::new(track)),
             is_favorite,
             sub_menu: None,
             playlist_context: None,
@@ -321,7 +322,7 @@ impl PopupMenu {
             title: Some(title),
             items,
             selected: 1,
-            target: PopupTarget::Track(track),
+            target: PopupTarget::Track(Box::new(track)),
             is_favorite,
             sub_menu: None,
             playlist_context: None,
@@ -384,7 +385,7 @@ impl PopupMenu {
                 is_header: false,
             },
             PopupMenuItem {
-                label: s.track_album.into(),
+                label: s.album_page.into(),
                 action: PopupAction::ViewAlbum,
                 is_header: false,
             },
@@ -530,6 +531,9 @@ pub enum Overlay {
     ArtistDetail,
     /// Playlist detail modal.
     PlaylistDetail { selected: usize },
+    /// Podcast show episodes modal. Reads the same `playlist_detail` state as
+    /// `PlaylistDetail`, minus the playlist-only actions.
+    ShowDetail { selected: usize },
     /// Genre/category detail page.
     GenreDetail {
         sub_tab: GenreDetailSubTab,
@@ -2517,6 +2521,11 @@ impl Client {
                                 playlist_id,
                             });
                         }
+                        if let Some(show_id) = item.show_id.clone() {
+                            self.view
+                                .set_nav_overlay(Overlay::ShowDetail { selected: 0 });
+                            return KeyAction::SendCommand(Command::GetShowDetail { show_id });
+                        }
                     }
                 }
                 match self.view.active_tab {
@@ -2769,6 +2778,7 @@ impl Client {
             Overlay::AlbumDetail { .. } => self.handle_album_detail_key(key),
             Overlay::ArtistDetail => self.handle_artist_detail_key(key),
             Overlay::PlaylistDetail { .. } => self.handle_playlist_detail_key(key),
+            Overlay::ShowDetail { .. } => self.handle_show_detail_key(key),
             Overlay::GenreDetail { .. } => self.handle_genre_detail_key(key),
             Overlay::WaitingList { .. } => self.handle_waiting_list_key(key),
             Overlay::OfflineDetail { .. } => self.handle_offline_detail_key(key),
@@ -2980,8 +2990,9 @@ impl Client {
                             .and_then(|a| a.tracks.get(*track_index))
                     };
                     if let Some(track) = track.cloned() {
-                        self.view.popup =
-                            Some(PopupMenu::remove_offline_only(PopupTarget::Track(track)));
+                        self.view.popup = Some(PopupMenu::remove_offline_only(PopupTarget::Track(
+                            Box::new(track),
+                        )));
                     }
                 }
                 KeyAction::Continue
@@ -3092,7 +3103,7 @@ impl Client {
             OfflineCategory::Tracks => self
                 .view
                 .offline_selected_track()
-                .map(|ot| PopupTarget::Track(ot.track.clone())),
+                .map(|ot| PopupTarget::Track(Box::new(ot.track.clone()))),
             OfflineCategory::Albums => {
                 let (_, album) = self.view.offline_selected_album()?;
                 Some(PopupTarget::Album {
@@ -3465,6 +3476,59 @@ impl Client {
                 }
             }
             // Open waiting list on top of playlist detail
+            KeyCode::Char('w') => {
+                self.view.push_overlay(Overlay::WaitingList { selected: 0 });
+                KeyAction::Continue
+            }
+            // Player controls
+            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
+            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
+            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                let new_vol = (self.view.volume + 0.05).min(1.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            KeyCode::Char('-') => {
+                let new_vol = (self.view.volume - 0.05).max(0.0);
+                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
+            }
+            _ => KeyAction::Continue,
+        }
+    }
+
+    /// Handle key events in the podcast show overlay. Same navigation as the
+    /// playlist detail, without the playlist-only actions (`x`, `d`).
+    fn handle_show_detail_key(&mut self, key: KeyEvent) -> KeyAction {
+        let selected = match self.view.overlay {
+            Some(Overlay::ShowDetail { selected }) => selected,
+            _ => return KeyAction::Continue,
+        };
+
+        let episode_count = self
+            .view
+            .playlist_detail
+            .as_ref()
+            .map(|d| d.tracks.len())
+            .unwrap_or(0);
+
+        match key.code {
+            KeyCode::Esc => {
+                self.view.pop_overlay();
+                KeyAction::Continue
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                let new_sel = selected.saturating_sub(1);
+                self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
+                KeyAction::Continue
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let max = episode_count.saturating_sub(1);
+                let new_sel = (selected + 1).min(max);
+                self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
+                KeyAction::Continue
+            }
+            KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
+            // Open waiting list on top of the show
             KeyCode::Char('w') => {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
@@ -4054,7 +4118,7 @@ impl Client {
             PopupAction::DownloadOffline => {
                 if let PopupTarget::Track(track) = target {
                     self.view.popup = None;
-                    KeyAction::SendCommand(Command::DownloadOffline { track })
+                    KeyAction::SendCommand(Command::DownloadOffline { track: *track })
                 } else {
                     KeyAction::Continue
                 }
@@ -4101,7 +4165,7 @@ impl Client {
             PopupAction::PlayNext => {
                 if let PopupTarget::Track(track) = target {
                     self.view.popup = None;
-                    KeyAction::SendCommand(Command::PlayNext { track })
+                    KeyAction::SendCommand(Command::PlayNext { track: *track })
                 } else {
                     KeyAction::Continue
                 }
@@ -4109,7 +4173,7 @@ impl Client {
             PopupAction::AddToQueue => {
                 if let PopupTarget::Track(track) = target {
                     self.view.popup = None;
-                    KeyAction::SendCommand(Command::AddToQueue { track })
+                    KeyAction::SendCommand(Command::AddToQueue { track: *track })
                 } else {
                     KeyAction::Continue
                 }
@@ -4573,8 +4637,10 @@ impl Client {
                 None
             }
             RowsKind::PlaylistDetail => {
-                if let Some(Overlay::PlaylistDetail { selected }) = self.view.overlay.as_mut() {
-                    *selected = index;
+                match self.view.overlay.as_mut() {
+                    Some(Overlay::PlaylistDetail { selected })
+                    | Some(Overlay::ShowDetail { selected }) => *selected = index,
+                    _ => {}
                 }
                 None
             }
