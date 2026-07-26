@@ -57,7 +57,7 @@
 #   ScrollUp[@<time>] [number]      Scroll terminal viewport up by rows
 #   ScrollDown[@<time>] [number]    Scroll terminal viewport down by rows
 
-Output themes.gif
+Output artist.gif
 
 Require echo
 
@@ -74,22 +74,40 @@ Set CaptionInactivityTimer 900ms
 
 CaptionOn
 Type "deezer-tui" Sleep 910ms  Enter
-Sleep 1s
-Ctrl+O
 Sleep 0.91s
+Ctrl+F
+Sleep 1s
+Type "Slash" Sleep 910ms  Enter
+Sleep 1s
+Type "x"
+Sleep 1s
 Down
-Sleep 0.3s
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 0.2s
+Down
+Sleep 1.5s
 Enter
+Sleep 2s
+Right
 Sleep 1s
 Down
 Sleep 1s
 Down
 Sleep 1s
+Right
+Sleep 2s
 Down
 Sleep 1s
-Down
-Sleep 1s
-Down
-Sleep 1s
-Down
+Enter
 Sleep 3s
