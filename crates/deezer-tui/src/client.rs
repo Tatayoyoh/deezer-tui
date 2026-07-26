@@ -1344,6 +1344,13 @@ impl ViewState {
         self.favorites.iter().any(|t| t.track_id == track_id)
     }
 
+    /// True when this track is the one loaded in the player, playing or paused.
+    pub fn is_playing_track(&self, track_id: &str) -> bool {
+        self.current_track
+            .as_ref()
+            .is_some_and(|t| t.track_id == track_id)
+    }
+
     /// Check if an artist is in the user's favorites.
     fn is_artist_favorite(&self, artist_id: &str) -> bool {
         self.favorite_artist_ids.iter().any(|id| id == artist_id)

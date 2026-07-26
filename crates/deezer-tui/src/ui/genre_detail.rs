@@ -6,6 +6,7 @@ use crate::i18n::t;
 use crate::protocol::GenreDetailSubTab;
 use crate::theme::Theme;
 use crate::ui::common;
+use crate::ui::common::track_number;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
@@ -93,7 +94,7 @@ fn draw_content(
                     .map(|(i, t)| {
                         let dur = t.duration_secs();
                         Row::new(vec![
-                            Cell::from(Span::styled(format!("{:>3}", i + 1), Theme::dim())),
+                            Cell::from(track_number(i, view.is_playing_track(&t.track_id))),
                             Cell::from(Span::styled(t.title.clone(), Theme::text())),
                             Cell::from(Span::styled(t.artist.clone(), Theme::text())),
                             Cell::from(Span::styled(t.album.clone(), Theme::dim())),

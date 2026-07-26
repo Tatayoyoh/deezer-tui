@@ -7,7 +7,7 @@ use ratatui::widgets::{
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
-use crate::ui::common::{shortcut_hint, shortcut_line};
+use crate::ui::common::{shortcut_hint, shortcut_line, track_number};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
@@ -1117,19 +1117,10 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
                 .as_ref()
                 .is_some_and(|ct| ct.track_id == track.track_id);
 
-            let prefix = if is_current { "▶" } else { "" };
             let fav_marker = if is_fav { " ♥" } else { "" };
 
-            let num_style = if is_current {
-                Style::default()
-                    .fg(Theme::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Theme::dim()
-            };
-
             Row::new(vec![
-                Cell::from(Span::styled(format!("{}{:>3}", prefix, i + 1), num_style)),
+                Cell::from(track_number(i, is_current)),
                 Cell::from(Span::styled(
                     format!("{}{}", track.title, fav_marker),
                     Theme::text(),
@@ -1266,19 +1257,10 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
             let is_current = i == view.queue_index;
             let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
 
-            let prefix = if is_current { "▶" } else { "" };
             let fav_marker = if is_fav { " ♥" } else { "" };
 
-            let num_style = if is_current {
-                Style::default()
-                    .fg(Theme::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Theme::dim()
-            };
-
             Row::new(vec![
-                Cell::from(Span::styled(format!("{}{:>3}", prefix, i + 1), num_style)),
+                Cell::from(track_number(i, is_current)),
                 Cell::from(Span::styled(
                     format!("{}{}", track.title, fav_marker),
                     Theme::text(),
@@ -1422,20 +1404,8 @@ fn draw_offline_detail(
                 .current_track
                 .as_ref()
                 .is_some_and(|ct| ct.track_id == track.track_id);
-            let num_style = if is_current {
-                Style::default()
-                    .fg(Theme::primary())
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Theme::dim()
-            };
-            let prefix = if is_current { "▶" } else { "" };
-
             Row::new(vec![
-                Cell::from(Span::styled(
-                    format!("{}{:>3}", prefix, track_index + 1),
-                    num_style,
-                )),
+                Cell::from(track_number(*track_index, is_current)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,

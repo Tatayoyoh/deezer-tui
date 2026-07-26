@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - Status notifications moved to the player bar's top and auto disappear after 7 seconds
 - Removed the top header line (app title + status area)
 - Offline albums and playlists tracks are now displayed in modals
+- Track lists mark the playing track with a `●` bullet instead of `▶`, no longer confusable with the `>` cursor
 
 ### Fixed
 - Opening a modal/overlay now dims the background
