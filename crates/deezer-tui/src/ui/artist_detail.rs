@@ -14,7 +14,7 @@ use crate::ui::common;
 use crate::ui::common::shortcut_hint;
 
 /// Draw the artist detail overlay (replaces the content area).
-pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
+pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect, as_background: bool) {
     let s = t();
     if view.artist_detail_loading {
         let loading = Paragraph::new(Span::styled(s.loading_artist, Theme::dim()))
@@ -39,7 +39,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 
     let detail = detail.clone();
     view.record_click(columns[0], ClickTarget::DetailLeftPanel);
-    draw_artist_info(frame, &detail, view, columns[0]);
+    draw_artist_info(frame, &detail, view, columns[0], as_background);
     // Auto-switch focus to right if left column lost its scrollbar (e.g. on resize)
     if !view.artist_detail_left_scrollable && view.artist_detail_left_focused {
         view.artist_detail_left_focused = false;
@@ -48,7 +48,13 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 }
 
 /// Draw the left column: artist art + metadata.
-fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewState, area: Rect) {
+fn draw_artist_info(
+    frame: &mut Frame,
+    detail: &ArtistDetail,
+    view: &mut ViewState,
+    area: Rect,
+    as_background: bool,
+) {
     let s = t();
     let focused = view.artist_detail_left_focused;
     let block = Block::default()
@@ -77,7 +83,12 @@ fn draw_artist_info(frame: &mut Frame, detail: &ArtistDetail, view: &mut ViewSta
 
     // Artist art: real image or placeholder. Record the actual image sub-rect
     // (not the letterbox padding) so overlays skip only it when dimming.
-    view.cover_image_area = if let Some(ref mut proto) = view.cover_image {
+    // As a background under a full modal, use the placeholder (dimmable) so the
+    // page dims uniformly — the real image can't be dimmed.
+    view.cover_image_area = if as_background {
+        draw_artist_art(frame, chunks[0]);
+        None
+    } else if let Some(ref mut proto) = view.cover_image {
         let image_widget = StatefulImage::<ratatui_image::protocol::StatefulProtocol>::default();
         frame.render_stateful_widget(image_widget, chunks[0], proto);
         // size_for gives the image size at origin; offset it onto chunks[0]

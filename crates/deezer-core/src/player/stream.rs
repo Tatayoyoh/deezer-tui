@@ -74,3 +74,32 @@ pub async fn download_and_decrypt(
 
     Ok(data)
 }
+
+/// Download unencrypted audio, for podcast episodes served by the show's own
+/// host rather than Deezer's CDN.
+pub async fn download_direct(url: &str, http: &reqwest::Client) -> Result<Vec<u8>, DeezerError> {
+    info!("Downloading direct stream");
+
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| DeezerError::Http(e.to_string()))?;
+
+    if !resp.status().is_success() {
+        return Err(DeezerError::Http(format!(
+            "Stream host returned status {}",
+            resp.status()
+        )));
+    }
+
+    let data = resp
+        .bytes()
+        .await
+        .map_err(|e| DeezerError::Http(e.to_string()))?
+        .to_vec();
+
+    debug!(bytes = data.len(), "Downloaded direct stream");
+
+    Ok(data)
+}

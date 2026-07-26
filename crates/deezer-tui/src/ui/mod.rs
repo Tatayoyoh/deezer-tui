@@ -38,6 +38,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
 fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     let area = frame.area();
 
+    // Reset each frame; the album/artist detail draw sets it when it renders a
+    // real cover image, so overlays know whether an image needs protecting.
+    view.cover_image_area = None;
+
     // Full-screen themed background
     frame.render_widget(Clear, area);
     frame.render_widget(
@@ -59,11 +63,21 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     // Show album/artist detail as background whenever it appears anywhere in the overlay chain
     // (current overlay or any stacked overlay). This handles cases where Help/Settings/Info
     // are pushed on top of a detail view.
-    let all_overlays =
-        std::iter::once(view.overlay.as_ref()).chain(view.overlay_stack.iter().rev().map(Some));
+    // When a full content modal (waiting list / playlist / show) sits on top of a
+    // detail, keep showing the detail behind it, but render its cover art as the
+    // (dimmable) placeholder instead of the real image, which can't be dimmed and
+    // would otherwise show through as a bright island.
+    let detail_as_background = matches!(
+        view.overlay,
+        Some(Overlay::WaitingList { .. })
+            | Some(Overlay::PlaylistDetail { .. })
+            | Some(Overlay::ShowDetail { .. })
+    );
     let mut show_album = false;
     let mut show_artist = false;
     let mut show_genre = false;
+    let all_overlays =
+        std::iter::once(view.overlay.as_ref()).chain(view.overlay_stack.iter().rev().map(Some));
     for o in all_overlays {
         match o {
             Some(Overlay::AlbumDetail { .. }) => {
@@ -91,9 +105,9 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     );
 
     if show_album {
-        album_detail::draw(frame, view, chunks[1]);
+        album_detail::draw(frame, view, chunks[1], detail_as_background);
     } else if show_artist {
-        artist_detail::draw(frame, view, chunks[1]);
+        artist_detail::draw(frame, view, chunks[1], detail_as_background);
     } else if show_genre {
         genre_detail::draw(frame, view, chunks[1]);
     } else {
@@ -145,7 +159,7 @@ fn back_destination(view: &ViewState) -> String {
     let name = match view.overlay_stack.last() {
         Some(Overlay::ArtistDetail) => view.artist_detail.as_ref().map(|a| a.name.as_str()),
         Some(Overlay::AlbumDetail { .. }) => view.album_detail.as_ref().map(|a| a.title.as_str()),
-        Some(Overlay::PlaylistDetail { .. }) => {
+        Some(Overlay::PlaylistDetail { .. }) | Some(Overlay::ShowDetail { .. }) => {
             view.playlist_detail.as_ref().map(|p| p.title.as_str())
         }
         Some(Overlay::GenreDetail { .. }) => view.genre_detail.as_ref().map(|g| g.name.as_str()),

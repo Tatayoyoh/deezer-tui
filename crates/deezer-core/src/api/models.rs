@@ -185,6 +185,11 @@ pub struct TrackData {
     #[serde(rename = "FALLBACK")]
     #[serde(default)]
     pub fallback: Option<TrackFallback>,
+    /// Ready-to-play URL for podcast episodes hosted outside Deezer: the audio
+    /// is fetched as-is, with no media API call and no Blowfish decryption.
+    #[serde(rename = "EPISODE_DIRECT_STREAM_URL")]
+    #[serde(default)]
+    pub direct_stream_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,6 +206,13 @@ impl TrackData {
 
     pub fn has_track_token(&self) -> bool {
         self.track_token.as_ref().is_some_and(|t| !t.is_empty())
+    }
+
+    /// Podcast episode served straight from its host — no token, no decryption.
+    pub fn direct_stream_url(&self) -> Option<&str> {
+        self.direct_stream_url
+            .as_deref()
+            .filter(|url| !url.is_empty())
     }
 
     /// User-uploaded MP3s have a negative SNG_ID.
@@ -304,12 +316,49 @@ pub struct EpisodeData {
     #[serde(rename = "EPISODE_TITLE")]
     #[serde(default)]
     pub title: String,
+    #[serde(rename = "SHOW_ID")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_optional_id")]
+    pub show_id: Option<String>,
     #[serde(rename = "SHOW_NAME")]
     #[serde(default)]
     pub show_name: String,
     #[serde(rename = "DURATION")]
     #[serde(default)]
     pub duration: String,
+    /// Set for shows streamed from their own host (most podcasts): the episode
+    /// plays from this URL directly, unencrypted.
+    #[serde(rename = "EPISODE_DIRECT_STREAM_URL")]
+    #[serde(default)]
+    pub direct_stream_url: Option<String>,
+    /// Only set for Deezer-hosted episodes, which go through the media API.
+    #[serde(rename = "TRACK_TOKEN")]
+    #[serde(default)]
+    pub track_token: Option<String>,
+    #[serde(rename = "MD5_ORIGIN")]
+    #[serde(default)]
+    pub md5_origin: String,
+}
+
+impl EpisodeData {
+    /// Adapt to a `TrackData` so episodes flow through the regular queue and
+    /// playback path. The show takes the artist/album slots.
+    pub fn to_track(&self) -> TrackData {
+        TrackData {
+            track_id: self.episode_id.clone(),
+            title: self.title.clone(),
+            artist: self.show_name.clone(),
+            artist_id: None,
+            album: String::new(),
+            duration: self.duration.clone(),
+            album_picture: String::new(),
+            album_id: None,
+            track_token: self.track_token.clone(),
+            md5_origin: self.md5_origin.clone(),
+            fallback: None,
+            direct_stream_url: self.direct_stream_url.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -502,6 +551,9 @@ pub struct DisplayItem {
     /// Artist ID, if this item represents an artist.
     #[serde(default)]
     pub artist_id: Option<String>,
+    /// Show ID, if this item represents a podcast show.
+    #[serde(default)]
+    pub show_id: Option<String>,
 }
 
 impl DisplayItem {
@@ -516,6 +568,7 @@ impl DisplayItem {
             album_id: None,
             playlist_id: None,
             artist_id: None,
+            show_id: None,
         }
     }
 
@@ -529,6 +582,7 @@ impl DisplayItem {
             album_id: None,
             playlist_id: None,
             artist_id: Some(artist.artist_id.clone()),
+            show_id: None,
         }
     }
 
@@ -542,6 +596,7 @@ impl DisplayItem {
             album_id: Some(album.album_id.clone()),
             playlist_id: None,
             artist_id: None,
+            show_id: None,
         }
     }
 
@@ -555,6 +610,7 @@ impl DisplayItem {
             album_id: None,
             playlist_id: Some(playlist.playlist_id.clone()),
             artist_id: None,
+            show_id: None,
         }
     }
 
@@ -568,6 +624,7 @@ impl DisplayItem {
             album_id: None,
             playlist_id: None,
             artist_id: None,
+            show_id: Some(podcast.show_id.clone()),
         }
     }
 
@@ -578,10 +635,12 @@ impl DisplayItem {
             col2: episode.show_name.clone(),
             col3: String::new(),
             col4: format!("{}:{:02}", dur / 60, dur % 60),
-            track: None,
+            // Playable: `PlayFromSearch` picks the track up straight from here.
+            track: Some(episode.to_track()),
             album_id: None,
             playlist_id: None,
             artist_id: None,
+            show_id: episode.show_id.clone(),
         }
     }
 
@@ -595,6 +654,7 @@ impl DisplayItem {
             album_id: None,
             playlist_id: None,
             artist_id: None,
+            show_id: None,
         }
     }
 }
@@ -723,4 +783,55 @@ where
     }
 
     deserializer.deserialize_any(IdToString)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Trimmed from a real `deezer.pageSearch` EPISODE entry.
+    const EPISODE_JSON: &str = r#"{
+        "EPISODE_ID": "907330422",
+        "SHOW_ID": "3851047",
+        "SHOW_NAME": "After Tour",
+        "EPISODE_TITLE": "Lenny Martinez",
+        "MD5_ORIGIN": "",
+        "EPISODE_DIRECT_STREAM_URL": "https://host.example/audio/128/default.mp3",
+        "DURATION": "1357",
+        "TRACK_TOKEN": "AAAAAWpm"
+    }"#;
+
+    #[test]
+    fn episode_parses_and_converts_to_a_playable_track() {
+        let episode: EpisodeData = serde_json::from_str(EPISODE_JSON).unwrap();
+        assert_eq!(episode.show_id.as_deref(), Some("3851047"));
+
+        let track = episode.to_track();
+        assert_eq!(track.track_id, "907330422");
+        assert_eq!(track.artist, "After Tour");
+        assert_eq!(track.duration_secs(), 1357);
+        assert_eq!(
+            track.direct_stream_url(),
+            Some("https://host.example/audio/128/default.mp3")
+        );
+    }
+
+    #[test]
+    fn episode_display_item_carries_the_track_and_show() {
+        let episode: EpisodeData = serde_json::from_str(EPISODE_JSON).unwrap();
+        let item = DisplayItem::from_episode(&episode);
+        // Playback reads the track straight off the display item.
+        assert!(item.track.is_some());
+        assert_eq!(item.show_id.as_deref(), Some("3851047"));
+        assert_eq!(item.col4, "22:37");
+    }
+
+    #[test]
+    fn a_regular_track_has_no_direct_stream() {
+        let track: TrackData = serde_json::from_str(
+            r#"{"SNG_ID": "123", "SNG_TITLE": "T", "ART_NAME": "A", "DURATION": "200"}"#,
+        )
+        .unwrap();
+        assert_eq!(track.direct_stream_url(), None);
+    }
 }

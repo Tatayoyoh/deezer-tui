@@ -306,6 +306,7 @@ impl DeezerClient {
                     album_id,
                     playlist_id: None,
                     artist_id: None,
+                    show_id: None,
                 }
             })
             .collect();
@@ -359,6 +360,7 @@ impl DeezerClient {
                     album_id: None,
                     playlist_id: None,
                     artist_id,
+                    show_id: None,
                 }
             })
             .collect();
@@ -421,6 +423,7 @@ impl DeezerClient {
                     album_id,
                     playlist_id: None,
                     artist_id: None,
+                    show_id: None,
                 }
             })
             .collect();
@@ -480,6 +483,7 @@ impl DeezerClient {
                     album_id: None,
                     playlist_id,
                     artist_id: None,
+                    show_id: None,
                 }
             })
             .collect();
@@ -528,6 +532,44 @@ impl DeezerClient {
         self.get_favorites().await
     }
 
+    /// Get a podcast show's name and its episodes, most recent first.
+    pub async fn get_show_episodes(
+        &self,
+        show_id: &str,
+    ) -> Result<(String, Vec<EpisodeData>), DeezerError> {
+        let params = json!({
+            "show_id": show_id,
+            "start": 0,
+            "nb": 200,
+            "user_id": null,
+        });
+
+        let res = self.gw_call("deezer.pageShow", params).await?;
+
+        let name = res
+            .get("DATA")
+            .and_then(|d| d.get("SHOW_NAME"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let episodes: Vec<EpisodeData> = res
+            .get("EPISODES")
+            .and_then(|e| e.get("data"))
+            .and_then(|d| d.as_array())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|e| serde_json::from_value(e.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        debug!("show {show_id}: {} episodes", episodes.len());
+
+        Ok((name, episodes))
+    }
+
     /// Get followed users/profiles via the public API.
     pub async fn get_following(&self) -> Result<Vec<DisplayItem>, DeezerError> {
         let session = self
@@ -569,6 +611,7 @@ impl DeezerClient {
                     album_id: None,
                     playlist_id: None,
                     artist_id: None,
+                    show_id: None,
                 }
             })
             .collect();
@@ -1670,4 +1713,56 @@ fn parse_chart_playlist(v: &serde_json::Value) -> Option<super::models::Playlist
         author: author.to_string(),
         collaborative: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::api::DeezerClient;
+
+    /// Live tests read the ARL from the environment so no token is committed.
+    fn arl() -> String {
+        std::env::var("DEEZER_ARL").expect("set DEEZER_ARL to run live tests")
+    }
+
+    #[tokio::test]
+    #[ignore = "live API: requires valid ARL token + network"]
+    async fn podcast_episodes_are_playable() {
+        let mut client = DeezerClient::new().unwrap();
+        client.login_arl(&arl()).await.expect("login failed");
+
+        // A podcast search must yield shows with an ID to open...
+        let shows = client
+            .search_category("podcast", "SHOW")
+            .await
+            .expect("show search failed");
+        let show_id = shows
+            .iter()
+            .find_map(|s| s.show_id.clone())
+            .expect("no show with an ID in search results");
+
+        // ...and that show must yield episodes carrying a playable source.
+        let (name, episodes) = client
+            .get_show_episodes(&show_id)
+            .await
+            .expect("get_show_episodes failed");
+        println!("show '{name}' ({show_id}): {} episodes", episodes.len());
+        assert!(!episodes.is_empty(), "show should have episodes");
+
+        let track = episodes[0].to_track();
+        assert!(
+            track.direct_stream_url().is_some() || track.has_track_token(),
+            "episode has neither a direct stream URL nor a track token"
+        );
+
+        // The direct stream must actually serve audio, unencrypted.
+        if let Some(url) = track.direct_stream_url() {
+            let audio = crate::player::stream::download_direct(url, client.http())
+                .await
+                .expect("direct stream download failed");
+            println!("downloaded {} bytes for '{}'", audio.len(), track.title);
+            assert!(audio.len() > 10_000, "suspiciously small audio payload");
+            let is_mp3 = audio.starts_with(b"ID3") || (audio[0] == 0xFF && audio[1] & 0xE0 == 0xE0);
+            assert!(is_mp3, "payload is not MP3: {:02X?}", &audio[..4]);
+        }
+    }
 }
