@@ -4,6 +4,51 @@ use ratatui::Frame;
 
 use crate::theme::Theme;
 
+/// Render a `[key] label` (or bare `key label`) hint string with the key on a
+/// "chip" (brackets stripped) and the label dimmed. Keeps inline shortcut hints
+/// consistent with the rest of the app.
+pub fn shortcut_hint(text: &'static str) -> Line<'static> {
+    // "[key] label": chip the bracket contents, dim the rest.
+    if let Some(close) = text.find(']') {
+        let open = text.find('[').map_or(0, |i| i + 1);
+        return Line::from(vec![
+            Span::styled(&text[open..close], Theme::shortcut_key()),
+            Span::styled(&text[close + 1..], Theme::dim()),
+        ]);
+    }
+    // Bare "key label": chip up to the first space.
+    if let Some(sp) = text.find(' ') {
+        return Line::from(vec![
+            Span::styled(&text[..sp], Theme::shortcut_key()),
+            Span::styled(&text[sp..], Theme::dim()),
+        ]);
+    }
+    Line::from(Span::styled(text, Theme::shortcut_key()))
+}
+
+/// Render a string with one or more `[key]` segments as a Line: each bracketed
+/// key becomes a chip (brackets stripped), surrounding text is dimmed. For
+/// border titles and hints that embed several keys.
+pub fn shortcut_line(text: &'static str) -> Line<'static> {
+    let mut spans = Vec::new();
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let Some(close_rel) = rest[open..].find(']') else {
+            break;
+        };
+        let close = open + close_rel;
+        if open > 0 {
+            spans.push(Span::styled(&rest[..open], Theme::dim()));
+        }
+        spans.push(Span::styled(&rest[open + 1..close], Theme::shortcut_key()));
+        rest = &rest[close + 1..];
+    }
+    if !rest.is_empty() {
+        spans.push(Span::styled(rest, Theme::dim()));
+    }
+    Line::from(spans)
+}
+
 /// Deezer logo in pixel art using Unicode block characters.
 /// Rendered in Deezer purple.
 // pub fn deezer_logo() -> Paragraph<'static> {

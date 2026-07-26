@@ -5,6 +5,7 @@ use crate::client::ViewState;
 use crate::i18n::t;
 use crate::protocol::FavoritesCategory;
 use crate::theme::Theme;
+use crate::ui::common::shortcut_line;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -61,11 +62,13 @@ fn draw_category_menu(frame: &mut Frame, current: FavoritesCategory, area: Rect)
 
 fn draw_shuffle_button(frame: &mut Frame, area: Rect) {
     let button = Paragraph::new(Line::from(vec![
-        Span::styled("  [g] ", Theme::dim()),
+        Span::raw("  "),
+        Span::styled("g", Theme::shortcut_key()),
+        Span::raw(" "),
         Span::styled(
             t().shuffle_favorites,
             Style::default()
-                .fg(Theme::secondary())
+                .fg(Theme::text_color())
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -82,11 +85,11 @@ fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
         } else {
             Theme::border()
         })
-        .title(if is_typing {
+        .title(shortcut_line(if is_typing {
             s.favorites_filter_typing
         } else {
             s.favorites_filter_normal
-        })
+        }))
         .title_style(Theme::title());
 
     let input_text = if view.favorites_filter_input.is_empty() && !is_typing {

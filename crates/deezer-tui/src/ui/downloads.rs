@@ -5,6 +5,7 @@ use crate::client::ViewState;
 use crate::i18n::t;
 use crate::protocol::OfflineCategory;
 use crate::theme::Theme;
+use crate::ui::common::shortcut_hint;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -229,10 +230,9 @@ fn draw_albums_table(frame: &mut Frame, view: &ViewState, area: Rect) {
         s.offline_category_label(OfflineCategory::Albums),
         view.offline_albums.len()
     );
-    let hint = Line::from(vec![
-        Span::styled(s.hint_expand_collapse, Theme::dim()),
-        Span::raw(" "),
-    ]);
+    let mut hint_spans = shortcut_hint(s.hint_expand_collapse).spans;
+    hint_spans.push(Span::raw(" "));
+    let hint = Line::from(hint_spans);
     let table = Table::new(
         rows,
         [
@@ -248,7 +248,7 @@ fn draw_albums_table(frame: &mut Frame, view: &ViewState, area: Rect) {
             .borders(Borders::NONE)
             .title(title)
             .title_style(Theme::title())
-            .title_top(Line::from(hint).alignment(Alignment::Right)),
+            .title_top(hint.alignment(Alignment::Right)),
     )
     .row_highlight_style(Theme::highlight())
     .highlight_symbol("> ");

@@ -125,7 +125,6 @@ pub struct Strings {
     pub info_album: &'static str,
     pub info_duration: &'static str,
     pub info_track_id: &'static str,
-    pub press_esc_close: &'static str,
 
     // --- Playlist picker ---
     pub add_to_playlist_title: &'static str, // "Add \"{}\" to playlist"
@@ -210,6 +209,8 @@ pub struct Strings {
     pub tracks_label: &'static str,
     pub label_label: &'static str,
     pub esc_back: &'static str,
+    /// Prefix for the "Back to <destination>" header hint.
+    pub back_to: &'static str,
     pub enter_play_track: &'static str,
     pub no_tracks: &'static str,
 
@@ -694,7 +695,6 @@ static EN: Strings = Strings {
     info_album: "Album:    ",
     info_duration: "Duration: ",
     info_track_id: "Track ID: ",
-    press_esc_close: "Press Esc to close",
 
     add_to_playlist_title: "Add to playlist",
     loading_playlists: "Loading playlists...",
@@ -773,6 +773,7 @@ static EN: Strings = Strings {
     tracks_label: "Tracks:  ",
     label_label: "Label:   ",
     esc_back: "[Esc] Back",
+    back_to: "Back to",
     enter_play_track: "[Enter] Play track",
     no_tracks: "No tracks",
 
@@ -1003,7 +1004,6 @@ static FR: Strings = Strings {
     info_album: "Album :   ",
     info_duration: "Durée :   ",
     info_track_id: "ID titre :",
-    press_esc_close: "Esc pour fermer",
 
     add_to_playlist_title: "Ajouter à la playlist",
     loading_playlists: "Chargement des playlists...",
@@ -1082,6 +1082,7 @@ static FR: Strings = Strings {
     tracks_label: "Titres : ",
     label_label: "Label :  ",
     esc_back: "[Esc] Retour",
+    back_to: "Retour à",
     enter_play_track: "[Entrée] Lire le titre",
     no_tracks: "Aucun titre",
 
@@ -1311,7 +1312,6 @@ static ES: Strings = Strings {
     info_album: "Álbum:    ",
     info_duration: "Duración: ",
     info_track_id: "ID canción:",
-    press_esc_close: "Esc para cerrar",
 
     add_to_playlist_title: "Agregar a playlist",
     loading_playlists: "Cargando playlists...",
@@ -1390,6 +1390,7 @@ static ES: Strings = Strings {
     tracks_label: "Canciones:",
     label_label: "Sello:   ",
     esc_back: "[Esc] Volver",
+    back_to: "Volver a",
     enter_play_track: "[Enter] Reproducir canción",
     no_tracks: "Sin canciones",
 
@@ -1619,7 +1620,6 @@ static PT: Strings = Strings {
     info_album: "Álbum:    ",
     info_duration: "Duração:  ",
     info_track_id: "ID música:",
-    press_esc_close: "Esc para fechar",
 
     add_to_playlist_title: "Adicionar à playlist",
     loading_playlists: "Carregando playlists...",
@@ -1698,6 +1698,7 @@ static PT: Strings = Strings {
     tracks_label: "Músicas: ",
     label_label: "Selo:    ",
     esc_back: "[Esc] Voltar",
+    back_to: "Voltar para",
     enter_play_track: "[Enter] Reproduzir música",
     no_tracks: "Sem músicas",
 
@@ -1927,7 +1928,6 @@ static DE: Strings = Strings {
     info_album: "Album:    ",
     info_duration: "Dauer:    ",
     info_track_id: "Titel-ID: ",
-    press_esc_close: "Esc zum Schließen",
 
     add_to_playlist_title: "Zur Playlist hinzufügen",
     loading_playlists: "Playlists werden geladen...",
@@ -2006,6 +2006,7 @@ static DE: Strings = Strings {
     tracks_label: "Titel:   ",
     label_label: "Label:   ",
     esc_back: "[Esc] Zurück",
+    back_to: "Zurück zu",
     enter_play_track: "[Enter] Titel abspielen",
     no_tracks: "Keine Titel",
 

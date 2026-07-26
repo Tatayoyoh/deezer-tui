@@ -21,6 +21,9 @@ use crate::i18n::t;
 use crate::protocol::{ActiveTab, Screen};
 use crate::theme::Theme;
 
+/// Height in rows of the always-visible bottom player bar.
+pub const PLAYER_BAR_HEIGHT: u16 = 4;
+
 /// Root draw function — dispatches to the correct screen.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
     match view.screen {
@@ -44,9 +47,9 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Tab bar
-            Constraint::Min(5),    // Content area
-            Constraint::Length(4), // Player bar
+            Constraint::Length(2),                 // Tab bar (tabs + bottom border)
+            Constraint::Min(5),                    // Content area
+            Constraint::Length(PLAYER_BAR_HEIGHT), // Player bar
         ])
         .split(area);
 
@@ -105,31 +108,81 @@ fn draw_main(frame: &mut Frame, view: &mut ViewState) {
 
     // Popup overlay (drawn on top of everything)
     popup::draw(frame, view);
+
+    // Status notification: right-aligned on the player bar's top separator.
+    // Drawn last so popups' backdrop dimming doesn't wash it out.
+    draw_notification(frame, view, chunks[2]);
+}
+
+/// Draw the transient status notification as a right-aligned chip on the
+/// player bar's top separator line. Hidden once the message has expired.
+fn draw_notification(frame: &mut Frame, view: &ViewState, player_area: Rect) {
+    let Some(msg) = view.visible_status_msg() else {
+        return;
+    };
+    let line = Line::from(Span::styled(format!(" {msg} "), Theme::notification()));
+    let width = (line.width() as u16).min(player_area.width);
+    if width == 0 || player_area.height == 0 {
+        return;
+    }
+    let notif_area = Rect {
+        x: player_area.x + player_area.width - width,
+        y: player_area.y,
+        width,
+        height: 1,
+    };
+    frame.render_widget(Clear, notif_area);
+    frame.render_widget(Paragraph::new(line), notif_area);
+}
+
+/// Where the header "Back" hint navigates to: the previous overlay's name (the
+/// entry just below the current one on the stack), or the active tab when there
+/// is nothing stacked underneath.
+fn back_destination(view: &ViewState) -> String {
+    let s = t();
+    let name = match view.overlay_stack.last() {
+        Some(Overlay::ArtistDetail) => view.artist_detail.as_ref().map(|a| a.name.as_str()),
+        Some(Overlay::AlbumDetail { .. }) => view.album_detail.as_ref().map(|a| a.title.as_str()),
+        Some(Overlay::PlaylistDetail { .. }) => {
+            view.playlist_detail.as_ref().map(|p| p.title.as_str())
+        }
+        Some(Overlay::GenreDetail { .. }) => view.genre_detail.as_ref().map(|g| g.name.as_str()),
+        _ => None,
+    };
+    let dest = match name {
+        Some(n) if !n.is_empty() => n,
+        _ => match view.active_tab {
+            ActiveTab::Search => s.tab_search,
+            ActiveTab::Favorites => s.tab_favorites,
+            ActiveTab::Explore => s.tab_explore,
+            ActiveTab::Downloads => s.tab_offline,
+        }
+        .trim(),
+    };
+    // Cap length so the header can't overflow the tab bar.
+    const MAX: usize = 32;
+    if dest.chars().count() > MAX {
+        format!("{}…", dest.chars().take(MAX - 1).collect::<String>())
+    } else {
+        dest.to_string()
+    }
 }
 
 fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
     let s = t();
 
-    let header_title = " Deezer-TUI ";
-
-    let mut block = Block::default()
+    let block = Block::default()
         .borders(Borders::BOTTOM)
-        .border_style(Theme::border())
-        .title(header_title)
-        .title_style(Theme::dim());
-
-    if let Some(ref msg) = view.status_msg {
-        let status_line = Line::from(vec![Span::styled(
-            format!(" {msg} "),
-            Style::default().fg(Color::Cyan),
-        )]);
-        block = block.title_top(status_line.alignment(Alignment::Right));
-    }
+        .border_style(Theme::border());
 
     if show_back {
-        // Replace tabs with a "<< [Esc] Back" navigation hint
-        let back_label = format!(" {} ", s.esc_back);
-        let back_line = Line::from(vec![Span::styled(back_label, Theme::text())]);
+        // Replace tabs with an "Esc Back to <destination>" navigation hint.
+        let dest = back_destination(view);
+        let back_line = Line::from(vec![
+            Span::raw(" "),
+            Span::styled("Esc", Theme::shortcut_key()),
+            Span::styled(format!(" {} {} ", s.back_to, dest), Theme::dim()),
+        ]);
         let paragraph = Paragraph::new(back_line).block(block);
         frame.render_widget(paragraph, area);
         return;
@@ -171,7 +224,7 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
         if area.width > text_len {
             let indicator_area = Rect {
                 x: area.x + area.width - text_len,
-                y: area.y + 1,
+                y: area.y,
                 width: text_len,
                 height: 1,
             };
@@ -186,19 +239,20 @@ fn draw_tabs(frame: &mut Frame, view: &ViewState, area: Rect, show_back: bool) {
             );
         }
     } else {
-        let hint_text = format!("[Tab] {} ", s.help_switch_tabs);
+        let hint_text = format!("Tab {} ", s.help_switch_tabs);
         let hint_len = hint_text.len() as u16;
         if area.width > hint_len {
             let hint_area = Rect {
                 x: area.x + area.width - hint_len,
-                y: area.y + 1,
+                y: area.y,
                 width: hint_len,
                 height: 1,
             };
-            frame.render_widget(
-                Paragraph::new(Span::styled(hint_text, Theme::dim())),
-                hint_area,
-            );
+            let hint_line = Line::from(vec![
+                Span::styled("Tab", Theme::shortcut_key()),
+                Span::styled(format!(" {} ", s.help_switch_tabs), Theme::dim()),
+            ]);
+            frame.render_widget(Paragraph::new(hint_line), hint_area);
         }
     }
 }

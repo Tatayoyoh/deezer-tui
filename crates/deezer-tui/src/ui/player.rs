@@ -75,8 +75,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     // Progress bar + volume (right)
     let s = t();
     let vol_pct = (view.volume * 100.0) as u8;
-    let vol_label = format!(" [+/-] {}: {vol_pct}% ", s.vol);
-    let vol_width = vol_label.len() as u16;
+    let vol_rest = format!(" {}: {vol_pct}% ", s.vol);
+    let vol_width = (1 + 3 + vol_rest.len()) as u16; // " " + "+/-" chip + rest
 
     let progress_chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -95,7 +95,11 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .label(time_label);
     frame.render_widget(progress, progress_chunks[0]);
 
-    let vol_line = Line::from(Span::styled(vol_label, Theme::dim()));
+    let vol_line = Line::from(vec![
+        Span::raw(" "),
+        Span::styled("+/-", Theme::shortcut_key()),
+        Span::styled(vol_rest, Theme::dim()),
+    ]);
     frame.render_widget(
         Paragraph::new(vol_line).alignment(Alignment::Right),
         progress_chunks[1],
@@ -124,26 +128,35 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     };
+    // Shortcut keys render as a white "chip" (no brackets, no padding); labels
+    // have no bg.
+    let key = Theme::shortcut_key();
     let controls_left = Line::from(vec![
         Span::styled("  ", Theme::dim()),
-        Span::styled("[?]", Theme::text()),
+        Span::styled("?", key),
         Span::styled(format!(" {}  ", s.help), Theme::dim()),
-        Span::styled("[Space]", Theme::text()),
+        Span::styled("Space", key),
         Span::styled(format!(" {}  ", s.play_pause), Theme::dim()),
-        Span::styled("[n]", Theme::text()),
+        Span::styled("n", key),
         Span::styled(format!(" {}  ", s.next), Theme::dim()),
-        Span::styled("[b]", Theme::text()),
+        Span::styled("b", key),
         Span::styled(format!(" {}  ", s.prev), Theme::dim()),
-        Span::styled(format!("[s] {}  ", s.shuffle), shuffle_style),
-        Span::styled(format!("[r] {}", repeat_label), repeat_style),
+        Span::styled("s", key),
+        Span::styled(format!(" {}  ", s.shuffle), shuffle_style),
+        Span::styled("r", key),
+        Span::styled(format!(" {}", repeat_label), repeat_style),
     ]);
 
-    let flow_style = Style::default()
-        .fg(Theme::secondary())
-        .add_modifier(Modifier::BOLD);
-    let flow_label = format!("[f] {} ", s.flow);
-    let flow_width = flow_label.len() as u16;
-    let controls_right = Line::from(Span::styled(flow_label, flow_style));
+    // Flow is special: the whole "f Flow" chip is white on a secondary bg,
+    // with only the "f" key underlined.
+    let flow_style = Theme::shortcut_flow_chip();
+    let flow_label = format!(" f {} ", s.flow);
+    let flow_width = flow_label.chars().count() as u16;
+    let controls_right = Line::from(vec![
+        Span::styled(" ", flow_style),
+        Span::styled("f", flow_style.add_modifier(Modifier::UNDERLINED)),
+        Span::styled(format!(" {} ", s.flow), flow_style),
+    ]);
 
     let ctrl_chunks = Layout::default()
         .direction(Direction::Horizontal)

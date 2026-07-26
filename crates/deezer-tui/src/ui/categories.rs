@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 use crate::client::ViewState;
 use crate::i18n::t;
 use crate::theme::Theme;
+use crate::ui::common::shortcut_line;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -28,11 +29,11 @@ fn draw_filter_input(frame: &mut Frame, view: &ViewState, area: Rect) {
         } else {
             Theme::border()
         })
-        .title(if is_typing {
+        .title(shortcut_line(if is_typing {
             s.genres_filter_typing
         } else {
             s.genres_filter_normal
-        })
+        }))
         .title_style(Theme::title());
 
     let input_text = if view.genres_filter_input.is_empty() && !is_typing {

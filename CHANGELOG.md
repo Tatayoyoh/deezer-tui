@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Keyboard shortcut indicators now share same color and style everywhere in the app
+- Background transparency is now a simple on/off toggle
+- Improve album and artist page back button adding location indicators
+- Modals no longer overlap the player bar
+- Status notifications moved to the player bar's top and auto disappear after 7 seconds
+- Removed the top header line (app title + status area)
+
+### Fixed
+- Opening a modal/overlay now dims the background
+- The player bar now keeps its colors when an overlay is open
+- Playlist and waiting-list modals now dim the background
+- On image-capable terminals, closing a modal that overlapped the cover image no longer leaves fragments
+
 ## [1.14.0] - 2026-07-19
 
 ### Added
