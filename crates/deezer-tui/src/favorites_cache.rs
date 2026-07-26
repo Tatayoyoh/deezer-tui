@@ -22,9 +22,16 @@ use deezer_core::Config;
 
 use crate::protocol::MoodEntry;
 
+/// Current cache format. Bump to discard every on-disk cache written by an
+/// older build — used when a bug could have stored wrong data under a key.
+const CACHE_VERSION: u32 = 2;
+
 /// All cached favorites data, persisted to disk.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FavoritesCache {
+    /// Format version of this cache file; mismatched files are discarded.
+    #[serde(default)]
+    pub version: u32,
     /// Favorite tracks (FavoritesCategory::Tracks).
     #[serde(default)]
     pub tracks: Option<Vec<TrackData>>,
@@ -54,14 +61,28 @@ impl FavoritesCache {
         Config::dir().map(|d| d.join("favorites_cache.json"))
     }
 
-    /// Load from disk. Returns an empty cache on any error.
+    /// An empty cache stamped with the current format version.
+    fn empty() -> Self {
+        Self {
+            version: CACHE_VERSION,
+            ..Self::default()
+        }
+    }
+
+    /// Load from disk. Returns an empty cache on any error, or when the file
+    /// was written by an older, incompatible cache format.
     pub fn load() -> Self {
         let Some(path) = Self::path() else {
-            return Self::default();
+            return Self::empty();
         };
-        match std::fs::read_to_string(&path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
+        let cache = match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str::<Self>(&content).unwrap_or_default(),
+            Err(_) => return Self::empty(),
+        };
+        if cache.version == CACHE_VERSION {
+            cache
+        } else {
+            Self::empty()
         }
     }
 
@@ -71,7 +92,9 @@ impl FavoritesCache {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(content) = serde_json::to_string(self) {
+        let mut to_write = self.clone();
+        to_write.version = CACHE_VERSION;
+        if let Ok(content) = serde_json::to_string(&to_write) {
             let _ = std::fs::write(path, content);
         }
     }
