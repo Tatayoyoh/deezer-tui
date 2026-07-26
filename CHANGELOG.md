@@ -31,6 +31,7 @@ All notable changes to this project will be documented in this file.
 - The player bar now keeps its colors when an overlay is open
 - Playlist and waiting-list modals now dim the background
 - On image-capable terminals, closing a modal that overlapped the cover image no longer leaves fragments
+- Favorites > Following page content
 
 ## [1.14.0] - 2026-07-19
 

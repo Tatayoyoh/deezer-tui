@@ -37,9 +37,12 @@ enum AsyncResult {
     SearchResults(Vec<TrackData>),
     SearchError(String),
     SearchDisplayResults(Vec<DisplayItem>),
-    FavoritesLoaded(Vec<TrackData>),
-    FavoritesError(String),
-    FavoritesDisplayLoaded(Vec<DisplayItem>),
+    /// Tracks for a favorites category. Carries the category the request was
+    /// issued for so a late response cannot be attributed to another one.
+    FavoritesLoaded(FavoritesCategory, Vec<TrackData>),
+    FavoritesError(FavoritesCategory, String),
+    /// Display items for a favorites category (see `FavoritesLoaded`).
+    FavoritesDisplayLoaded(FavoritesCategory, Vec<DisplayItem>),
     TrackReady {
         audio_data: Vec<u8>,
         track: TrackData,
@@ -1402,10 +1405,16 @@ impl Daemon {
             let client = client.lock().await;
             match client.get_favorites().await {
                 Ok(tracks) => {
-                    let _ = tx.send(AsyncResult::FavoritesLoaded(tracks));
+                    let _ = tx.send(AsyncResult::FavoritesLoaded(
+                        FavoritesCategory::Tracks,
+                        tracks,
+                    ));
                 }
                 Err(e) => {
-                    let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                    let _ = tx.send(AsyncResult::FavoritesError(
+                        FavoritesCategory::Tracks,
+                        e.to_string(),
+                    ));
                 }
             }
         });
@@ -1481,10 +1490,10 @@ impl Daemon {
                     let client = client.lock().await;
                     match client.get_favorites().await {
                         Ok(tracks) => {
-                            let _ = tx.send(AsyncResult::FavoritesLoaded(tracks));
+                            let _ = tx.send(AsyncResult::FavoritesLoaded(category, tracks));
                         }
                         Err(e) => {
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -1494,10 +1503,10 @@ impl Daemon {
                     let client = client.lock().await;
                     match client.get_listening_history().await {
                         Ok(tracks) => {
-                            let _ = tx.send(AsyncResult::FavoritesLoaded(tracks));
+                            let _ = tx.send(AsyncResult::FavoritesLoaded(category, tracks));
                         }
                         Err(e) => {
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -1509,11 +1518,11 @@ impl Daemon {
                     match client.get_favorite_artists().await {
                         Ok(items) => {
                             debug!("Favorite artists loaded: {} items", items.len());
-                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(category, items));
                         }
                         Err(e) => {
                             debug!("Favorite artists error: {e}");
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -1523,10 +1532,10 @@ impl Daemon {
                     let client = client.lock().await;
                     match client.get_favorite_albums().await {
                         Ok(items) => {
-                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(category, items));
                         }
                         Err(e) => {
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -1536,10 +1545,10 @@ impl Daemon {
                     let client = client.lock().await;
                     match client.get_playlists().await {
                         Ok(items) => {
-                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(category, items));
                         }
                         Err(e) => {
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -1549,10 +1558,10 @@ impl Daemon {
                     let client = client.lock().await;
                     match client.get_following().await {
                         Ok(items) => {
-                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(items));
+                            let _ = tx.send(AsyncResult::FavoritesDisplayLoaded(category, items));
                         }
                         Err(e) => {
-                            let _ = tx.send(AsyncResult::FavoritesError(e.to_string()));
+                            let _ = tx.send(AsyncResult::FavoritesError(category, e.to_string()));
                         }
                     }
                 });
@@ -2579,24 +2588,29 @@ impl Daemon {
                     self.search_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_search_error, &err));
                 }
-                AsyncResult::FavoritesLoaded(tracks) => {
-                    self.favorites_loading = false;
-                    self.status_msg = Some(t().fmt_loaded(tracks.len()));
-                    self.favorites_display = tracks.iter().map(DisplayItem::from_track).collect();
-                    // Populate cache for the current category (not RecentlyPlayed)
-                    if self.favorites_category == FavoritesCategory::Tracks {
+                AsyncResult::FavoritesLoaded(category, tracks) => {
+                    // Cache under the category that was requested, never the one
+                    // currently displayed — a late response must not overwrite
+                    // another category's cache entry.
+                    // RecentlyPlayed is never cached (changes after every play).
+                    if category == FavoritesCategory::Tracks {
                         self.favorites_cache.tracks = Some(tracks.clone());
                         self.favorites_cache.save();
+                        // Backing list for favorite indicators / shuffle favorites.
+                        self.favorites = tracks.clone();
                     }
-                    self.favorites = tracks;
-                    self.favorites_selected = 0;
+                    if category == self.favorites_category {
+                        self.favorites_loading = false;
+                        self.status_msg = Some(t().fmt_loaded(tracks.len()));
+                        self.favorites_display =
+                            tracks.iter().map(DisplayItem::from_track).collect();
+                        self.favorites = tracks;
+                        self.favorites_selected = 0;
+                    }
                 }
-                AsyncResult::FavoritesDisplayLoaded(items) => {
-                    self.favorites_loading = false;
-                    self.status_msg = Some(t().fmt_loaded(items.len()));
-                    self.favorites.clear();
-                    // Populate cache for the current category
-                    match self.favorites_category {
+                AsyncResult::FavoritesDisplayLoaded(category, items) => {
+                    // Cache under the requested category (see FavoritesLoaded).
+                    match category {
                         FavoritesCategory::Artists => {
                             self.favorites_cache.artists = Some(items.clone());
                         }
@@ -2612,15 +2626,22 @@ impl Daemon {
                         _ => {}
                     }
                     self.favorites_cache.save();
-                    self.favorites_display = items;
-                    self.favorites_selected = 0;
+                    if category == self.favorites_category {
+                        self.favorites_loading = false;
+                        self.status_msg = Some(t().fmt_loaded(items.len()));
+                        self.favorites.clear();
+                        self.favorites_display = items;
+                        self.favorites_selected = 0;
+                    }
                 }
-                AsyncResult::FavoritesError(err) => {
-                    self.favorites_loading = false;
-                    self.favorites_display.clear();
-                    self.favorites.clear();
-                    self.favorites_selected = 0;
-                    self.status_msg = Some(t().fmt_error(t().status_favorites_error, &err));
+                AsyncResult::FavoritesError(category, err) => {
+                    if category == self.favorites_category {
+                        self.favorites_loading = false;
+                        self.favorites_display.clear();
+                        self.favorites.clear();
+                        self.favorites_selected = 0;
+                        self.status_msg = Some(t().fmt_error(t().status_favorites_error, &err));
+                    }
                 }
                 AsyncResult::FavoriteAdded(_track_id) => {
                     self.status_msg = Some(t().status_added_to_favorites.into());
