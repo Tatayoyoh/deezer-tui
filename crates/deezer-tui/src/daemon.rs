@@ -1696,7 +1696,7 @@ impl Daemon {
     }
 
     /// Apply a delta to a playlist's track count in cached `self.playlists` and
-    /// in any visible DisplayItem lists (col3 = "<N> titres").
+    /// in any visible DisplayItem lists (col3 = plain track count).
     fn adjust_playlist_count(&mut self, playlist_id: &str, delta: i64) {
         for pl in self.playlists.iter_mut() {
             if pl.playlist_id == playlist_id {
@@ -1713,7 +1713,7 @@ impl Daemon {
                         .and_then(|n| n.parse::<i64>().ok())
                         .map(|n| (n + delta).max(0))
                         .unwrap_or(0);
-                    it.col3 = format!("{} titres", new_count);
+                    it.col3 = new_count.to_string();
                 }
             }
         };
@@ -1735,7 +1735,7 @@ impl Daemon {
         let set = |items: &mut [DisplayItem]| {
             for it in items.iter_mut() {
                 if it.playlist_id.as_deref() == Some(playlist_id) {
-                    it.col3 = format!("{count} titres");
+                    it.col3 = count.to_string();
                 }
             }
         };

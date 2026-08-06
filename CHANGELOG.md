@@ -6,6 +6,9 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Client/daemon IPC desync causing "Communication error" JSON parse failures (#16, #19)
+- Hardcoded French "titres" in the Albums and Playlists track-count column; the
+  count now renders as a plain number under the already-localized "Tracks"
+  header (#18)
 
 ## [1.15.0] - 2026-07-26
 

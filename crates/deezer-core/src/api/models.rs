@@ -591,7 +591,7 @@ impl DisplayItem {
             col1: album.title.clone(),
             col2: album.artist.clone(),
             col3: album.release_date.clone(),
-            col4: format!("{} titres", album.nb_tracks),
+            col4: album.nb_tracks.to_string(),
             track: None,
             album_id: Some(album.album_id.clone()),
             playlist_id: None,
@@ -604,7 +604,7 @@ impl DisplayItem {
         Self {
             col1: playlist.title.clone(),
             col2: playlist.author.clone(),
-            col3: format!("{} titres", playlist.nb_songs),
+            col3: playlist.nb_songs.to_string(),
             col4: String::new(),
             track: None,
             album_id: None,
