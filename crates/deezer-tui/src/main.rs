@@ -117,10 +117,13 @@ fn main() -> Result<()> {
     }
 }
 
-/// Build a current-thread runtime for the TUI client and one-shot commands.
-/// No worker thread pool — the client only does IPC + rendering.
+/// Build a runtime for the TUI client and one-shot commands.
+/// Needs a real worker thread: the main loop blocks the thread it runs on
+/// inside crossterm's synchronous `event::poll`, which would otherwise starve
+/// the background daemon-socket reader task on a current-thread runtime.
 fn build_client_runtime() -> Result<tokio::runtime::Runtime> {
-    Ok(tokio::runtime::Builder::new_current_thread()
+    Ok(tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()?)
 }

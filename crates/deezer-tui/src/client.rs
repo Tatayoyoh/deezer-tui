@@ -1627,7 +1627,12 @@ impl ViewState {
 
 pub struct Client {
     view: ViewState,
-    reader: BufReader<tokio::net::unix::OwnedReadHalf>,
+    /// Parsed messages from the daemon, produced by a dedicated reader task.
+    /// `read_line` is not cancellation-safe, so it must never be raced against
+    /// a timeout on a shared reader — that silently truncates/desyncs the
+    /// stream. Reading to completion in its own task and forwarding results
+    /// over this channel avoids that entirely.
+    server_rx: mpsc::UnboundedReceiver<io::Result<ServerMessage>>,
     writer: tokio::net::unix::OwnedWriteHalf,
     picker: Picker,
     image_tx: mpsc::UnboundedSender<(String, image::DynamicImage)>,
@@ -1649,9 +1654,28 @@ impl Client {
 
         let (image_tx, image_rx) = mpsc::unbounded_channel();
 
+        let (server_tx, server_rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(read_half);
+            loop {
+                match read_line::<ServerMessage, _>(&mut reader).await {
+                    Ok(Some(msg)) => {
+                        if server_tx.send(Ok(msg)).is_err() {
+                            break;
+                        }
+                    }
+                    Ok(None) => break, // EOF — daemon disconnected
+                    Err(e) => {
+                        let _ = server_tx.send(Err(e));
+                        break;
+                    }
+                }
+            }
+        });
+
         Ok(Self {
             view: ViewState::from_snapshot(&DaemonSnapshot::default()),
-            reader: BufReader::new(read_half),
+            server_rx,
             writer: write_half,
             picker,
             image_tx,
@@ -1794,17 +1818,12 @@ impl Client {
 
         // Wait for initial snapshot from daemon before drawing anything.
         // This avoids a brief flash of the Login screen when the user is already logged in.
-        match tokio::time::timeout(
-            Duration::from_secs(3),
-            read_line::<ServerMessage, _>(&mut self.reader),
-        )
-        .await
-        {
-            Ok(Ok(Some(ServerMessage::Snapshot(snap)))) => {
+        match tokio::time::timeout(Duration::from_secs(3), self.server_rx.recv()).await {
+            Ok(Some(Ok(ServerMessage::Snapshot(snap)))) => {
                 self.view.update_from_snapshot(snap);
             }
             _ => {
-                // Timeout or error — proceed with default state
+                // Timeout, disconnect, or error — proceed with default state
             }
         }
 
@@ -2000,34 +2019,30 @@ impl Client {
                 break;
             }
 
-            // Try to read messages from daemon (non-blocking)
-            match tokio::time::timeout(
-                Duration::from_millis(1),
-                read_line::<ServerMessage, _>(&mut self.reader),
-            )
-            .await
-            {
-                Ok(Ok(Some(ServerMessage::Snapshot(snap)))) => {
+            // Drain any messages from daemon (non-blocking; reading happens in
+            // the dedicated task spawned in `connect`, never raced against a
+            // timeout here).
+            match self.server_rx.try_recv() {
+                Ok(Ok(ServerMessage::Snapshot(snap))) => {
                     self.view.update_from_snapshot(snap);
                     self.maybe_fetch_cover_image();
                 }
-                Ok(Ok(Some(ServerMessage::Error(err)))) => {
+                Ok(Ok(ServerMessage::Error(err))) => {
                     self.view.set_status_msg(Some(format!("Error: {err}")));
                 }
-                Ok(Ok(None)) => {
+                Ok(Err(e)) => {
+                    debug!("Read error from daemon: {e}");
+                    self.view
+                        .set_status_msg(Some(format!("Communication error: {e}")));
+                }
+                Err(mpsc::error::TryRecvError::Disconnected) => {
                     // Daemon disconnected
                     self.view
                         .set_status_msg(Some(t().daemon_disconnected.into()));
                     running = false;
                 }
-                Ok(Err(e)) => {
-                    // Read/parse error — log but don't crash immediately
-                    debug!("Read error from daemon: {e}");
-                    self.view
-                        .set_status_msg(Some(format!("Communication error: {e}")));
-                }
-                Err(_) => {
-                    // Timeout — no data available, continue
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    // No data available, continue
                 }
             }
 
