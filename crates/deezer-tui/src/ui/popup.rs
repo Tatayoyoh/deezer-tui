@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
-    ScrollbarOrientation, ScrollbarState, Table, TableState,
+    ScrollbarOrientation, ScrollbarState, Table,
 };
 
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
@@ -358,7 +358,7 @@ fn draw_playlist_picker(
         .row_highlight_style(Theme::highlight())
         .highlight_symbol(" > ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::Modal, selected);
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
     view.record_rows(
         chunks[1],
@@ -1151,7 +1151,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::PlaylistDetail, selected);
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
     view.record_rows(
         chunks[1],
@@ -1291,7 +1291,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::WaitingList, selected);
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
     view.record_rows(
         chunks[0],
@@ -1432,7 +1432,7 @@ fn draw_offline_detail(
     .row_highlight_style(Theme::highlight())
     .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::OfflineDetail, selected);
     frame.render_stateful_widget(table, chunks[1], &mut table_state);
     view.record_rows(
         chunks[1],

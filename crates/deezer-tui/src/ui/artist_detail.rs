@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
-    TableState, Tabs, Wrap,
+    Tabs, Wrap,
 };
 use ratatui_image::{Resize, StatefulImage};
 
@@ -373,7 +373,7 @@ fn draw_top_tracks(
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::ArtistDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);
     view.record_rows(
         area,
@@ -463,7 +463,7 @@ fn draw_album_list(
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::ArtistDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);
     view.record_rows(
         area,
@@ -525,7 +525,7 @@ fn draw_similar_artists(
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::ArtistDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);
     view.record_rows(
         area,

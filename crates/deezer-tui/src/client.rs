@@ -14,6 +14,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
+use ratatui::widgets::TableState;
 use ratatui::Terminal;
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
@@ -628,7 +629,7 @@ pub enum ClickTarget {
 
 /// Which list the rows recorded by the draw pass belong to — a click selects
 /// the row in that list's own cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RowsKind {
     /// Main list of the active tab (and its category).
     Tab,
@@ -815,6 +816,9 @@ pub struct ViewState {
     pub login_button_area: Cell<Option<Rect>>,
     /// Clickable regions of the last drawn frame.
     pub click: RefCell<ClickAreas>,
+    /// Scroll offset each list was drawn with last frame, so the next draw can
+    /// resume from it instead of recomputing the viewport from the top.
+    pub scroll: RefCell<HashMap<RowsKind, usize>>,
 }
 
 /// How long a status notification stays visible before hiding itself.
@@ -981,6 +985,7 @@ impl ViewState {
             cover_image_area: None,
             login_button_area: Cell::new(None),
             click: RefCell::default(),
+            scroll: RefCell::default(),
         }
     }
 
@@ -1100,6 +1105,26 @@ impl ViewState {
             len,
             kind,
         });
+        // Carry the offset into the next frame so `table_state` can resume from it.
+        self.scroll.borrow_mut().insert(kind, offset);
+    }
+
+    /// `TableState` for `kind`, seeded with the offset the same list was drawn
+    /// with last frame.
+    ///
+    /// Building a `TableState::default()` per frame instead pins the offset at
+    /// 0, and ratatui then scrolls the minimum needed to reveal the cursor —
+    /// which parks the cursor on the last visible row and scrolls the viewport
+    /// under it on every move. Resuming from the previous offset keeps the
+    /// cursor moving inside the viewport and only scrolls at the edges.
+    ///
+    /// A stale offset (list swapped, items removed) is self-correcting:
+    /// ratatui clamps it to keep `selected` visible.
+    pub fn table_state(&self, kind: RowsKind, selected: usize) -> TableState {
+        let offset = self.scroll.borrow().get(&kind).copied().unwrap_or(0);
+        TableState::default()
+            .with_selected(Some(selected))
+            .with_offset(offset)
     }
 
     /// Focus the active tab's search or filter input — the `/` and `Ctrl+F`

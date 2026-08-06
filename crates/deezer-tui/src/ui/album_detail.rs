@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{
     Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table,
-    TableState, Wrap,
+    Wrap,
 };
 use ratatui_image::{Resize, StatefulImage};
 
@@ -339,7 +339,7 @@ fn draw_track_list(
         })
         .highlight_symbol(if left_focused { "  " } else { "> " });
 
-    let mut table_state = TableState::default().with_selected(Some(selected));
+    let mut table_state = view.table_state(RowsKind::AlbumDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);
     view.record_rows(
         area,
