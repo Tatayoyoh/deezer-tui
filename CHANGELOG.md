@@ -5,20 +5,16 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-- Opening a private playlist failed with "An active access token must be used
-  to query information about the current user": the playlist detail still went
-  through the public API, which rejects private playlists (#17)
-
-### Changed
-- Enabling shuffle now turns repeat off. Repeat leaves shuffle alone, so
-  shuffle + repeat can still be set by enabling shuffle first
-- Shuffle is now a full pass over the queue — each track plays once per cycle —
-  instead of an endless random walk. Repeat all replays the whole shuffle in a
-  new random order; with repeat off, playback stops once the cycle ends
-- Repeat one loops the current track and, on next/prev, resumes the shuffle
-  cycle if shuffle is on, or normal order otherwise
+- Opening a private playlist is not working (#17)
 - Previous track under shuffle now steps back through the tracks actually
   played, instead of jumping to the queue's preceding track
+
+### Changed
+- Shuffle is now a full pass over the queue — each track plays once per cycle —
+  instead of an endless random walk.
+- Enabling shuffle now turns repeat off. Shuffle + repeat can still be set by enabling shuffle first
+- On "Repeat one" loops on current track + next/prev will resumes the shuffle
+  cycle if shuffle is on
 
 ## [1.15.1] - 2026-08-06
 
