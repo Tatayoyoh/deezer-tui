@@ -1329,8 +1329,16 @@ impl DeezerClient {
     /// Acquire a JWT for pipe.deezer.com GraphQL API.
     /// Exchanges the ARL cookie (already set on the cookie jar by `login_arl`)
     /// for a JWT via `auth.deezer.com/login/arl`. Cached on the client.
-    async fn ensure_jwt(&self) -> Result<String, DeezerError> {
-        if let Ok(cache) = self.jwt_cache.lock() {
+    ///
+    /// `force` drops the cached token first, to replace one the server has
+    /// rejected. The ARL cookie outlives the JWT, so this re-exchange needs no
+    /// user interaction.
+    async fn ensure_jwt(&self, force: bool) -> Result<String, DeezerError> {
+        if force {
+            if let Ok(mut cache) = self.jwt_cache.lock() {
+                *cache = None;
+            }
+        } else if let Ok(cache) = self.jwt_cache.lock() {
             if let Some(ref jwt) = *cache {
                 return Ok(jwt.clone());
             }
@@ -1372,8 +1380,29 @@ impl DeezerClient {
     }
 
     /// Call the pipe.deezer.com GraphQL endpoint with a Bearer JWT.
+    ///
+    /// The JWT is cached for the whole session but Deezer expires it
+    /// server-side, so a rejected token is refreshed and the call retried once
+    /// instead of surfacing "JWT token has expired, please reauthenticate" to
+    /// the user (#14). The retry is bounded to one attempt: if the fresh token
+    /// is rejected too, the ARL itself is dead and only a real re-login helps.
     async fn graphql_call(&self, query: &str) -> Result<serde_json::Value, DeezerError> {
-        let jwt = self.ensure_jwt().await?;
+        match self.graphql_attempt(query, false).await {
+            Err(e) if is_stale_jwt(&e) => {
+                debug!("GraphQL rejected the JWT ({e}); refreshing and retrying once");
+                self.graphql_attempt(query, true).await
+            }
+            other => other,
+        }
+    }
+
+    /// One GraphQL round-trip. `force_new_jwt` bypasses the cached token.
+    async fn graphql_attempt(
+        &self,
+        query: &str,
+        force_new_jwt: bool,
+    ) -> Result<serde_json::Value, DeezerError> {
+        let jwt = self.ensure_jwt(force_new_jwt).await?;
         let body = json!({ "query": query });
 
         let resp = self
@@ -1394,6 +1423,14 @@ impl DeezerClient {
             "/tmp/deezer-graphql-debug.txt",
             format!("status={status}\n{raw_text}"),
         );
+        // A rejected token can come back as a bare 401/403 with no GraphQL
+        // error envelope, so check the status before parsing.
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(DeezerError::Auth(format!(
+                "GraphQL rejected the JWT (status={status})"
+            )));
+        }
+
         let body: serde_json::Value = serde_json::from_str(&raw_text)
             .map_err(|e| DeezerError::Http(format!("Non-JSON response: {e} body={raw_text}")))?;
 
@@ -1686,13 +1723,60 @@ fn parse_chart_playlist(v: &serde_json::Value) -> Option<super::models::Playlist
     })
 }
 
+/// True for the errors a fresh JWT can plausibly resolve.
+///
+/// Deezer reports an expired pipe.deezer.com token as a GraphQL error message
+/// ("JWT token has expired, please reauthenticate") rather than a status code,
+/// so the message has to be matched. Kept narrow on purpose: a retry must not
+/// be triggered by unrelated GraphQL failures.
+fn is_stale_jwt(err: &DeezerError) -> bool {
+    match err {
+        // Raised by graphql_attempt itself for a 401/403.
+        DeezerError::Auth(msg) => msg.to_ascii_lowercase().contains("jwt"),
+        DeezerError::Api(msg) => {
+            let msg = msg.to_ascii_lowercase();
+            msg.contains("jwt")
+                && (msg.contains("expired")
+                    || msg.contains("reauthenticate")
+                    || msg.contains("invalid"))
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::is_stale_jwt;
+    use crate::api::models::DeezerError;
     use crate::api::DeezerClient;
 
     /// Live tests read the ARL from the environment so no token is committed.
     fn arl() -> String {
         std::env::var("DEEZER_ARL").expect("set DEEZER_ARL to run live tests")
+    }
+
+    #[test]
+    fn stale_jwt_is_detected_from_the_graphql_message() {
+        // The message Deezer actually returns, as reported in #14.
+        assert!(is_stale_jwt(&DeezerError::Api(
+            "GraphQL error: JWT token has expired, please reauthenticate".into()
+        )));
+        // The 401/403 path raises Auth instead.
+        assert!(is_stale_jwt(&DeezerError::Auth(
+            "GraphQL rejected the JWT (status=401 Unauthorized)".into()
+        )));
+    }
+
+    #[test]
+    fn unrelated_errors_do_not_trigger_a_jwt_retry() {
+        assert!(!is_stale_jwt(&DeezerError::Api(
+            "GraphQL error: field 'moods' not found".into()
+        )));
+        assert!(!is_stale_jwt(&DeezerError::Http("connection reset".into())));
+        // "Not authenticated" is a missing session, not a stale token.
+        assert!(!is_stale_jwt(&DeezerError::Auth(
+            "Not authenticated".into()
+        )));
     }
 
     #[tokio::test]

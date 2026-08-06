@@ -17,6 +17,8 @@ All notable changes to this project will be documented in this file.
 - List scrolling pinned the cursor to the bottom row and moved the viewport
   under it; the cursor now moves inside the viewport, which only scrolls once
   the cursor reaches an edge (#20)
+- Expired pipe.deezer.com JWT is now refreshed and the call retried once,
+  instead of surfacing "JWT token has expired, please reauthenticate" (#14)
 
 ## [1.15.0] - 2026-07-26
 
