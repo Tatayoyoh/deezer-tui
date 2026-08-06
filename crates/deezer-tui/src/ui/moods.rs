@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 use crate::client::{RowsKind, ViewState};
 use crate::i18n::t;
@@ -51,7 +51,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut table_state = TableState::default().with_selected(Some(view.moods_selected));
+    let mut table_state = view.table_state(RowsKind::Tab, view.moods_selected);
     frame.render_stateful_widget(table, area, &mut table_state);
     view.record_rows(
         area,

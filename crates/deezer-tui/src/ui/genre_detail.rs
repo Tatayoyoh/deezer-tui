@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
 use crate::client::{ClickTarget, Overlay, RowsKind, ViewState};
 use crate::i18n::t;
@@ -234,7 +234,7 @@ fn draw_content(
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("> ");
 
-    let mut state = TableState::default().with_selected(Some(selected.min(count - 1)));
+    let mut state = view.table_state(RowsKind::GenreDetail, selected.min(count - 1));
     frame.render_stateful_widget(table, area, &mut state);
     view.record_rows(
         area,
