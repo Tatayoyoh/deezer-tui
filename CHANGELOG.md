@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Client/daemon IPC desync causing "Communication error" JSON parse failures (#16, #19)
+
 ## [1.15.0] - 2026-07-26
 
 ### Added
