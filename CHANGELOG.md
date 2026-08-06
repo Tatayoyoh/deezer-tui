@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Enabling shuffle now turns repeat off. Repeat leaves shuffle alone, so
+  shuffle + repeat can still be set by enabling shuffle first
+- Shuffle is now a full pass over the queue — each track plays once per cycle —
+  instead of an endless random walk. Repeat all replays the whole shuffle in a
+  new random order; with repeat off, playback stops once the cycle ends
+- Repeat one loops the current track and, on next/prev, resumes the shuffle
+  cycle if shuffle is on, or normal order otherwise
+- Previous track under shuffle now steps back through the tracks actually
+  played, instead of jumping to the queue's preceding track
+
 ## [1.15.1] - 2026-08-06
 
 ### Fixed
