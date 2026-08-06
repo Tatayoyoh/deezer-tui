@@ -1049,63 +1049,66 @@ impl DeezerClient {
         })
     }
 
-    /// Get playlist details (title, creator, tracks) via the public API.
+    /// Get playlist details (title, creator, tracks).
+    ///
+    /// Uses the authenticated gateway rather than `api.deezer.com/playlist/{id}`:
+    /// the public endpoint refuses private playlists with "An active access
+    /// token must be used to query information about the current user", so
+    /// opening one from the Playlists tab failed once #17 made them visible.
     pub async fn get_playlist_detail(
         &self,
         playlist_id: &str,
     ) -> Result<PlaylistDetail, DeezerError> {
-        let url = format!("https://api.deezer.com/playlist/{}", playlist_id);
-        let resp: serde_json::Value = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| DeezerError::Http(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| DeezerError::Http(e.to_string()))?;
+        let params = json!({
+            "playlist_id": playlist_id,
+            "start": 0,
+            "nb": 2000,
+            "lang": "en",
+            "tab": 0,
+            "tags": true,
+            "header": true,
+        });
 
-        if let Some(err) = resp.get("error") {
-            return Err(DeezerError::Api(
-                err.get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Unknown playlist error")
-                    .to_string(),
-            ));
-        }
+        let res = self.gw_call("deezer.pagePlaylist", params).await?;
+        let data = res.get("DATA");
 
-        let title = resp
-            .get("title")
+        let title = data
+            .and_then(|d| d.get("TITLE"))
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or_default()
             .to_string();
-        let creator = resp
-            .get("creator")
-            .and_then(|c| c.get("name"))
+        let creator = data
+            .and_then(|d| d.get("PARENT_USERNAME"))
             .and_then(|v| v.as_str())
-            .unwrap_or("")
+            .unwrap_or_default()
             .to_string();
-        let nb_tracks = resp.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
 
-        // Parse track IDs from the "tracks.data" array
-        let track_ids: Vec<String> = resp
-            .get("tracks")
-            .and_then(|t| t.get("data"))
+        // SONGS holds full gateway track objects, so they deserialize straight
+        // into TrackData — no second call to resolve IDs. Entries that come
+        // back without a TRACK_TOKEN are topped up by ensure_track_token when
+        // the track is actually played.
+        let tracks: Vec<TrackData> = res
+            .get("SONGS")
+            .and_then(|s| s.get("data"))
             .and_then(|d| d.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|t| t.get("id").and_then(|v| v.as_u64()).map(|v| v.to_string()))
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|t| serde_json::from_value(t.clone()).ok())
                     .collect()
             })
             .unwrap_or_default();
 
-        // Fetch full track data via gw-light (includes TRACK_TOKEN)
-        let track_id_refs: Vec<&str> = track_ids.iter().map(|s| s.as_str()).collect();
-        let tracks = if !track_id_refs.is_empty() {
-            self.get_tracks(&track_id_refs).await.unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // NB_SONG comes back as a number or a string depending on the endpoint.
+        let nb_tracks = data
+            .and_then(|d| d.get("NB_SONG"))
+            .and_then(|v| {
+                v.as_u64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+            })
+            .unwrap_or(tracks.len() as u64);
+
+        debug!("playlist {playlist_id}: {} tracks", tracks.len());
 
         Ok(PlaylistDetail {
             playlist_id: playlist_id.to_string(),

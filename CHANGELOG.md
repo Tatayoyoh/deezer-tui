@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Opening a private playlist failed with "An active access token must be used
+  to query information about the current user": the playlist detail still went
+  through the public API, which rejects private playlists (#17)
+
 ### Changed
 - Enabling shuffle now turns repeat off. Repeat leaves shuffle alone, so
   shuffle + repeat can still be set by enabling shuffle first
