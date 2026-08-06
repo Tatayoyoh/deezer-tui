@@ -24,7 +24,8 @@ use crate::protocol::MoodEntry;
 
 /// Current cache format. Bump to discard every on-disk cache written by an
 /// older build — used when a bug could have stored wrong data under a key.
-const CACHE_VERSION: u32 = 2;
+/// 3: track counts are stored as a plain number, not "<N> titres" (#18).
+const CACHE_VERSION: u32 = 3;
 
 /// All cached favorites data, persisted to disk.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
