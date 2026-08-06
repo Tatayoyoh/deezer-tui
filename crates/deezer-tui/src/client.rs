@@ -2915,6 +2915,30 @@ impl Client {
         KeyAction::Continue
     }
 
+    /// Player controls that stay available while a detail overlay is open.
+    /// Returns `None` when the key is not a player control, so callers keep
+    /// their own fallthrough behaviour.
+    ///
+    /// Shared by every detail overlay so the set can't drift between them —
+    /// `s` and `r` used to be missing from all of them.
+    fn player_control_action(&self, key: KeyCode) -> Option<KeyAction> {
+        let cmd = match key {
+            KeyCode::Char(' ') => Command::TogglePause,
+            KeyCode::Char('n') => Command::NextTrack,
+            KeyCode::Char('b') => Command::PrevTrack,
+            KeyCode::Char('s') => Command::ToggleShuffle,
+            KeyCode::Char('r') => Command::CycleRepeat,
+            KeyCode::Char('+') | KeyCode::Char('=') => Command::SetVolume {
+                volume: (self.view.volume + 0.05).min(1.0),
+            },
+            KeyCode::Char('-') => Command::SetVolume {
+                volume: (self.view.volume - 0.05).max(0.0),
+            },
+            _ => return None,
+        };
+        Some(KeyAction::SendCommand(cmd))
+    }
+
     /// Handle key events in the offline album/playlist detail modal.
     fn handle_offline_detail_key(&mut self, key: KeyEvent) -> KeyAction {
         let (playlist, index, selected) = match self.view.overlay {
@@ -3019,19 +3043,11 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            // Player controls stay live behind the modal
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3228,19 +3244,11 @@ impl Client {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
             }
-            // Player controls still work in album detail
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3356,19 +3364,11 @@ impl Client {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
             }
-            // Player controls still work
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3502,19 +3502,11 @@ impl Client {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
             }
-            // Player controls
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3555,19 +3547,11 @@ impl Client {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
                 KeyAction::Continue
             }
-            // Player controls
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3683,19 +3667,11 @@ impl Client {
                     }
                 }
             }
-            // Player controls
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
@@ -3772,19 +3748,11 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            // Player controls still work
-            KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
-            KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
-            KeyCode::Char('b') => KeyAction::SendCommand(Command::PrevTrack),
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                let new_vol = (self.view.volume + 0.05).min(1.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            KeyCode::Char('-') => {
-                let new_vol = (self.view.volume - 0.05).max(0.0);
-                KeyAction::SendCommand(Command::SetVolume { volume: new_vol })
-            }
-            _ => KeyAction::Continue,
+            // Player controls (play/pause, prev/next, shuffle, repeat,
+            // volume) stay active while this overlay is open.
+            other => self
+                .player_control_action(other)
+                .unwrap_or(KeyAction::Continue),
         }
     }
 
