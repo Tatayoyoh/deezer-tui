@@ -9,6 +9,8 @@ All notable changes to this project will be documented in this file.
 - Hardcoded French "titres" in the Albums and Playlists track-count column; the
   count now renders as a plain number under the already-localized "Tracks"
   header (#18)
+- `r` (repeat) and `s` (shuffle) were ignored in every detail overlay (album,
+  artist, playlist, podcast, genre, offline detail, waiting list) (#15)
 
 ## [1.15.0] - 2026-07-26
 
