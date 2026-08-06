@@ -232,6 +232,14 @@ pub struct Daemon {
     engine: Option<PlayerEngine>,
     master_key: Option<[u8; 16]>,
 
+    /// Playback order of the current shuffle cycle: every queue index exactly
+    /// once, in random order. Lets shuffle be a full pass over the queue rather
+    /// than an endless random walk, which is what makes "repeat all" able to
+    /// repeat *the shuffle* instead of the queue's natural order.
+    shuffle_order: Vec<usize>,
+    /// How far through `shuffle_order` the current cycle is.
+    shuffle_pos: usize,
+
     // Network connectivity
     is_offline: bool,
 
@@ -376,6 +384,8 @@ impl Daemon {
             cdn_http,
             engine: None,
             master_key: None,
+            shuffle_order: Vec::new(),
+            shuffle_pos: 0,
 
             is_offline,
 
@@ -809,8 +819,24 @@ impl Daemon {
                 self.playback_offset_secs = 0;
             }
             Command::ToggleShuffle => {
-                let mut state = self.player_state.lock().unwrap();
-                state.shuffle = !state.shuffle;
+                let (shuffle, queue_len, current) = {
+                    let mut state = self.player_state.lock().unwrap();
+                    state.shuffle = !state.shuffle;
+                    if state.shuffle {
+                        // Turning shuffle on clears repeat: the two are set from
+                        // scratch, and repeat is then free to be re-enabled on
+                        // top of shuffle (repeat does not clear shuffle).
+                        state.repeat = RepeatMode::Off;
+                    }
+                    (state.shuffle, state.queue.len(), state.queue_index)
+                };
+                if shuffle {
+                    // Start a fresh cycle from whatever is playing now.
+                    self.rebuild_shuffle_order(queue_len, current);
+                } else {
+                    self.shuffle_order.clear();
+                    self.shuffle_pos = 0;
+                }
             }
             Command::CycleRepeat => {
                 let mut state = self.player_state.lock().unwrap();
@@ -875,6 +901,9 @@ impl Daemon {
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue = self.favorites.clone();
                         state.shuffle = true;
+                        // Same rule as toggling shuffle by hand: enabling it
+                        // clears repeat.
+                        state.repeat = RepeatMode::Off;
                     }
                     // Pick a random track to start
                     use std::collections::hash_map::DefaultHasher;
@@ -885,6 +914,8 @@ impl Daemon {
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue_index = idx;
                     }
+                    // Build the cycle around the track we're about to start.
+                    self.rebuild_shuffle_order(self.favorites.len(), idx);
                     if let Some(track) = self.favorites.get(idx).cloned() {
                         self.start_play_track(track);
                     }
@@ -965,6 +996,11 @@ impl Daemon {
                         None
                     }
                 };
+                // Jumping straight to a track moves the shuffle cycle to it, so
+                // next/prev continue from where the user actually is.
+                if let Some(pos) = self.shuffle_order.iter().position(|&i| i == index) {
+                    self.shuffle_pos = pos;
+                }
                 if let Some(track) = track {
                     self.start_play_track(track);
                 }
@@ -2450,6 +2486,45 @@ impl Daemon {
         });
     }
 
+    /// Build a fresh shuffle cycle over `queue_len` tracks, starting at `start`
+    /// so the track playing right now isn't immediately replayed.
+    ///
+    /// Fisher-Yates seeded the same way as the rest of the daemon's randomness
+    /// (hashed `Instant`) — the project has no `rand` dependency and this is
+    /// picking a play order, not anything that needs a real CSPRNG.
+    fn rebuild_shuffle_order(&mut self, queue_len: usize, start: usize) {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        Instant::now().hash(&mut hasher);
+        self.shuffle_order = shuffled_indices(queue_len, start, hasher.finish());
+        self.shuffle_pos = 0;
+    }
+
+    /// Keep `shuffle_order` consistent with a queue that changed under it.
+    ///
+    /// A queue that grew (Flow/Mood continuation, "add to queue") keeps its
+    /// cycle and gets the new tracks appended, so continuation doesn't restart
+    /// the shuffle. Anything else — replaced, shrunk, or never built — starts a
+    /// fresh cycle from the current track.
+    fn sync_shuffle_order(&mut self, queue_len: usize, current: usize) {
+        if queue_len == 0 {
+            self.shuffle_order.clear();
+            self.shuffle_pos = 0;
+            return;
+        }
+        if self.shuffle_order.len() == queue_len {
+            return;
+        }
+        if queue_len > self.shuffle_order.len() && !self.shuffle_order.is_empty() {
+            self.shuffle_order
+                .extend(self.shuffle_order.len()..queue_len);
+            return;
+        }
+        self.rebuild_shuffle_order(queue_len, current);
+    }
+
     fn play_next(&mut self) {
         let status = self.player_state.lock().unwrap().status;
         let was_paused = status == PlaybackStatus::Paused;
@@ -2471,31 +2546,61 @@ impl Daemon {
             "play_next called"
         );
 
+        let (queue_len, current, shuffle, repeat) = queue_info;
+        if queue_len == 0 {
+            info!("play_next: queue is empty, returning");
+            return;
+        }
+
+        // Shuffle walks a precomputed cycle, and the bookkeeping needs `&mut
+        // self`, so resolve it before taking the state lock.
+        let mut shuffled_next = None;
+        if shuffle {
+            self.sync_shuffle_order(queue_len, current);
+            let pos = self.shuffle_pos + 1;
+            if pos < self.shuffle_order.len() {
+                self.shuffle_pos = pos;
+                shuffled_next = Some(self.shuffle_order[pos]);
+            } else {
+                // Every track in the queue has played once this cycle.
+                if self.flow_active {
+                    self.player_state.lock().unwrap().status = PlaybackStatus::Loading;
+                    info!("play_next: end of shuffled Flow queue, fetching more tracks");
+                    self.start_flow();
+                    return;
+                }
+                if let Some(mood) = self.active_mood.clone() {
+                    self.player_state.lock().unwrap().status = PlaybackStatus::Loading;
+                    info!("play_next: end of shuffled Mood queue, fetching more tracks");
+                    self.start_play_mood(mood, true);
+                    return;
+                }
+                if repeat == RepeatMode::Queue {
+                    // Repeat all under shuffle: reshuffle and run the whole
+                    // queue again in a new random order.
+                    info!("play_next: shuffle cycle complete, reshuffling for repeat-all");
+                    self.rebuild_shuffle_order(queue_len, current);
+                    // rebuild_shuffle_order parks the current track at 0, so the
+                    // next track of the new cycle is at 1 (unless the queue holds
+                    // a single track, which just replays).
+                    self.shuffle_pos = if self.shuffle_order.len() > 1 { 1 } else { 0 };
+                    shuffled_next = self.shuffle_order.get(self.shuffle_pos).copied();
+                } else {
+                    // Shuffle exhausted with no repeat — stop here.
+                    info!("play_next: shuffle cycle complete, no repeat");
+                    if was_paused {
+                        self.resume_playback();
+                    }
+                    return;
+                }
+            }
+        }
+
         let next_track = {
             let mut state = self.player_state.lock().unwrap();
-            if state.queue.is_empty() {
-                info!("play_next: queue is empty, returning");
-                return;
-            }
 
-            let next_idx = if state.shuffle {
-                if state.queue.len() == 1 {
-                    0
-                } else {
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = DefaultHasher::new();
-                    Instant::now().hash(&mut hasher);
-                    // Pick among all tracks except the one currently playing, so
-                    // shuffle never repeats the same track twice in a row — even
-                    // right after the queue was extended (e.g. Flow continuation).
-                    let r = hasher.finish() as usize % (state.queue.len() - 1);
-                    if r >= state.queue_index {
-                        r + 1
-                    } else {
-                        r
-                    }
-                }
+            let next_idx = if let Some(idx) = shuffled_next {
+                idx
             } else {
                 let next = state.queue_index + 1;
                 if next >= state.queue.len() {
@@ -2550,13 +2655,38 @@ impl Daemon {
     fn play_prev(&mut self) {
         let was_paused = self.player_state.lock().unwrap().status == PlaybackStatus::Paused;
 
-        let prev_track = {
-            let mut state = self.player_state.lock().unwrap();
-            if state.queue.is_empty() {
+        let (queue_len, current, shuffle) = {
+            let state = self.player_state.lock().unwrap();
+            (state.queue.len(), state.queue_index, state.shuffle)
+        };
+        if queue_len == 0 {
+            return;
+        }
+
+        // Under shuffle, "previous" walks back through the cycle that was
+        // actually played, not to queue_index - 1 which is a track the user
+        // most likely never heard.
+        let mut shuffled_prev = None;
+        if shuffle {
+            self.sync_shuffle_order(queue_len, current);
+            if self.shuffle_pos > 0 {
+                self.shuffle_pos -= 1;
+                shuffled_prev = self.shuffle_order.get(self.shuffle_pos).copied();
+            } else {
+                // At the start of the cycle — nothing played before it.
+                if was_paused {
+                    self.resume_playback();
+                }
                 return;
             }
+        }
 
-            let prev_idx = if state.queue_index == 0 {
+        let prev_track = {
+            let mut state = self.player_state.lock().unwrap();
+
+            let prev_idx = if let Some(idx) = shuffled_prev {
+                idx
+            } else if state.queue_index == 0 {
                 match state.repeat {
                     RepeatMode::Queue => state.queue.len() - 1,
                     _ => {
@@ -3694,5 +3824,71 @@ async fn broadcast_snapshot(
         for id in dead {
             g.remove(&id);
         }
+    }
+}
+
+/// A shuffle cycle over `len` tracks: every index exactly once, in random
+/// order, with `start` moved to the front so the track playing right now isn't
+/// immediately replayed.
+///
+/// Fisher-Yates over an xorshift64* stream. The project has no `rand`
+/// dependency and this picks a play order, not anything needing a real CSPRNG.
+fn shuffled_indices(len: usize, start: usize, seed: u64) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..len).collect();
+    let mut seed = seed | 1;
+    for i in (1..order.len()).rev() {
+        seed ^= seed >> 12;
+        seed ^= seed << 25;
+        seed ^= seed >> 27;
+        let j = (seed.wrapping_mul(0x2545_f491_4f6c_dd1d) as usize) % (i + 1);
+        order.swap(i, j);
+    }
+    if let Some(pos) = order.iter().position(|&i| i == start) {
+        order.swap(0, pos);
+    }
+    order
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shuffled_indices;
+
+    /// The whole point of a cycle: "repeat all" can only repeat *the shuffle*
+    /// if the shuffle is a full pass that plays each track exactly once.
+    #[test]
+    fn a_shuffle_cycle_covers_every_track_exactly_once() {
+        for len in [1usize, 2, 5, 50, 500] {
+            for start in [0, len / 2, len.saturating_sub(1)] {
+                let order = shuffled_indices(len, start, 0x9E37_79B9_7F4A_7C15);
+                assert_eq!(order.len(), len, "len={len} start={start}");
+                let mut seen = order.clone();
+                seen.sort_unstable();
+                assert_eq!(
+                    seen,
+                    (0..len).collect::<Vec<_>>(),
+                    "every index exactly once (len={len} start={start})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_playing_track_leads_the_cycle() {
+        for start in 0..20usize {
+            let order = shuffled_indices(20, start, 0xDEAD_BEEF_CAFE_1234);
+            assert_eq!(order[0], start, "cycle must open on the current track");
+        }
+    }
+
+    #[test]
+    fn the_order_is_actually_shuffled() {
+        // Not a randomness test — just a guard against returning 0..len as-is.
+        let order = shuffled_indices(100, 0, 0x1234_5678_9ABC_DEF0);
+        assert_ne!(order, (0..100).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn an_empty_queue_yields_an_empty_cycle() {
+        assert!(shuffled_indices(0, 0, 42).is_empty());
     }
 }
