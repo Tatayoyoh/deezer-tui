@@ -6,19 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - Client/daemon IPC desync causing "Communication error" JSON parse failures (#16, #19)
-- Hardcoded French "titres" in the Albums and Playlists track-count column; the
-  count now renders as a plain number under the already-localized "Tracks"
-  header (#18)
-- `r` (repeat) and `s` (shuffle) were ignored in every detail overlay (album,
-  artist, playlist, podcast, genre, offline detail, waiting list) (#15)
-- Private playlists were missing from the Playlists tab: it now uses the
-  authenticated gateway instead of the public REST API, which only ever
-  returns public playlists (#17)
-- List scrolling pinned the cursor to the bottom row and moved the viewport
-  under it; the cursor now moves inside the viewport, which only scrolls once
-  the cursor reaches an edge (#20)
-- Expired pipe.deezer.com JWT is now refreshed and the call retried once,
-  instead of surfacing "JWT token has expired, please reauthenticate" (#14)
+- Hardcoded French "titres" in the Albums and Playlists track-count column (#18)
+- `r` (repeat) and `s` (shuffle) were ignored in every overlays (album, artist, playlist, podcast, genre, offline detail, waiting list) (#15)
+- Private and collaborative playlists were missing from the Playlists tab (#17)
+- The cursor now moves inside the viewport, which only scrolls once the cursor reaches an edge (#20)
+- Expired pipe.deezer.com JWT is now refreshed and the call retried once, instead of surfacing "JWT token has expired, please reauthenticate" (#14)
 
 ## [1.15.0] - 2026-07-26
 
