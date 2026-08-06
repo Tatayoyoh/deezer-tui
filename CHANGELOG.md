@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.15.2] - 2026-08-06
 
 ### Fixed
 - Opening a private playlist is not working (#17)
