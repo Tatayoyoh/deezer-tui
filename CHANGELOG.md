@@ -11,6 +11,9 @@ All notable changes to this project will be documented in this file.
   header (#18)
 - `r` (repeat) and `s` (shuffle) were ignored in every detail overlay (album,
   artist, playlist, podcast, genre, offline detail, waiting list) (#15)
+- Private playlists were missing from the Playlists tab: it now uses the
+  authenticated gateway instead of the public REST API, which only ever
+  returns public playlists (#17)
 
 ## [1.15.0] - 2026-07-26
 

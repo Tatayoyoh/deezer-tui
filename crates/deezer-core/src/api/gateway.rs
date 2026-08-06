@@ -431,63 +431,47 @@ impl DeezerClient {
         Ok(items)
     }
 
-    /// Get user playlists.
-    /// Get user playlists via the public API.
-    pub async fn get_playlists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+    /// Raw playlist entries from the user's own profile page, via the
+    /// authenticated gateway.
+    ///
+    /// This is deliberately not `api.deezer.com/user/{id}/playlists`: the
+    /// public REST API only ever exposes playlists whose visibility is public,
+    /// so every private playlist is silently absent from its response even
+    /// when the request carries a valid session.
+    async fn fetch_profile_playlists(&self) -> Result<Vec<serde_json::Value>, DeezerError> {
         let session = self
             .session
             .as_ref()
             .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
 
-        let url = format!(
-            "https://api.deezer.com/user/{}/playlists?limit=2000",
-            session.user_id
-        );
-        let resp: serde_json::Value = self
-            .http
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| DeezerError::Http(e.to_string()))?
-            .json()
-            .await
-            .map_err(|e| DeezerError::Http(e.to_string()))?;
+        let params = json!({
+            "user_id": session.user_id,
+            "tab": "playlists",
+            "nb": 2000,
+        });
 
-        let data = resp
-            .get("data")
-            .and_then(|d| d.as_array())
-            .ok_or_else(|| DeezerError::Api("Missing 'data' in playlists".into()))?;
+        let results = self.gw_call("deezer.pageProfile", params).await?;
+        let data = results
+            .get("TAB")
+            .and_then(|t| t.get("playlists"))
+            .and_then(|p| p.get("data"))
+            .ok_or_else(|| DeezerError::Api("Missing TAB.playlists.data in profile".into()))?;
 
-        debug!("favorite_playlists: {} items", data.len());
+        serde_json::from_value(data.clone())
+            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))
+    }
 
-        let items = data
-            .iter()
-            .map(|entry| {
-                let playlist_id = entry
-                    .get("id")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v.to_string());
-                let title = entry.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                let nb_tracks = entry.get("nb_tracks").and_then(|v| v.as_u64()).unwrap_or(0);
-                let author = entry
-                    .get("creator")
-                    .and_then(|c| c.get("name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                DisplayItem {
-                    col1: title.to_string(),
-                    col2: author.to_string(),
-                    col3: nb_tracks.to_string(),
-                    col4: String::new(),
-                    track: None,
-                    album_id: None,
-                    playlist_id,
-                    artist_id: None,
-                    show_id: None,
-                }
-            })
+    /// Get user playlists for the Playlists tab — public and private alike.
+    pub async fn get_playlists(&self) -> Result<Vec<DisplayItem>, DeezerError> {
+        let items: Vec<DisplayItem> = self
+            .fetch_profile_playlists()
+            .await?
+            .into_iter()
+            .filter_map(|v| serde_json::from_value::<PlaylistData>(v).ok())
+            .map(|pl| DisplayItem::from_playlist(&pl))
             .collect();
 
+        debug!("favorite_playlists: {} items", items.len());
         Ok(items)
     }
 
@@ -751,27 +735,14 @@ impl DeezerClient {
 
     /// Get user playlists as raw PlaylistData (for playlist picker).
     pub async fn get_user_playlists_raw(&self) -> Result<Vec<PlaylistData>, DeezerError> {
-        let session = self
+        let owner_id = self
             .session
             .as_ref()
-            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?;
+            .ok_or_else(|| DeezerError::Auth("Not authenticated".into()))?
+            .user_id
+            .to_string();
 
-        let params = json!({
-            "user_id": session.user_id,
-            "tab": "playlists",
-            "nb": 2000,
-        });
-
-        let results = self.gw_call("deezer.pageProfile", params).await?;
-        let data = results
-            .get("TAB")
-            .and_then(|t| t.get("playlists"))
-            .and_then(|p| p.get("data"))
-            .ok_or_else(|| DeezerError::Api("Missing TAB.playlists.data in profile".into()))?;
-
-        let owner_id = session.user_id.to_string();
-        let all: Vec<serde_json::Value> = serde_json::from_value(data.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse playlists: {e}")))?;
+        let all = self.fetch_profile_playlists().await?;
 
         let writable: Vec<PlaylistData> = all
             .into_iter()
