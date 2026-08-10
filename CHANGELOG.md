@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Browser login on macOS no longer attempts the Linux-only `xdg-mime`/`.desktop` URI handler setup (which always failed silently); goes straight to the manual paste fallback
+- `open_browser` now uses macOS's `open` instead of hoping `firefox`/`chromium` are literal binaries on `PATH`
+
 ## [1.15.2] - 2026-08-06
 
 ### Fixed
