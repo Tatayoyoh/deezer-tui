@@ -1,4 +1,5 @@
 mod client;
+mod completions;
 mod daemon;
 mod favorites_cache;
 mod i18n;
@@ -32,6 +33,48 @@ fn init_logging(path: &str) {
     }
 }
 
+fn print_help() {
+    println!("deezer-tui — Terminal-based Deezer player");
+    println!();
+    println!("Usage: deezer-tui [OPTIONS]");
+    println!();
+    println!("Options:");
+    println!("  -p, --toggle              Toggle play/pause");
+    println!("      --play                Resume playback");
+    println!("      --pause               Pause playback");
+    println!("      --stop                Stop playback");
+    println!("  -n, --next                Skip to next track");
+    println!("  -b, --prev                Go to previous track");
+    println!("  -s, --status              Show current playback status");
+    println!("      --json                Format status output as JSON");
+    println!("      --volume <0-100>      Set volume percentage");
+    println!("      --volume-up [STEP]    Increase volume (default: 5%)");
+    println!("      --volume-down [STEP]  Decrease volume (default: 5%)");
+    println!("      --seek <SECS>         Seek to absolute position in seconds");
+    println!("      --seek-forward [SECS] Seek forward by seconds (default: 5s)");
+    println!("      --seek-backward [SECS]Seek backward by seconds (default: 5s)");
+    println!("      --shuffle             Toggle shuffle mode");
+    println!("      --repeat              Cycle repeat mode (off -> queue -> track)");
+    println!("      --like                Add currently playing track to favorites");
+    println!("      --dislike             Dislike currently playing track");
+    println!("      --completions <SHELL> Generate shell completions (bash, zsh, fish)");
+    println!("  -q, --quit                Stop the daemon");
+    println!("  -v, --version             Show version info");
+    println!("  -h, --help                Show this help message");
+}
+
+fn print_version() {
+    println!(
+        "deezer-tui {} ({}/{})",
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
+    println!("License: WTFPL");
+    println!("Author:  Tatayoyoh");
+    println!("GitHub:  https://github.com/Tatayoyoh/deezer-tui");
+}
+
 fn main() -> Result<()> {
     // Initialize i18n: config override > system locale > English
     let config = deezer_core::Config::load();
@@ -46,35 +89,122 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
 
     if args.iter().any(|a| a == "-h" || a == "--help") {
-        println!("deezer-tui — Terminal-based Deezer player");
-        println!();
-        println!("Usage: deezer-tui [OPTIONS]");
-        println!();
-        println!("Options:");
-        println!("  -p, --toggle     Toggle play/pause");
-        println!("  -n, --next       Skip to next track");
-        println!("  -b, --prev       Go to previous track");
-        println!("  -q, --quit       Stop the daemon");
-        println!("  -v, --version    Show version info");
-        println!("  -h, --help       Show this help message");
+        print_help();
         return Ok(());
     }
 
     if args.iter().any(|a| a == "-v" || a == "--version") {
-        println!(
-            "deezer-tui {} ({}/{})",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        );
-        println!("License: WTFPL");
-        println!("Author:  Tatayoyoh");
-        println!("GitHub:  https://github.com/Tatayoyoh/deezer-tui");
+        print_version();
         return Ok(());
+    }
+
+    // Shell completions generator
+    if let Some(pos) = args.iter().position(|a| a == "--completions") {
+        if let Some(shell) = args.get(pos + 1) {
+            completions::generate_completions(shell);
+            return Ok(());
+        } else {
+            eprintln!("Error: --completions requires a shell argument (bash, zsh, fish)");
+            std::process::exit(1);
+        }
     }
 
     if args.iter().any(|a| a == "-q" || a == "--quit") {
         return handle_quit();
+    }
+
+    // Status query
+    if args.iter().any(|a| a == "-s" || a == "--status" || a == "--current") {
+        let json = args.iter().any(|a| a == "--json" || a == "-j");
+        return handle_status(json);
+    }
+
+    // Volume controls
+    if let Some(pos) = args.iter().position(|a| a == "--volume") {
+        if let Some(val_str) = args.get(pos + 1) {
+            if let Ok(val) = val_str.parse::<f32>() {
+                let volume = (val / 100.0).clamp(0.0, 1.0);
+                return send_command_to_daemon(Command::SetVolume { volume });
+            } else {
+                eprintln!("Error: --volume requires a number between 0 and 100");
+                std::process::exit(1);
+            }
+        } else {
+            eprintln!("Error: --volume requires a percentage value (0-100)");
+            std::process::exit(1);
+        }
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--volume-up") {
+        let step = args.get(pos + 1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(5.0) / 100.0;
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            let volume = (s.volume + step).clamp(0.0, 1.0);
+            return send_command_to_daemon(Command::SetVolume { volume });
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--volume-down") {
+        let step = args.get(pos + 1).and_then(|s| s.parse::<f32>().ok()).unwrap_or(5.0) / 100.0;
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            let volume = (s.volume - step).clamp(0.0, 1.0);
+            return send_command_to_daemon(Command::SetVolume { volume });
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
+    }
+
+    // Seek controls
+    if let Some(pos) = args.iter().position(|a| a == "--seek") {
+        if let Some(secs_str) = args.get(pos + 1) {
+            if let Ok(secs) = secs_str.parse::<u64>() {
+                return send_command_to_daemon(Command::SeekAbsolute { secs });
+            }
+        }
+        eprintln!("Error: --seek requires seconds as a positive integer");
+        std::process::exit(1);
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--seek-forward") {
+        let secs = args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(5);
+        return send_command_to_daemon(Command::SeekForward { secs });
+    }
+
+    if let Some(pos) = args.iter().position(|a| a == "--seek-backward") {
+        let secs = args.get(pos + 1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(5);
+        return send_command_to_daemon(Command::SeekBackward { secs });
+    }
+
+    // Playback controls
+    if args.iter().any(|a| a == "--play") {
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            if s.status != deezer_core::player::state::PlaybackStatus::Playing {
+                return send_command_to_daemon(Command::TogglePause);
+            }
+            return Ok(());
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
+    }
+
+    if args.iter().any(|a| a == "--pause") {
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            if s.status == deezer_core::player::state::PlaybackStatus::Playing {
+                return send_command_to_daemon(Command::TogglePause);
+            }
+            return Ok(());
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
+    }
+
+    if args.iter().any(|a| a == "--stop") {
+        return send_command_to_daemon(Command::Stop);
     }
 
     if args.iter().any(|a| a == "-n" || a == "--next") {
@@ -85,6 +215,40 @@ fn main() -> Result<()> {
     }
     if args.iter().any(|a| a == "-p" || a == "--toggle") {
         return send_command_to_daemon(Command::TogglePause);
+    }
+    if args.iter().any(|a| a == "--shuffle" || a == "--toggle-shuffle") {
+        return send_command_to_daemon(Command::ToggleShuffle);
+    }
+    if args.iter().any(|a| a == "--repeat" || a == "--cycle-repeat") {
+        return send_command_to_daemon(Command::CycleRepeat);
+    }
+
+    if args.iter().any(|a| a == "--like") {
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            if let Some(track) = s.current_track {
+                return send_command_to_daemon(Command::AddFavorite { track_id: track.track_id });
+            } else {
+                eprintln!("deezer-tui: no track is currently playing");
+                return Ok(());
+            }
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
+    }
+
+    if args.iter().any(|a| a == "--dislike") {
+        if let Ok(Some(s)) = fetch_daemon_snapshot() {
+            if let Some(track) = s.current_track {
+                return send_command_to_daemon(Command::DislikeTrack { track_id: track.track_id });
+            } else {
+                eprintln!("deezer-tui: no track is currently playing");
+                return Ok(());
+            }
+        } else {
+            eprintln!("deezer-tui: no daemon running");
+            return Ok(());
+        }
     }
 
     let show_updated = args.iter().any(|a| a == "--updated");
@@ -135,6 +299,106 @@ fn build_daemon_runtime() -> Result<tokio::runtime::Runtime> {
         .worker_threads(2)
         .enable_all()
         .build()?)
+}
+
+/// Fetch a single snapshot from the daemon (if alive).
+fn fetch_daemon_snapshot() -> Result<Option<crate::protocol::DaemonSnapshot>> {
+    let sock_path = socket_path();
+    if !sock_path.exists() {
+        return Ok(None);
+    }
+
+    let rt = build_client_runtime()?;
+    rt.block_on(async {
+        use crate::protocol::read_line;
+        match tokio::net::UnixStream::connect(&sock_path).await {
+            Ok(stream) => {
+                let (read_half, _write_half) = stream.into_split();
+                let mut reader = tokio::io::BufReader::new(read_half);
+                let snap = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    read_line::<crate::protocol::ServerMessage, _>(&mut reader),
+                )
+                .await;
+
+                match snap {
+                    Ok(Ok(Some(crate::protocol::ServerMessage::Snapshot(s)))) => Ok(Some(s)),
+                    _ => Ok(None),
+                }
+            }
+            Err(_) => Ok(None),
+        }
+    })
+}
+
+fn format_time(secs: u64) -> String {
+    let m = secs / 60;
+    let s = secs % 60;
+    format!("{m:02}:{s:02}")
+}
+
+/// Handle `deezer-tui -s` / `--status`: query daemon and format now-playing status.
+fn handle_status(json: bool) -> Result<()> {
+    match fetch_daemon_snapshot()? {
+        Some(s) => {
+            if json {
+                let json_val = serde_json::json!({
+                    "status": match s.status {
+                        deezer_core::player::state::PlaybackStatus::Playing => "playing",
+                        deezer_core::player::state::PlaybackStatus::Paused => "paused",
+                        deezer_core::player::state::PlaybackStatus::Stopped => "stopped",
+                        deezer_core::player::state::PlaybackStatus::Loading => "loading",
+                    },
+                    "track": s.current_track.as_ref().map(|t| serde_json::json!({
+                        "id": t.track_id,
+                        "title": t.title,
+                        "artist": t.artist,
+                        "album": t.album,
+                        "duration": t.duration,
+                    })),
+                    "position_secs": s.position_secs,
+                    "duration_secs": s.duration_secs,
+                    "volume": s.volume,
+                    "volume_percent": (s.volume * 100.0).round() as u32,
+                    "shuffle": s.shuffle,
+                    "repeat": match s.repeat {
+                        deezer_core::player::state::RepeatMode::Off => "off",
+                        deezer_core::player::state::RepeatMode::Queue => "queue",
+                        deezer_core::player::state::RepeatMode::Track => "track",
+                    },
+                    "quality": format!("{:?}", s.quality),
+                });
+                println!("{}", serde_json::to_string_pretty(&json_val)?);
+            } else {
+                match (&s.status, &s.current_track) {
+                    (deezer_core::player::state::PlaybackStatus::Playing, Some(t)) => {
+                        let pos = format_time(s.position_secs);
+                        let dur = format_time(s.duration_secs);
+                        println!("▶ {} — {} [{}/{}]", t.title, t.artist, pos, dur);
+                    }
+                    (deezer_core::player::state::PlaybackStatus::Paused, Some(t)) => {
+                        let pos = format_time(s.position_secs);
+                        let dur = format_time(s.duration_secs);
+                        println!("⏸ {} — {} [{}/{}]", t.title, t.artist, pos, dur);
+                    }
+                    (deezer_core::player::state::PlaybackStatus::Loading, Some(t)) => {
+                        println!("⏳ {} — {}", t.title, t.artist);
+                    }
+                    _ => {
+                        println!("⏹ Stopped");
+                    }
+                }
+            }
+        }
+        None => {
+            if json {
+                println!("{}", serde_json::json!({ "status": "offline", "error": "no daemon running" }));
+            } else {
+                eprintln!("deezer-tui: no daemon running");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Send a single command to the daemon and exit.
@@ -285,5 +549,20 @@ fn start_with_fork(show_updated: bool) -> Result<()> {
                 client.run(show_updated).await
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_time() {
+        assert_eq!(format_time(0), "00:00");
+        assert_eq!(format_time(9), "00:09");
+        assert_eq!(format_time(59), "00:59");
+        assert_eq!(format_time(60), "01:00");
+        assert_eq!(format_time(65), "01:05");
+        assert_eq!(format_time(3600), "60:00");
     }
 }
