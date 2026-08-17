@@ -1037,9 +1037,19 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         }
     };
 
-    let tracks = &detail.tracks;
-    let visible_count = (tracks.len() as u16).min(area.height.saturating_sub(8));
-    let height = visible_count + 7; // header + title line + separator + footer + borders
+    // Playlists gain a `/` title search box; a podcast show keeps its plain list.
+    let show_filter = !is_show;
+    // Filtered track list, each paired with its real index in the playlist.
+    let tracks = view.playlist_detail_tracks_filtered();
+    let selected = selected.min(tracks.len().saturating_sub(1));
+
+    let reserve = if show_filter { 11 } else { 8 };
+    let extra = if show_filter { 10 } else { 7 }; // + filter box (3) for playlists
+                                                  // Size the modal from the full track count so it doesn't shrink as the
+                                                  // filter narrows the visible rows.
+    let total_tracks = detail.tracks.len();
+    let visible_count = (total_tracks as u16).min(area.height.saturating_sub(reserve));
+    let height = visible_count + extra;
     let popup_area = centered_rect(80, height, area);
 
     frame.render_widget(Clear, popup_area);
@@ -1058,22 +1068,31 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     frame.render_widget(block, popup_area);
 
     let s = t();
-    if tracks.is_empty() {
-        let empty =
-            Paragraph::new(Span::styled(s.no_tracks, Theme::dim())).alignment(Alignment::Center);
-        frame.render_widget(empty, inner);
-        return;
-    }
 
-    // Split inner: subtitle + list + footer
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    // Split inner: subtitle + [filter box] + list + footer
+    let constraints: &[Constraint] = if show_filter {
+        &[
+            Constraint::Length(1), // subtitle
+            Constraint::Length(3), // filter box
+            Constraint::Min(1),    // track list
+            Constraint::Length(1), // footer hints
+        ]
+    } else {
+        &[
             Constraint::Length(1), // subtitle
             Constraint::Min(1),    // track list
             Constraint::Length(1), // footer hints
-        ])
+        ]
+    };
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(inner);
+    let (subtitle_area, list_area, footer_area) = if show_filter {
+        (chunks[0], chunks[2], chunks[3])
+    } else {
+        (chunks[0], chunks[1], chunks[2])
+    };
 
     // Subtitle: creator + track count (episode count for a show, which has no creator)
     let subtitle_text = if is_show {
@@ -1084,8 +1103,44 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     let subtitle = Line::from(vec![Span::styled(subtitle_text, Theme::dim())]);
     frame.render_widget(
         Paragraph::new(subtitle).alignment(Alignment::Center),
-        chunks[0],
+        subtitle_area,
     );
+
+    // Filter input box (playlists only).
+    if show_filter {
+        let is_typing = view.playlist_detail_filter_typing;
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(if is_typing {
+                Theme::border_focused()
+            } else {
+                Theme::border()
+            })
+            .title(shortcut_line(if is_typing {
+                s.favorites_filter_typing
+            } else {
+                s.favorites_filter_normal
+            }))
+            .title_style(Theme::title());
+        let input_text = if view.playlist_detail_filter_input.is_empty() && !is_typing {
+            Span::styled(s.playlist_detail_filter_placeholder, Theme::dim())
+        } else {
+            Span::styled(&view.playlist_detail_filter_input, Theme::text())
+        };
+        frame.render_widget(Paragraph::new(input_text).block(input_block), chunks[1]);
+        view.record_click(chunks[1], crate::client::ClickTarget::FilterInput);
+        if is_typing {
+            let cursor_x = chunks[1].x + 1 + view.playlist_detail_filter_input.len() as u16;
+            frame.set_cursor_position(Position::new(cursor_x, chunks[1].y + 1));
+        }
+    }
+
+    if tracks.is_empty() {
+        let empty =
+            Paragraph::new(Span::styled(s.no_tracks, Theme::dim())).alignment(Alignment::Center);
+        frame.render_widget(empty, list_area);
+        return;
+    }
 
     // Table header
     let (col_title, col_author) = if is_show {
@@ -1105,11 +1160,11 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     ])
     .height(1);
 
-    // Table rows
+    // Table rows — `track_index` is the position in the full playlist, so the
+    // `#` column stays meaningful even when the list is filtered.
     let rows: Vec<Row> = tracks
         .iter()
-        .enumerate()
-        .map(|(i, track)| {
+        .map(|(track_index, track)| {
             let dur = track.duration_secs();
             let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
             let is_current = view
@@ -1120,7 +1175,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
             let fav_marker = if is_fav { " ♥" } else { "" };
 
             Row::new(vec![
-                Cell::from(track_number(i, is_current)),
+                Cell::from(track_number(*track_index, is_current)),
                 Cell::from(Span::styled(
                     format!("{}{}", track.title, fav_marker),
                     Theme::text(),
@@ -1152,9 +1207,9 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .highlight_symbol("> ");
 
     let mut table_state = view.table_state(RowsKind::PlaylistDetail, selected);
-    frame.render_stateful_widget(table, chunks[1], &mut table_state);
+    frame.render_stateful_widget(table, list_area, &mut table_state);
     view.record_rows(
-        chunks[1],
+        list_area,
         1, // header
         table_state.offset(),
         tracks.len(),
@@ -1168,6 +1223,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     ];
     if !is_show {
         hint_spans.extend([
+            Span::styled("/", Theme::shortcut_key()),
+            Span::styled(s.hint_filter, Theme::dim()),
             Span::styled("x", Theme::shortcut_key()),
             Span::styled(s.hint_menu, Theme::dim()),
             Span::styled("d", Theme::shortcut_key()),
@@ -1179,7 +1236,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         Span::styled(s.hint_close, Theme::dim()),
     ]);
     let footer = Paragraph::new(Line::from(hint_spans)).alignment(Alignment::Center);
-    frame.render_widget(footer, chunks[2]);
+    frame.render_widget(footer, footer_area);
 }
 
 fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {

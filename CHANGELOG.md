@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Title search inside an open playlist by title or artist (#22)
+
 ### Fixed
 - Browser login on macOS no longer attempts the Linux-only `xdg-mime`/`.desktop` URI handler setup (which always failed silently); goes straight to the manual paste fallback
 - `open_browser` now uses macOS's `open` instead of hoping `firefox`/`chromium` are literal binaries on `PATH`
