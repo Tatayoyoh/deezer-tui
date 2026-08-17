@@ -764,6 +764,9 @@ pub struct ViewState {
     pub artist_detail_left_scrollable: bool,
     pub playlist_detail: Option<PlaylistDetail>,
     pub playlist_detail_loading: bool,
+    /// Fuzzy filter of the open playlist detail modal's track list (`/`).
+    pub playlist_detail_filter_input: String,
+    pub playlist_detail_filter_typing: bool,
     pub genre_detail: Option<GenreDetail>,
     pub genre_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -949,6 +952,8 @@ impl ViewState {
             artist_detail_left_scrollable: false,
             playlist_detail: snap.playlist_detail.clone(),
             playlist_detail_loading: snap.playlist_detail_loading,
+            playlist_detail_filter_input: String::new(),
+            playlist_detail_filter_typing: false,
             genre_detail: snap.genre_detail.clone(),
             genre_detail_loading: snap.genre_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -1130,6 +1135,16 @@ impl ViewState {
     /// Focus the active tab's search or filter input — the `/` and `Ctrl+F`
     /// shortcuts, and clicking the input bar.
     pub fn focus_filter_input(&mut self, clear: bool) {
+        // An open playlist detail modal captures the filter shortcut for its
+        // own track search instead of the tab underneath.
+        if let Some(Overlay::PlaylistDetail { selected }) = self.overlay.as_mut() {
+            *selected = 0;
+            self.playlist_detail_filter_typing = true;
+            if clear {
+                self.playlist_detail_filter_input.clear();
+            }
+            return;
+        }
         match self.active_tab {
             ActiveTab::Search => {
                 self.input_mode = InputMode::Typing;
@@ -1171,6 +1186,12 @@ impl ViewState {
         }
     }
 
+    /// Clear the playlist detail modal's track filter (on open / re-open).
+    pub fn reset_playlist_detail_filter(&mut self) {
+        self.playlist_detail_filter_input.clear();
+        self.playlist_detail_filter_typing = false;
+    }
+
     /// Leave every text input: the mouse moved the focus somewhere else.
     pub fn blur_inputs(&mut self) {
         self.input_mode = InputMode::Normal;
@@ -1178,6 +1199,7 @@ impl ViewState {
         self.radio_filter_typing = false;
         self.genres_filter_typing = false;
         self.offline_filter_typing = false;
+        self.playlist_detail_filter_typing = false;
         if let Some(SubMenu::PlaylistPicker { filter_typing, .. }) = self
             .popup
             .as_mut()
@@ -1581,6 +1603,25 @@ impl ViewState {
         };
         let query = self.offline_detail_filter_input.to_lowercase();
         tracks
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| {
+                query.is_empty()
+                    || fuzzy_match(&query, &t.title.to_lowercase())
+                    || fuzzy_match(&query, &t.artist.to_lowercase())
+            })
+            .collect()
+    }
+
+    /// Tracks of the open playlist detail modal matching its `/` filter, each
+    /// paired with its original index in the playlist. Empty filter returns all.
+    pub fn playlist_detail_tracks_filtered(&self) -> Vec<(usize, &TrackData)> {
+        let Some(detail) = self.playlist_detail.as_ref() else {
+            return Vec::new();
+        };
+        let query = self.playlist_detail_filter_input.to_lowercase();
+        detail
+            .tracks
             .iter()
             .enumerate()
             .filter(|(_, t)| {
@@ -2143,6 +2184,7 @@ impl Client {
             && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
             && !self.view.offline_filter_typing
+            && !self.view.playlist_detail_filter_typing
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
@@ -2161,6 +2203,7 @@ impl Client {
             && !self.view.genres_filter_typing
             && !self.view.favorites_filter_typing
             && !self.view.offline_filter_typing
+            && !self.view.playlist_detail_filter_typing
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Info)) {
@@ -2562,6 +2605,7 @@ impl Client {
                             return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
                         }
                         if let Some(playlist_id) = item.playlist_id.clone() {
+                            self.view.reset_playlist_detail_filter();
                             self.view
                                 .set_nav_overlay(Overlay::PlaylistDetail { selected: 0 });
                             return KeyAction::SendCommand(Command::GetPlaylistDetail {
@@ -3475,29 +3519,66 @@ impl Client {
             _ => return KeyAction::Continue,
         };
 
-        // x: context menu for focused track
-        if key.code == KeyCode::Char('x') {
-            let detail = self.view.playlist_detail.as_ref();
-            if let (Some(track), Some(playlist_id)) = (
-                detail.and_then(|d| d.tracks.get(selected)).cloned(),
-                detail.map(|d| d.playlist_id.clone()),
-            ) {
-                let is_fav = self.view.is_track_favorite(&track.track_id);
-                self.view.popup = Some(PopupMenu::full_in_playlist(track, is_fav, playlist_id));
+        // Filter typing mode swallows most keys (title/artist search via `/`).
+        if self.view.playlist_detail_filter_typing {
+            match key.code {
+                KeyCode::Esc => {
+                    self.view.playlist_detail_filter_typing = false;
+                    self.view.playlist_detail_filter_input.clear();
+                    self.set_playlist_detail_selected(0);
+                }
+                KeyCode::Enter => self.view.playlist_detail_filter_typing = false,
+                KeyCode::Char(c) => {
+                    self.view.playlist_detail_filter_input.push(c);
+                    self.set_playlist_detail_selected(0);
+                }
+                KeyCode::Backspace => {
+                    self.view.playlist_detail_filter_input.pop();
+                    self.set_playlist_detail_selected(0);
+                }
+                _ => {}
             }
             return KeyAction::Continue;
         }
 
-        let track_count = self
-            .view
-            .playlist_detail
-            .as_ref()
-            .map(|d| d.tracks.len())
-            .unwrap_or(0);
+        // The cursor addresses the filtered view; resolve it to the track's real
+        // index in the playlist (and a clone of that one track) up front, so the
+        // borrow is released before mutating the view below.
+        let filtered = self.view.playlist_detail_tracks_filtered();
+        let filtered_len = filtered.len();
+        let focused: Option<(usize, TrackData)> =
+            filtered.get(selected).map(|(i, t)| (*i, (*t).clone()));
+        drop(filtered);
+
+        // x: context menu for focused track
+        if key.code == KeyCode::Char('x') {
+            if let (Some((_, track)), Some(playlist_id)) = (
+                focused.as_ref(),
+                self.view
+                    .playlist_detail
+                    .as_ref()
+                    .map(|d| d.playlist_id.clone()),
+            ) {
+                let is_fav = self.view.is_track_favorite(&track.track_id);
+                self.view.popup = Some(PopupMenu::full_in_playlist(
+                    track.clone(),
+                    is_fav,
+                    playlist_id,
+                ));
+            }
+            return KeyAction::Continue;
+        }
 
         match key.code {
             KeyCode::Esc => {
+                self.view.playlist_detail_filter_input.clear();
                 self.view.pop_overlay();
+                KeyAction::Continue
+            }
+            KeyCode::Char('/') => {
+                self.view.playlist_detail_filter_typing = true;
+                self.view.playlist_detail_filter_input.clear();
+                self.set_playlist_detail_selected(0);
                 KeyAction::Continue
             }
             KeyCode::Up | KeyCode::Char('k') => {
@@ -3506,12 +3587,17 @@ impl Client {
                 KeyAction::Continue
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                let max = track_count.saturating_sub(1);
+                let max = filtered_len.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
+            KeyCode::Enter => match focused {
+                Some((track_index, _)) => {
+                    KeyAction::SendCommand(Command::PlayFromPlaylist { index: track_index })
+                }
+                None => KeyAction::Continue,
+            },
             // Download the whole playlist for offline mode (same as `d` on an album)
             KeyCode::Char('d') => {
                 if let Some(ref detail) = self.view.playlist_detail {
@@ -3532,6 +3618,13 @@ impl Client {
             other => self
                 .player_control_action(other)
                 .unwrap_or(KeyAction::Continue),
+        }
+    }
+
+    /// Move the cursor of the playlist detail modal.
+    fn set_playlist_detail_selected(&mut self, index: usize) {
+        if let Some(Overlay::PlaylistDetail { selected }) = self.view.overlay.as_mut() {
+            *selected = index;
         }
     }
 
@@ -3676,6 +3769,7 @@ impl Client {
                     GenreDetailSubTab::Playlists => {
                         if let Some(playlist) = detail.playlists.get(selected) {
                             let playlist_id = playlist.playlist_id.clone();
+                            self.view.reset_playlist_detail_filter();
                             self.view
                                 .push_overlay(Overlay::PlaylistDetail { selected: 0 });
                             KeyAction::SendCommand(Command::GetPlaylistDetail { playlist_id })
@@ -4941,5 +5035,42 @@ mod tests {
         let rects = tab_rects(area, &["Aa", "Bbb", "C"]);
         assert_eq!(rects.len(), 2);
         assert_eq!((rects[1].x, rects[1].width), (5, 1));
+    }
+
+    #[test]
+    fn playlist_detail_filter_maps_to_original_indices() {
+        fn track(id: &str, title: &str, artist: &str) -> TrackData {
+            serde_json::from_value(serde_json::json!({
+                "SNG_ID": id,
+                "SNG_TITLE": title,
+                "ART_NAME": artist,
+            }))
+            .unwrap()
+        }
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        view.playlist_detail = Some(PlaylistDetail {
+            playlist_id: "1".into(),
+            title: "Mix".into(),
+            creator: "Me".into(),
+            nb_tracks: 3,
+            tracks: vec![
+                track("10", "Alpha", "A"),
+                track("20", "Beta", "B"),
+                track("30", "Alfetta", "C"),
+            ],
+        });
+
+        // No filter → every track, identity indices.
+        let all = view.playlist_detail_tracks_filtered();
+        assert_eq!(all.iter().map(|(i, _)| *i).collect::<Vec<_>>(), [0, 1, 2]);
+
+        // A filter that matches a single title keeps that track's real index,
+        // so playback targets the right position in the full playlist.
+        view.playlist_detail_filter_input = "beta".into();
+        let filtered = view.playlist_detail_tracks_filtered();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].0, 1);
+        assert_eq!(filtered[0].1.title, "Beta");
     }
 }
