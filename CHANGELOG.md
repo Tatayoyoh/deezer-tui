@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.16.0] - 2026-08-17
 
 ### Added
 - Title search inside an open playlist by title or artist (#22)
