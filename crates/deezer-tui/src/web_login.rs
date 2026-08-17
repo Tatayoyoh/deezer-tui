@@ -11,13 +11,17 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+#[cfg(target_os = "linux")]
+use anyhow::Context;
+use anyhow::Result;
 use tracing::{debug, info, warn};
 
 const LOGIN_URL: &str = "https://www.deezer.com/desktop/login/electron/callback";
 const TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
+#[cfg(target_os = "linux")]
 const DESKTOP_FILE_NAME: &str = "deezer-tui-auth.desktop";
+#[cfg(target_os = "linux")]
 const MIME_TYPE: &str = "x-scheme-handler/deezer";
 
 /// Run the browser-based login flow. Returns `Some(arl)` on success, `None` if cancelled.
@@ -108,7 +112,7 @@ fn temp_auth_file_path() -> PathBuf {
     PathBuf::from(format!("/tmp/deezer-tui-auth-{pid}"))
 }
 
-/// Path to the temporary .desktop file.
+#[cfg(target_os = "linux")]
 fn desktop_file_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home)
@@ -116,7 +120,7 @@ fn desktop_file_path() -> PathBuf {
         .join(DESKTOP_FILE_NAME)
 }
 
-/// Path to the temporary handler script.
+#[cfg(target_os = "linux")]
 fn handler_script_path() -> PathBuf {
     PathBuf::from(format!(
         "/tmp/deezer-tui-auth-handler-{}.sh",
@@ -124,25 +128,19 @@ fn handler_script_path() -> PathBuf {
     ))
 }
 
-/// Path to `~/.config/mimeapps.list`.
+#[cfg(target_os = "linux")]
 fn mimeapps_list_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/mimeapps.list")
 }
 
-/// Path to our backup of `mimeapps.list`.
+#[cfg(target_os = "linux")]
 fn mimeapps_backup_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     PathBuf::from(home).join(".config/mimeapps.list.deezer-tui-bak")
 }
 
-/// Set up a temporary URI scheme handler for `deezer://`.
-/// Returns the name of the previous handler (if any) for restoration.
-///
-/// To prevent other apps (e.g. deezer-linux) from also opening, we:
-/// 1. Register our handler as default via `xdg-mime`
-/// 2. Add competing handlers to `[Removed Associations]` in `mimeapps.list`
-/// 3. Backup the original `mimeapps.list` for restoration on cleanup
+#[cfg(target_os = "linux")]
 fn setup_uri_handler(auth_file: &Path) -> Result<Option<String>> {
     // Query current handler
     let old_handler = Command::new("xdg-mime")
@@ -217,9 +215,7 @@ fn setup_uri_handler(auth_file: &Path) -> Result<Option<String>> {
     Ok(old_handler)
 }
 
-/// Add a handler to `[Removed Associations]` in `~/.config/mimeapps.list`
-/// so the desktop environment won't use it as a fallback.
-/// Backs up the original file first.
+#[cfg(target_os = "linux")]
 fn block_competing_handler(handler_name: &str) {
     let mimeapps = mimeapps_list_path();
     let backup = mimeapps_backup_path();
@@ -271,7 +267,7 @@ fn block_competing_handler(handler_name: &str) {
     debug!("Blocked competing handler {handler_name} in mimeapps.list");
 }
 
-/// Remove the temporary handler and restore the previous state.
+#[cfg(target_os = "linux")]
 fn cleanup_uri_handler(old_handler: Option<&str>) {
     // Remove temp files
     let _ = fs::remove_file(handler_script_path());
@@ -300,10 +296,19 @@ fn cleanup_uri_handler(old_handler: Option<&str>) {
         .output();
 }
 
-/// Open a URL in the system browser.
+#[cfg(target_os = "macos")]
+fn setup_uri_handler(_auth_file: &Path) -> Result<Option<String>> {
+    Ok(None)
+}
+
+#[cfg(target_os = "macos")]
+fn cleanup_uri_handler(_old_handler: Option<&str>) {}
+
 fn open_browser(url: &str) -> Result<()> {
-    // Try xdg-open first (standard on Linux desktops)
-    let browsers = [
+    #[cfg(target_os = "macos")]
+    let browsers: &[&str] = &["open"];
+    #[cfg(not(target_os = "macos"))]
+    let browsers: &[&str] = &[
         "xdg-open",
         "firefox",
         "chromium",
@@ -311,7 +316,7 @@ fn open_browser(url: &str) -> Result<()> {
         "google-chrome",
     ];
 
-    for browser in &browsers {
+    for browser in browsers {
         match Command::new(browser).arg(url).spawn() {
             Ok(_) => {
                 debug!("Opened browser with {browser}");
