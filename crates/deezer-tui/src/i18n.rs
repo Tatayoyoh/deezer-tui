@@ -102,6 +102,7 @@ pub struct Strings {
     pub vol: &'static str,
     pub help: &'static str,
     pub flow: &'static str,
+    pub like: &'static str,
 
     // --- Popup menu ---
     pub menu_manage: &'static str,
@@ -174,6 +175,7 @@ pub struct Strings {
     pub help_waiting_list: &'static str,
     pub help_context_menu: &'static str,
     pub help_playing_menu: &'static str,
+    pub help_like_track: &'static str,
     pub help_start_flow: &'static str,
     pub help_shuffle_favorites: &'static str,
     pub help_this_help: &'static str,
@@ -689,6 +691,7 @@ static EN: Strings = Strings {
     vol: "Vol",
     help: "Help",
     flow: "Flow",
+    like: "Like",
 
     menu_manage: "── Manage ──",
     menu_playback: "── Playback ──",
@@ -755,6 +758,7 @@ static EN: Strings = Strings {
     help_waiting_list: "Waiting list (queue)",
     help_context_menu: "Track context menu",
     help_playing_menu: "Playing track menu",
+    help_like_track: "Like / favorite track",
     help_start_flow: "Start Deezer Flow",
     help_shuffle_favorites: "Shuffle favorites",
     help_this_help: "This help",
@@ -1005,6 +1009,7 @@ static FR: Strings = Strings {
     vol: "Vol",
     help: "Aide",
     flow: "Flow",
+    like: "Favori",
 
     menu_manage: "── Gérer ──",
     menu_playback: "── Lecture ──",
@@ -1071,6 +1076,7 @@ static FR: Strings = Strings {
     help_waiting_list: "File d'attente",
     help_context_menu: "Menu contextuel",
     help_playing_menu: "Menu titre en cours",
+    help_like_track: "Ajouter/retirer des favoris",
     help_start_flow: "Lancer Deezer Flow",
     help_shuffle_favorites: "Lecture aléatoire favoris",
     help_this_help: "Cette aide",
@@ -1320,6 +1326,7 @@ static ES: Strings = Strings {
     vol: "Vol",
     help: "Ayuda",
     flow: "Flow",
+    like: "Me gusta",
 
     menu_manage: "── Gestionar ──",
     menu_playback: "── Reproducción ──",
@@ -1386,6 +1393,7 @@ static ES: Strings = Strings {
     help_waiting_list: "Cola de reproducción",
     help_context_menu: "Menú contextual",
     help_playing_menu: "Menú canción actual",
+    help_like_track: "Añadir/quitar de favoritos",
     help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatorios",
     help_this_help: "Esta ayuda",
@@ -1635,6 +1643,7 @@ static PT: Strings = Strings {
     vol: "Vol",
     help: "Ajuda",
     flow: "Flow",
+    like: "Favorito",
 
     menu_manage: "── Gerenciar ──",
     menu_playback: "── Reprodução ──",
@@ -1701,6 +1710,7 @@ static PT: Strings = Strings {
     help_waiting_list: "Fila de reprodução",
     help_context_menu: "Menu de contexto",
     help_playing_menu: "Menu da música atual",
+    help_like_track: "Adicionar/remover dos favoritos",
     help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatórios",
     help_this_help: "Esta ajuda",
@@ -1950,6 +1960,7 @@ static DE: Strings = Strings {
     vol: "Lautst.",
     help: "Hilfe",
     flow: "Flow",
+    like: "Favorit",
 
     menu_manage: "── Verwalten ──",
     menu_playback: "── Wiedergabe ──",
@@ -2016,6 +2027,7 @@ static DE: Strings = Strings {
     help_waiting_list: "Warteschlange",
     help_context_menu: "Kontextmenü",
     help_playing_menu: "Menü laufender Titel",
+    help_like_track: "Zu Favoriten hinzufügen/entfernen",
     help_start_flow: "Deezer Flow starten",
     help_shuffle_favorites: "Favoriten zufällig",
     help_this_help: "Diese Hilfe",

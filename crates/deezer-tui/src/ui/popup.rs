@@ -602,6 +602,7 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         (Some("Ctrl+←"), s.help_seek_backward),
         (Some("s"), s.help_toggle_shuffle),
         (Some("r"), s.help_cycle_repeat),
+        (Some("L"), s.help_like_track),
         (Some("+/-"), s.help_volume),
         // Menus
         (None, s.help_section_menus),
@@ -1166,7 +1167,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .iter()
         .map(|(track_index, track)| {
             let dur = track.duration_secs();
-            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
+            let is_fav = view.is_track_favorite(&track.track_id);
             let is_current = view
                 .current_track
                 .as_ref()
@@ -1223,6 +1224,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     ];
     if !is_show {
         hint_spans.extend([
+            Span::styled("L / f", Theme::shortcut_key()),
+            Span::styled(s.hint_favorite, Theme::dim()),
             Span::styled("/", Theme::shortcut_key()),
             Span::styled(s.hint_filter, Theme::dim()),
             Span::styled("x", Theme::shortcut_key()),
@@ -1312,7 +1315,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         .map(|(i, track)| {
             let dur = track.duration_secs();
             let is_current = i == view.queue_index;
-            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
+            let is_fav = view.is_track_favorite(&track.track_id);
 
             let fav_marker = if is_fav { " ♥" } else { "" };
 
@@ -1362,7 +1365,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let hints = Line::from(vec![
         Span::styled("d", Theme::shortcut_key()),
         Span::styled(s.hint_remove, Theme::dim()),
-        Span::styled("f", Theme::shortcut_key()),
+        Span::styled("L / f", Theme::shortcut_key()),
         Span::styled(s.hint_favorite, Theme::dim()),
         Span::styled("x", Theme::shortcut_key()),
         Span::styled(s.hint_menu, Theme::dim()),
