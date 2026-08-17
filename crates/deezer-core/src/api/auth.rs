@@ -89,13 +89,21 @@ impl DeezerClient {
 mod tests {
     use super::*;
 
-    const TEST_ARL: &str = "***ARL-EXPIRED-REMOVED***";
+    /// Live tests need a real ARL token, provided through the environment.
+    /// NEVER hardcode a real ARL: it is a full-session credential.
+    /// Run with: DEEZER_TEST_ARL=<your-arl> cargo test -- --ignored
+    fn test_arl() -> String {
+        std::env::var("DEEZER_TEST_ARL").expect("set DEEZER_TEST_ARL env var to run live API tests")
+    }
 
     #[tokio::test]
     #[ignore = "live API: requires valid ARL token + network"]
     async fn test_arl_login() {
         let mut client = DeezerClient::new().unwrap();
-        let session = client.login_arl(TEST_ARL).await.expect("login_arl failed");
+        let session = client
+            .login_arl(&test_arl())
+            .await
+            .expect("login_arl failed");
 
         println!("Login OK!");
         println!("  user_id: {}", session.user_id);
@@ -115,7 +123,7 @@ mod tests {
     #[ignore = "live API: requires valid ARL token + network"]
     async fn test_search() {
         let mut client = DeezerClient::new().unwrap();
-        client.login_arl(TEST_ARL).await.expect("login failed");
+        client.login_arl(&test_arl()).await.expect("login failed");
 
         let results = client.search("Daft Punk").await.expect("search failed");
         println!("Search returned {} tracks", results.data.len());
@@ -136,7 +144,7 @@ mod tests {
     #[ignore = "live API: requires valid ARL token + network"]
     async fn test_favorites() {
         let mut client = DeezerClient::new().unwrap();
-        client.login_arl(TEST_ARL).await.expect("login failed");
+        client.login_arl(&test_arl()).await.expect("login failed");
 
         let favorites = client.get_favorites().await.expect("get_favorites failed");
         println!("Favorites: {} tracks", favorites.len());
@@ -155,7 +163,7 @@ mod tests {
     #[ignore = "live API: requires valid ARL token + network"]
     async fn test_get_track_with_token() {
         let mut client = DeezerClient::new().unwrap();
-        client.login_arl(TEST_ARL).await.expect("login failed");
+        client.login_arl(&test_arl()).await.expect("login failed");
 
         // Get full track data for a known track (Around the World by Daft Punk)
         let track = client.get_track("3135556").await.expect("get_track failed");

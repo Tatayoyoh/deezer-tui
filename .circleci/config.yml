@@ -70,6 +70,13 @@ jobs:
           name: Install ALSA dev headers
           command: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - run:
+          name: Secret scan (gitleaks)
+          command: |
+            GITLEAKS_VERSION=8.30.1
+            curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tar.gz
+            tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+            /tmp/gitleaks git --verbose --redact .
+      - run:
           name: Check formatting
           command: cargo fmt --check
       - run:

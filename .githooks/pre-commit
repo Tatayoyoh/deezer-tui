@@ -10,3 +10,16 @@ if [ -n "$STAGED_RS" ]; then
     # Re-stage the formatted files
     echo "$STAGED_RS" | xargs git add
 fi
+
+# Secret scan: block commits leaking credentials (ARL tokens, keys, etc.)
+if command -v gitleaks >/dev/null 2>&1; then
+    if ! gitleaks protect --staged --redact; then
+        echo ""
+        echo "ERROR: gitleaks found a secret in the staged changes."
+        echo "Fix it or, if it is a false positive, run: git commit --no-verify"
+        exit 1
+    fi
+else
+    echo "warning: gitleaks not installed, skipping secret scan"
+    echo "  install: https://github.com/gitleaks/gitleaks#installing"
+fi

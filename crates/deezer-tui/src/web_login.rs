@@ -412,32 +412,37 @@ fn wait_for_arl(auth_file: &Path) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Deterministic fake ARL for parsing tests: 192 hex chars, NOT a real
+    /// token. Never use a real ARL here — it is a full-session credential.
+    fn fake_arl() -> String {
+        "a1b2c3d4".repeat(24)
+    }
+
     #[test]
     fn test_parse_arl_full_url() {
-        let input = "deezer://autolog/***ARL-EXPIRED-REMOVED***";
-        let arl = parse_arl(input).unwrap();
+        let input = format!("deezer://autolog/{}", fake_arl());
+        let arl = parse_arl(&input).unwrap();
         assert_eq!(arl.len(), 192);
-        assert!(arl.starts_with("eec547"));
+        assert_eq!(arl, fake_arl());
     }
 
     #[test]
     fn test_parse_arl_raw() {
-        let input = "***ARL-EXPIRED-REMOVED***";
-        let arl = parse_arl(input).unwrap();
+        let arl = parse_arl(&fake_arl()).unwrap();
         assert_eq!(arl.len(), 192);
     }
 
     #[test]
     fn test_parse_arl_with_newline() {
-        let input = "***ARL-EXPIRED-REMOVED***\n";
-        let arl = parse_arl(input).unwrap();
+        let input = format!("{}\n", fake_arl());
+        let arl = parse_arl(&input).unwrap();
         assert_eq!(arl.len(), 192);
     }
 
     #[test]
     fn test_parse_arl_autolog_prefix() {
-        let input = "autolog/***ARL-EXPIRED-REMOVED***";
-        let arl = parse_arl(input).unwrap();
+        let input = format!("autolog/{}", fake_arl());
+        let arl = parse_arl(&input).unwrap();
         assert_eq!(arl.len(), 192);
     }
 
