@@ -3083,8 +3083,7 @@ impl Client {
             match self.view.active_tab {
                 ActiveTab::Search => {
                     if self.view.search_category == SearchCategory::Track {
-                        if let Some(item) =
-                            self.view.search_display.get(self.view.search_selected)
+                        if let Some(item) = self.view.search_display.get(self.view.search_selected)
                         {
                             if let Some(ref track) = item.track {
                                 let track_id = track.track_id.clone();
@@ -3093,71 +3092,73 @@ impl Client {
                         }
                     }
                 }
-                ActiveTab::Favorites => {
-                    match self.view.favorites_category {
-                        FavoritesCategory::Tracks | FavoritesCategory::RecentlyPlayed => {
-                            let selected = if self.view.favorites_filter_active() {
-                                self.view.favorites_filter_selected
-                            } else {
-                                self.view.favorites_selected
-                            };
-                            let items: Vec<_> = if self.view.favorites_filter_active() {
-                                self.view
-                                    .favorites_filtered
-                                    .iter()
-                                    .map(|(_, item)| item)
-                                    .collect()
-                            } else {
-                                self.view.favorites_display.iter().collect()
-                            };
-                            if let Some(item) = items.get(selected) {
-                                if let Some(ref track) = item.track {
-                                    let track_id = track.track_id.clone();
-                                    return self.toggle_track_favorite(&track_id);
-                                }
+                ActiveTab::Favorites => match self.view.favorites_category {
+                    FavoritesCategory::Tracks | FavoritesCategory::RecentlyPlayed => {
+                        let selected = if self.view.favorites_filter_active() {
+                            self.view.favorites_filter_selected
+                        } else {
+                            self.view.favorites_selected
+                        };
+                        let items: Vec<_> = if self.view.favorites_filter_active() {
+                            self.view
+                                .favorites_filtered
+                                .iter()
+                                .map(|(_, item)| item)
+                                .collect()
+                        } else {
+                            self.view.favorites_display.iter().collect()
+                        };
+                        if let Some(item) = items.get(selected) {
+                            if let Some(ref track) = item.track {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
                             }
                         }
-                        FavoritesCategory::Artists => {
-                            if let Some(item) =
-                                self.view.favorites_display.get(self.view.favorites_selected)
-                            {
-                                if let Some(ref artist_id) = item.artist_id {
-                                    let is_fav = self.view.is_artist_favorite(artist_id);
-                                    let cmd = if is_fav {
-                                        Command::RemoveFavoriteArtist {
-                                            artist_id: artist_id.clone(),
-                                        }
-                                    } else {
-                                        Command::AddFavoriteArtist {
-                                            artist_id: artist_id.clone(),
-                                        }
-                                    };
-                                    return KeyAction::SendCommand(cmd);
-                                }
-                            }
-                        }
-                        FavoritesCategory::Albums => {
-                            if let Some(item) =
-                                self.view.favorites_display.get(self.view.favorites_selected)
-                            {
-                                if let Some(ref album_id) = item.album_id {
-                                    let is_fav = self.view.is_album_favorite(album_id);
-                                    let cmd = if is_fav {
-                                        Command::RemoveFavoriteAlbum {
-                                            album_id: album_id.clone(),
-                                        }
-                                    } else {
-                                        Command::AddFavoriteAlbum {
-                                            album_id: album_id.clone(),
-                                        }
-                                    };
-                                    return KeyAction::SendCommand(cmd);
-                                }
-                            }
-                        }
-                        _ => {}
                     }
-                }
+                    FavoritesCategory::Artists => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref artist_id) = item.artist_id {
+                                let is_fav = self.view.is_artist_favorite(artist_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    FavoritesCategory::Albums => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref album_id) = item.album_id {
+                                let is_fav = self.view.is_album_favorite(album_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }

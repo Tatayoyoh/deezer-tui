@@ -33,7 +33,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         PlaybackStatus::Stopped => Span::styled("  [] ", Theme::dim()),
     };
 
-    let (track_left, track_right, heart_click_offset) = if let Some(ref track) = view.current_track {
+    let (track_left, track_right, heart_click_offset) = if let Some(ref track) = view.current_track
+    {
         let is_fav = view.is_track_favorite(&track.track_id);
         let heart_span = if is_fav {
             Span::styled(
@@ -46,7 +47,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
             Span::styled("♡", Theme::dim())
         };
         // Status icon (5) + Title + " - " (3) + Artist + " " (1)
-        let heart_x = 5 + track.title.chars().count() as u16 + 3 + track.artist.chars().count() as u16 + 1;
+        let heart_x =
+            5 + track.title.chars().count() as u16 + 3 + track.artist.chars().count() as u16 + 1;
         (
             Line::from(vec![
                 status_icon,
