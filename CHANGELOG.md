@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Like/favorite track mechanism similar to Deezer web interface:
+    * Player bar heart icon (`♥` / `♡`) for currently playing track with click-to-toggle
+    * `L` (Shift+L) and `Ctrl+L` global shortcuts to toggle like on focused track or currently playing track
+    * `L` / `f` shortcuts in Album, Playlist, Artist Top Tracks, and Genre track detail overlays
+    * Heart indicator ` ♥` next to track titles across all lists and tables for liked tracks
+    * Synchronized and cached favorite track IDs between daemon and client
+
 ## [1.16.0] - 2026-08-17
 
 ### Added

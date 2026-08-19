@@ -125,9 +125,18 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
                 .track
                 .as_ref()
                 .is_some_and(|t| view.is_playing_track(&t.track_id));
+            let is_fav = item
+                .track
+                .as_ref()
+                .is_some_and(|t| view.is_track_favorite(&t.track_id));
+            let col1_text = if is_fav {
+                format!("{} ♥", item.col1)
+            } else {
+                item.col1.clone()
+            };
             Row::new(vec![
                 Cell::from(track_number(i, is_playing)),
-                Cell::from(Span::styled(&item.col1, Theme::text())),
+                Cell::from(Span::styled(col1_text, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,
                     Style::default().fg(Theme::primary()),

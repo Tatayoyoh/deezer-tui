@@ -259,6 +259,10 @@ fn draw_album_metadata(frame: &mut Frame, detail: &AlbumDetail, area: Rect, scro
     lines.push(shortcut_hint(s.esc_back));
     lines.push(shortcut_hint(s.enter_play_track));
     lines.push(Line::from(vec![
+        Span::styled("L / f", Theme::shortcut_key()),
+        Span::styled(s.hint_favorite, Theme::dim()),
+    ]));
+    lines.push(Line::from(vec![
         Span::styled("d", Theme::shortcut_key()),
         Span::styled(s.hint_download_album, Theme::dim()),
     ]));
@@ -300,9 +304,15 @@ fn draw_track_list(
         .enumerate()
         .map(|(i, track)| {
             let dur = track.duration_secs();
+            let is_fav = view.is_track_favorite(&track.track_id);
+            let title_text = if is_fav {
+                format!("{} ♥", track.title)
+            } else {
+                track.title.clone()
+            };
             Row::new(vec![
                 Cell::from(track_number(i, view.is_playing_track(&track.track_id))),
-                Cell::from(Span::styled(&track.title, Theme::text())),
+                Cell::from(Span::styled(title_text, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
                     Style::default().fg(Theme::primary()),

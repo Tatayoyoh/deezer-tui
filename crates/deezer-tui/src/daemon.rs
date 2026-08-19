@@ -63,6 +63,7 @@ enum AsyncResult {
     FavoriteAlbumRemoved(String),
     FavoriteAlbumError(String),
     FavoriteIdsLoaded {
+        track_ids: Vec<String>,
         artist_ids: Vec<String>,
         album_ids: Vec<String>,
     },
@@ -171,6 +172,7 @@ pub struct Daemon {
     favorites_loading: bool,
     favorites_category: FavoritesCategory,
     favorites_display: Vec<DisplayItem>,
+    favorite_track_ids: Vec<String>,
     favorite_artist_ids: Vec<String>,
     favorite_album_ids: Vec<String>,
     favorites_cache: FavoritesCache,
@@ -306,6 +308,11 @@ impl Daemon {
 
         let favorites_cache = FavoritesCache::load();
         let cached_moods = favorites_cache.moods.clone().unwrap_or_default();
+        let favorite_track_ids = favorites_cache
+            .tracks
+            .as_ref()
+            .map(|tracks| tracks.iter().map(|t| t.track_id.clone()).collect())
+            .unwrap_or_default();
 
         Ok(Self {
             config,
@@ -333,6 +340,7 @@ impl Daemon {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            favorite_track_ids,
             favorite_artist_ids: Vec::new(),
             favorite_album_ids: Vec::new(),
             favorites_cache,
@@ -922,9 +930,13 @@ impl Daemon {
                 }
             }
             Command::AddFavorite { track_id } => {
+                if !self.favorite_track_ids.contains(&track_id) {
+                    self.favorite_track_ids.push(track_id.clone());
+                }
                 self.start_add_favorite(track_id);
             }
             Command::RemoveFavorite { track_id } => {
+                self.favorite_track_ids.retain(|id| id != &track_id);
                 self.start_remove_favorite(track_id);
             }
             Command::AddFavoriteArtist { artist_id } => {
@@ -1293,6 +1305,7 @@ impl Daemon {
             favorites_loading: self.favorites_loading,
             favorites_category: self.favorites_category,
             favorites_display: self.favorites_display.clone(),
+            favorite_track_ids: self.favorite_track_ids.clone(),
             favorite_artist_ids: self.favorite_artist_ids.clone(),
             favorite_album_ids: self.favorite_album_ids.clone(),
             offline_category: self.offline_category,
@@ -1716,6 +1729,10 @@ impl Daemon {
         let tx = self.async_tx.clone();
         tokio::spawn(async move {
             let client = client.lock().await;
+            let track_ids = match client.get_favorites().await {
+                Ok(tracks) => tracks.iter().map(|t| t.track_id.clone()).collect(),
+                Err(_) => Vec::new(),
+            };
             let artist_ids = match client.get_favorite_artists().await {
                 Ok(items) => items.iter().filter_map(|d| d.artist_id.clone()).collect(),
                 Err(_) => Vec::new(),
@@ -1725,6 +1742,7 @@ impl Daemon {
                 Err(_) => Vec::new(),
             };
             let _ = tx.send(AsyncResult::FavoriteIdsLoaded {
+                track_ids,
                 artist_ids,
                 album_ids,
             });
@@ -2813,6 +2831,8 @@ impl Daemon {
                         self.favorites_cache.save();
                         // Backing list for favorite indicators / shuffle favorites.
                         self.favorites = tracks.clone();
+                        self.favorite_track_ids =
+                            tracks.iter().map(|t| t.track_id.clone()).collect();
                     }
                     if category == self.favorites_category {
                         self.favorites_loading = false;
@@ -2858,14 +2878,18 @@ impl Daemon {
                         self.status_msg = Some(t().fmt_error(t().status_favorites_error, &err));
                     }
                 }
-                AsyncResult::FavoriteAdded(_track_id) => {
+                AsyncResult::FavoriteAdded(track_id) => {
                     self.status_msg = Some(t().status_added_to_favorites.into());
+                    if !self.favorite_track_ids.contains(&track_id) {
+                        self.favorite_track_ids.push(track_id);
+                    }
                     self.favorites_cache.invalidate_tracks();
                     self.favorites_cache.save();
                     self.start_load_favorites();
                 }
-                AsyncResult::FavoriteRemoved(_track_id) => {
+                AsyncResult::FavoriteRemoved(track_id) => {
                     self.status_msg = Some(t().status_removed_from_favorites.into());
+                    self.favorite_track_ids.retain(|id| id != &track_id);
                     self.favorites_cache.invalidate_tracks();
                     self.favorites_cache.save();
                     self.start_load_favorites();
@@ -2912,9 +2936,13 @@ impl Daemon {
                     self.status_msg = Some(t().fmt_error(t().status_favorite_error, &err));
                 }
                 AsyncResult::FavoriteIdsLoaded {
+                    track_ids,
                     artist_ids,
                     album_ids,
                 } => {
+                    if !track_ids.is_empty() {
+                        self.favorite_track_ids = track_ids;
+                    }
                     self.favorite_artist_ids = artist_ids;
                     self.favorite_album_ids = album_ids;
                 }

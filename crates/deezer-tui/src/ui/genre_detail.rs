@@ -93,9 +93,15 @@ fn draw_content(
                     .enumerate()
                     .map(|(i, t)| {
                         let dur = t.duration_secs();
+                        let is_fav = view.is_track_favorite(&t.track_id);
+                        let title_text = if is_fav {
+                            format!("{} ♥", t.title)
+                        } else {
+                            t.title.clone()
+                        };
                         Row::new(vec![
                             Cell::from(track_number(i, view.is_playing_track(&t.track_id))),
-                            Cell::from(Span::styled(t.title.clone(), Theme::text())),
+                            Cell::from(Span::styled(title_text, Theme::text())),
                             Cell::from(Span::styled(t.artist.clone(), Theme::text())),
                             Cell::from(Span::styled(t.album.clone(), Theme::dim())),
                             Cell::from(Span::styled(

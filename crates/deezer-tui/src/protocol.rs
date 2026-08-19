@@ -452,6 +452,9 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
+    /// IDs of tracks in the user's favorites (Loved Tracks).
+    #[serde(default)]
+    pub favorite_track_ids: Vec<String>,
     /// IDs of artists in the user's favorites.
     #[serde(default)]
     pub favorite_artist_ids: Vec<String>,
@@ -588,6 +591,7 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            favorite_track_ids: Vec::new(),
             favorite_artist_ids: Vec::new(),
             favorite_album_ids: Vec::new(),
             offline_category: OfflineCategory::default(),
