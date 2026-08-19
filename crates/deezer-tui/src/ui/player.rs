@@ -33,7 +33,22 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         PlaybackStatus::Stopped => Span::styled("  [] ", Theme::dim()),
     };
 
-    let (track_left, track_right) = if let Some(ref track) = view.current_track {
+    let (track_left, track_right, heart_click_offset) = if let Some(ref track) = view.current_track
+    {
+        let is_fav = view.is_track_favorite(&track.track_id);
+        let heart_span = if is_fav {
+            Span::styled(
+                "♥",
+                Style::default()
+                    .fg(Color::Rgb(255, 75, 100))
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::styled("♡", Theme::dim())
+        };
+        // Status icon (5) + Title + " - " (3) + Artist + " " (1)
+        let heart_x =
+            5 + track.title.chars().count() as u16 + 3 + track.artist.chars().count() as u16 + 1;
         (
             Line::from(vec![
                 status_icon,
@@ -45,12 +60,15 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 ),
                 Span::styled(" - ", Theme::dim()),
                 Span::styled(&track.artist, Style::default().fg(Theme::primary())),
+                Span::raw(" "),
+                heart_span,
                 Span::styled(format!("  ({})", &track.album), Theme::dim()),
             ]),
             Line::from(Span::styled(
                 format!("[{}] ", view.quality.as_api_format()),
                 Theme::dim(),
             )),
+            Some(heart_x),
         )
     } else {
         (
@@ -59,6 +77,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 Span::styled(t().no_track_loaded, Theme::dim()),
             ]),
             Line::default(),
+            None,
         )
     };
     let quality_width = track_right.width() as u16;
@@ -68,6 +87,20 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .split(chunks[0]);
     frame.render_widget(Paragraph::new(track_left), track_chunks[0]);
     view.record_click(track_chunks[0], ClickTarget::CurrentTrack);
+    if let Some(x_off) = heart_click_offset {
+        let heart_start = track_chunks[0].x + x_off;
+        if heart_start < track_chunks[0].right() {
+            let click_x = heart_start.saturating_sub(1);
+            let click_w = 3.min(track_chunks[0].right().saturating_sub(click_x));
+            let heart_rect = Rect {
+                x: click_x,
+                y: track_chunks[0].y,
+                width: click_w,
+                height: 1,
+            };
+            view.record_click(heart_rect, ClickTarget::ToggleLikeCurrentTrack);
+        }
+    }
     frame.render_widget(
         Paragraph::new(track_right).alignment(Alignment::Right),
         track_chunks[1],
@@ -130,6 +163,21 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     };
+    let (like_icon, like_style) = if view
+        .current_track
+        .as_ref()
+        .is_some_and(|t| view.is_track_favorite(&t.track_id))
+    {
+        (
+            "♥",
+            Style::default()
+                .fg(Color::Rgb(255, 75, 100))
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        ("♡", Theme::dim())
+    };
+
     // Shortcut keys render as a white "chip" (no brackets, no padding); labels
     // have no bg.
     let key = Theme::shortcut_key();
@@ -146,7 +194,10 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled("s", key),
         Span::styled(format!(" {}  ", s.shuffle), shuffle_style),
         Span::styled("r", key),
-        Span::styled(format!(" {}", repeat_label), repeat_style),
+        Span::styled(format!(" {}  ", repeat_label), repeat_style),
+        Span::styled("L", key),
+        Span::styled(format!(" {} ", s.like), Theme::dim()),
+        Span::styled(like_icon, like_style),
     ]);
 
     // Flow is special: the whole "f Flow" chip is white on a secondary bg,

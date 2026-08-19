@@ -341,9 +341,15 @@ fn draw_top_tracks(
         .enumerate()
         .map(|(i, track)| {
             let dur = track.duration_secs();
+            let is_fav = view.is_track_favorite(&track.track_id);
+            let title_text = if is_fav {
+                format!("{} ♥", track.title)
+            } else {
+                track.title.clone()
+            };
             Row::new(vec![
                 Cell::from(track_number(i, view.is_playing_track(&track.track_id))),
-                Cell::from(Span::styled(&track.title, Theme::text())),
+                Cell::from(Span::styled(title_text, Theme::text())),
                 Cell::from(Span::styled(
                     &track.album,
                     Style::default().fg(Theme::primary()),

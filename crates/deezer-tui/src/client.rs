@@ -611,6 +611,8 @@ pub enum ClickTarget {
     FilterInput,
     /// "f Flow" chip in the player bar.
     FlowChip,
+    /// Heart icon / Like button in the player bar to toggle favorite for current track.
+    ToggleLikeCurrentTrack,
     /// Playing track's name / progress bar in the player bar.
     CurrentTrack,
     /// "g Shuffle" button on the Favorites tab.
@@ -723,6 +725,7 @@ pub struct ViewState {
     pub favorites_filter_typing: bool,
     pub favorites_filtered: Vec<(usize, DisplayItem)>,
     pub favorites_filter_selected: usize,
+    pub favorite_track_ids: Vec<String>,
     pub favorite_artist_ids: Vec<String>,
     pub favorite_album_ids: Vec<String>,
     pub offline_category: OfflineCategory,
@@ -911,6 +914,7 @@ impl ViewState {
                 .map(|(i, item)| (i, item.clone()))
                 .collect(),
             favorites_filter_selected: 0,
+            favorite_track_ids: snap.favorite_track_ids.clone(),
             favorite_artist_ids: snap.favorite_artist_ids.clone(),
             favorite_album_ids: snap.favorite_album_ids.clone(),
             offline_category: snap.offline_category,
@@ -1240,6 +1244,7 @@ impl ViewState {
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
         self.apply_favorites_filter();
+        self.favorite_track_ids = snap.favorite_track_ids;
         self.favorite_artist_ids = snap.favorite_artist_ids;
         self.favorite_album_ids = snap.favorite_album_ids;
         self.offline_category = snap.offline_category;
@@ -1387,8 +1392,9 @@ impl ViewState {
     }
 
     /// Check if a track is in the user's favorites.
-    fn is_track_favorite(&self, track_id: &str) -> bool {
-        self.favorites.iter().any(|t| t.track_id == track_id)
+    pub fn is_track_favorite(&self, track_id: &str) -> bool {
+        self.favorite_track_ids.iter().any(|id| id == track_id)
+            || self.favorites.iter().any(|t| t.track_id == track_id)
     }
 
     /// True when this track is the one loaded in the player, playing or paused.
@@ -2232,6 +2238,14 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // Ctrl+L: toggle favorite / like for focused track or playing track
+        if key.code == KeyCode::Char('l') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if self.view.screen == Screen::Main {
+                return self.toggle_like_focused_or_playing();
+            }
+            return KeyAction::Continue;
+        }
+
         // Ctrl+Right: seek forward 10s
         if key.code == KeyCode::Right && key.modifiers.contains(KeyModifiers::CONTROL) {
             return KeyAction::SendCommand(Command::SeekForward { secs: 10 });
@@ -2694,6 +2708,9 @@ impl Client {
             // Deezer Flow
             KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
 
+            // Toggle favorite / like for focused track or playing track
+            KeyCode::Char('L') => self.toggle_like_focused_or_playing(),
+
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
@@ -2984,6 +3001,177 @@ impl Client {
         KeyAction::Continue
     }
 
+    /// Optimistically toggle a track's favorite status in the local view and send
+    /// the corresponding AddFavorite/RemoveFavorite command to the daemon.
+    fn toggle_track_favorite(&mut self, track_id: &str) -> KeyAction {
+        let is_fav = self.view.is_track_favorite(track_id);
+        if is_fav {
+            self.view.favorite_track_ids.retain(|id| id != track_id);
+            self.view.favorites.retain(|t| t.track_id != track_id);
+            KeyAction::SendCommand(Command::RemoveFavorite {
+                track_id: track_id.to_string(),
+            })
+        } else {
+            if !self.view.favorite_track_ids.iter().any(|id| id == track_id) {
+                self.view.favorite_track_ids.push(track_id.to_string());
+            }
+            KeyAction::SendCommand(Command::AddFavorite {
+                track_id: track_id.to_string(),
+            })
+        }
+    }
+
+    /// Toggle favorite for the currently focused track in any list/overlay, or
+    /// fall back to toggling the currently playing track.
+    fn toggle_like_focused_or_playing(&mut self) -> KeyAction {
+        // 1. If an overlay with tracks is open:
+        if let Some(ref overlay) = self.view.overlay {
+            match overlay {
+                Overlay::AlbumDetail { .. } => {
+                    if let Some(ref detail) = self.view.album_detail {
+                        if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
+                            let track_id = track.track_id.clone();
+                            return self.toggle_track_favorite(&track_id);
+                        }
+                    }
+                }
+                Overlay::ArtistDetail => {
+                    if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                        if let Some(ref detail) = self.view.artist_detail {
+                            if let Some(track) =
+                                detail.top_tracks.get(self.view.artist_detail_selected)
+                            {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                Overlay::PlaylistDetail { selected } => {
+                    let filtered = self.view.playlist_detail_tracks_filtered();
+                    if let Some((_, track)) = filtered.get(*selected) {
+                        let track_id = track.track_id.clone();
+                        drop(filtered);
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+                Overlay::GenreDetail { sub_tab, selected } => {
+                    if *sub_tab == GenreDetailSubTab::Tracks {
+                        if let Some(ref detail) = self.view.genre_detail {
+                            if let Some(track) = detail.tracks.get(*selected) {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                Overlay::WaitingList { selected } => {
+                    if let Some(track) = self.view.queue.get(*selected) {
+                        let track_id = track.track_id.clone();
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 2. If on main screen without popup/modal:
+        if self.view.screen == Screen::Main
+            && self.view.overlay.is_none()
+            && self.view.popup.is_none()
+        {
+            match self.view.active_tab {
+                ActiveTab::Search => {
+                    if self.view.search_category == SearchCategory::Track {
+                        if let Some(item) = self.view.search_display.get(self.view.search_selected)
+                        {
+                            if let Some(ref track) = item.track {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                ActiveTab::Favorites => match self.view.favorites_category {
+                    FavoritesCategory::Tracks | FavoritesCategory::RecentlyPlayed => {
+                        let selected = if self.view.favorites_filter_active() {
+                            self.view.favorites_filter_selected
+                        } else {
+                            self.view.favorites_selected
+                        };
+                        let items: Vec<_> = if self.view.favorites_filter_active() {
+                            self.view
+                                .favorites_filtered
+                                .iter()
+                                .map(|(_, item)| item)
+                                .collect()
+                        } else {
+                            self.view.favorites_display.iter().collect()
+                        };
+                        if let Some(item) = items.get(selected) {
+                            if let Some(ref track) = item.track {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                    FavoritesCategory::Artists => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref artist_id) = item.artist_id {
+                                let is_fav = self.view.is_artist_favorite(artist_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    FavoritesCategory::Albums => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref album_id) = item.album_id {
+                                let is_fav = self.view.is_album_favorite(album_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        // 3. Fallback: toggle currently playing track
+        if let Some(ref track) = self.view.current_track {
+            let track_id = track.track_id.clone();
+            return self.toggle_track_favorite(&track_id);
+        }
+
+        KeyAction::Continue
+    }
+
     /// Player controls that stay available while a detail overlay is open.
     /// Returns `None` when the key is not a player control, so callers keep
     /// their own fallthrough behaviour.
@@ -2997,6 +3185,22 @@ impl Client {
             KeyCode::Char('b') => Command::PrevTrack,
             KeyCode::Char('s') => Command::ToggleShuffle,
             KeyCode::Char('r') => Command::CycleRepeat,
+            KeyCode::Char('L') => {
+                if let Some(ref track) = self.view.current_track {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    let cmd = if is_fav {
+                        Command::RemoveFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    } else {
+                        Command::AddFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    };
+                    return Some(KeyAction::SendCommand(cmd));
+                }
+                return None;
+            }
             KeyCode::Char('+') | KeyCode::Char('=') => Command::SetVolume {
                 volume: (self.view.volume + 0.05).min(1.0),
             },
@@ -3242,6 +3446,16 @@ impl Client {
             }
             return KeyAction::Continue;
         }
+        // f / L: toggle favorite for focused track
+        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+            if let Some(ref detail) = self.view.album_detail {
+                if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
+                }
+            }
+            return KeyAction::Continue;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.view.pop_overlay();
@@ -3334,6 +3548,36 @@ impl Client {
                     {
                         let is_fav = self.view.is_track_favorite(&track.track_id);
                         self.view.popup = Some(PopupMenu::full(track, is_fav));
+                    }
+                }
+            }
+            return KeyAction::Continue;
+        }
+        // f / L: toggle favorite for focused track or artist
+        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+            if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                if let Some(ref detail) = self.view.artist_detail {
+                    if let Some(track) = detail.top_tracks.get(self.view.artist_detail_selected) {
+                        let track_id = track.track_id.clone();
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+            } else if self.view.artist_detail_sub_tab == ArtistSubTab::Similar {
+                if let Some(ref detail) = self.view.artist_detail {
+                    if let Some(artist) =
+                        detail.similar_artists.get(self.view.artist_detail_selected)
+                    {
+                        let is_fav = self.view.is_artist_favorite(&artist.artist_id);
+                        let cmd = if is_fav {
+                            Command::RemoveFavoriteArtist {
+                                artist_id: artist.artist_id.clone(),
+                            }
+                        } else {
+                            Command::AddFavoriteArtist {
+                                artist_id: artist.artist_id.clone(),
+                            }
+                        };
+                        return KeyAction::SendCommand(cmd);
                     }
                 }
             }
@@ -3569,6 +3813,15 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // f / L: toggle favorite for focused track
+        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+            if let Some((_, track)) = focused.as_ref() {
+                let track_id = track.track_id.clone();
+                return self.toggle_track_favorite(&track_id);
+            }
+            return KeyAction::Continue;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.view.playlist_detail_filter_input.clear();
@@ -3692,6 +3945,19 @@ impl Client {
                 GenreDetailSubTab::Radios => d.radios.len(),
             })
             .unwrap_or(0);
+
+        // f / L: toggle favorite for focused track
+        if (key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L'))
+            && sub_tab == GenreDetailSubTab::Tracks
+        {
+            if let Some(ref detail) = self.view.genre_detail {
+                if let Some(track) = detail.tracks.get(selected) {
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
+                }
+            }
+            return KeyAction::Continue;
+        }
 
         match key.code {
             KeyCode::Esc => {
@@ -3851,19 +4117,10 @@ impl Client {
                 KeyAction::Continue
             }
             // Toggle favorite
-            KeyCode::Char('f') => {
+            KeyCode::Char('f') | KeyCode::Char('L') => {
                 if let Some(track) = self.view.queue.get(selected) {
-                    let is_fav = self.view.is_track_favorite(&track.track_id);
-                    let cmd = if is_fav {
-                        Command::RemoveFavorite {
-                            track_id: track.track_id.clone(),
-                        }
-                    } else {
-                        Command::AddFavorite {
-                            track_id: track.track_id.clone(),
-                        }
-                    };
-                    return KeyAction::SendCommand(cmd);
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
                 }
                 KeyAction::Continue
             }
@@ -4649,6 +4906,14 @@ impl Client {
                 KeyAction::Continue
             }
             ClickTarget::FlowChip => KeyAction::SendCommand(Command::StartFlow),
+            ClickTarget::ToggleLikeCurrentTrack => {
+                if let Some(ref track) = self.view.current_track {
+                    let track_id = track.track_id.clone();
+                    self.toggle_track_favorite(&track_id)
+                } else {
+                    KeyAction::Continue
+                }
+            }
             ClickTarget::ShuffleFavorites => KeyAction::SendCommand(Command::ShuffleFavorites),
             // Player bar: right click only.
             ClickTarget::CurrentTrack => KeyAction::Continue,
@@ -5072,5 +5337,23 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0, 1);
         assert_eq!(filtered[0].1.title, "Beta");
+    }
+
+    #[test]
+    fn is_track_favorite_checks_favorite_ids_and_favorites_list() {
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.is_track_favorite("123"));
+
+        view.favorite_track_ids.push("123".into());
+        assert!(view.is_track_favorite("123"));
+        assert!(!view.is_track_favorite("456"));
+
+        let snap = DaemonSnapshot {
+            favorite_track_ids: vec!["456".into()],
+            ..DaemonSnapshot::default()
+        };
+        view.update_from_snapshot(snap);
+        assert!(!view.is_track_favorite("123"));
+        assert!(view.is_track_favorite("456"));
     }
 }
