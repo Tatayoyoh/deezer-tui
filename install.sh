@@ -90,6 +90,34 @@ add_to_path() {
     echo "  Run: source ${RC_FILE}"
 }
 
+# Install shell completions
+install_completions() {
+    SHELL_NAME="$(basename "${SHELL:-/bin/sh}")"
+    case "${SHELL_NAME}" in
+        bash)
+            COMP_DIR="${HOME}/.local/share/bash-completion/completions"
+            mkdir -p "${COMP_DIR}"
+            if "${INSTALL_DIR}/${BINARY_NAME}" --completions bash > "${COMP_DIR}/${BINARY_NAME}" 2>/dev/null; then
+                echo "  Installed Bash completions to ${COMP_DIR}/${BINARY_NAME}"
+            fi
+            ;;
+        zsh)
+            COMP_DIR="${HOME}/.zsh/completion"
+            mkdir -p "${COMP_DIR}"
+            if "${INSTALL_DIR}/${BINARY_NAME}" --completions zsh > "${COMP_DIR}/_${BINARY_NAME}" 2>/dev/null; then
+                echo "  Installed Zsh completions to ${COMP_DIR}/_${BINARY_NAME}"
+            fi
+            ;;
+        fish)
+            COMP_DIR="${HOME}/.config/fish/completions"
+            mkdir -p "${COMP_DIR}"
+            if "${INSTALL_DIR}/${BINARY_NAME}" --completions fish > "${COMP_DIR}/${BINARY_NAME}.fish" 2>/dev/null; then
+                echo "  Installed Fish completions to ${COMP_DIR}/${BINARY_NAME}.fish"
+            fi
+            ;;
+    esac
+}
+
 echo ""
 echo "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -98,5 +126,8 @@ case ":${PATH}:" in
     *":${INSTALL_DIR}:"*) ;;
     *) add_to_path ;;
 esac
+
+# Install shell completions
+install_completions
 
 echo "Run 'deezer-tui' to start!"
