@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Terminal integration (#26):
+    * Panic hook restoring raw mode / alternate screen / cursor on crash
+    * Dynamic terminal window title with the playing track (rewritten only when it changes)
+    * `--status` with human-readable and `--json` output for tmux, Waybar, Polybar and scripts
+    * CLI playback flags: `--play`, `--pause`, `--stop`, `--volume`, `--volume-up/down`, `--seek`, `--seek-forward/backward`, `--shuffle`, `--repeat`, `--like`, `--dislike`
+    * Shell completions generator (`--completions bash|zsh|fish`), installed by `install.sh`
+
+### Security
+- Track and artist names from the API are stripped of control characters before being written to the terminal title (OSC escape) or printed by `--status`; a `BEL` in a track name could previously close the OSC string and let the remainder be interpreted as terminal escape sequences
+
 ## [1.16.0] - 2026-08-17
 
 ### Added

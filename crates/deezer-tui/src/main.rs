@@ -6,6 +6,7 @@ mod i18n;
 #[cfg(target_os = "linux")]
 mod mpris;
 mod protocol;
+mod terminal_text;
 mod theme;
 mod ui;
 mod web_login;
@@ -16,6 +17,7 @@ use anyhow::Result;
 use tracing_subscriber::EnvFilter;
 
 use crate::protocol::{send_line, socket_path, Command};
+use crate::terminal_text::sanitize;
 
 /// Initialize file-based logging (no-op if RUST_LOG is not set).
 fn init_logging(path: &str) {
@@ -198,7 +200,9 @@ fn main() -> Result<()> {
     // Playback controls
     if args.iter().any(|a| a == "--play") {
         if let Ok(Some(s)) = fetch_daemon_snapshot() {
-            if s.status != deezer_core::player::state::PlaybackStatus::Playing {
+            // Only Paused resumes: toggling while Loading would pause the
+            // track that is still buffering.
+            if s.status == deezer_core::player::state::PlaybackStatus::Paused {
                 return send_command_to_daemon(Command::TogglePause);
             }
             return Ok(());
@@ -393,23 +397,35 @@ fn handle_status(json: bool) -> Result<()> {
                         deezer_core::player::state::RepeatMode::Queue => "queue",
                         deezer_core::player::state::RepeatMode::Track => "track",
                     },
-                    "quality": format!("{:?}", s.quality),
+                    "quality": s.quality.as_api_format(),
                 });
                 println!("{}", serde_json::to_string_pretty(&json_val)?);
             } else {
-                match (&s.status, &s.current_track) {
-                    (deezer_core::player::state::PlaybackStatus::Playing, Some(t)) => {
+                // Track metadata comes from the API and is printed raw into
+                // status bars — strip control characters first.
+                let meta = s
+                    .current_track
+                    .as_ref()
+                    .map(|t| (sanitize(&t.title), sanitize(&t.artist)));
+                match (&s.status, meta) {
+                    (
+                        deezer_core::player::state::PlaybackStatus::Playing,
+                        Some((title, artist)),
+                    ) => {
                         let pos = format_time(s.position_secs);
                         let dur = format_time(s.duration_secs);
-                        println!("▶ {} — {} [{}/{}]", t.title, t.artist, pos, dur);
+                        println!("▶ {title} — {artist} [{pos}/{dur}]");
                     }
-                    (deezer_core::player::state::PlaybackStatus::Paused, Some(t)) => {
+                    (deezer_core::player::state::PlaybackStatus::Paused, Some((title, artist))) => {
                         let pos = format_time(s.position_secs);
                         let dur = format_time(s.duration_secs);
-                        println!("⏸ {} — {} [{}/{}]", t.title, t.artist, pos, dur);
+                        println!("⏸ {title} — {artist} [{pos}/{dur}]");
                     }
-                    (deezer_core::player::state::PlaybackStatus::Loading, Some(t)) => {
-                        println!("⏳ {} — {}", t.title, t.artist);
+                    (
+                        deezer_core::player::state::PlaybackStatus::Loading,
+                        Some((title, artist)),
+                    ) => {
+                        println!("⏳ {title} — {artist}");
                     }
                     _ => {
                         println!("⏹ Stopped");
@@ -426,6 +442,8 @@ fn handle_status(json: bool) -> Result<()> {
             } else {
                 eprintln!("deezer-tui: no daemon running");
             }
+            // Non-zero exit so scripts can tell "offline" from "stopped".
+            std::process::exit(1);
         }
     }
     Ok(())

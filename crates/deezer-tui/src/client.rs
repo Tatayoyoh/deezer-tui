@@ -39,6 +39,7 @@ use crate::protocol::{
     FavoritesCategory, GenreDetailSubTab, GenreItem, MoodEntry, NavOverlay, OfflineCategory,
     RadioItem, Screen, SearchCategory, ServerMessage,
 };
+use crate::terminal_text::sanitize;
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
 use deezer_core::api::models::GenreDetail;
@@ -1708,6 +1709,9 @@ pub struct Client {
     image_cache: HashMap<String, image::DynamicImage>,
     /// Cell and time of the last left click, for double-click detection.
     last_click: Option<(u16, u16, Instant)>,
+    /// Last string written to the terminal title, to avoid rewriting it on
+    /// every snapshot (the daemon ticks 4x per second).
+    last_terminal_title: String,
 }
 
 /// Helper to restore standard terminal mode safely.
@@ -1759,6 +1763,7 @@ impl Client {
             image_rx,
             image_cache: HashMap::new(),
             last_click: None,
+            last_terminal_title: String::new(),
         })
     }
 
@@ -1855,17 +1860,30 @@ impl Client {
     }
 
     /// Update the terminal emulator window/tab title with current playback info.
-    fn update_terminal_title(&self) {
+    ///
+    /// Track metadata comes from the Deezer API and is written inside an OSC
+    /// escape (`ESC ] 0 ; … BEL`), so it must be stripped of control characters
+    /// first — a raw BEL would end the OSC string and let the rest of the name
+    /// be parsed by the terminal as escape sequences.
+    fn update_terminal_title(&mut self) {
         let title = match (&self.view.status, &self.view.current_track) {
-            (PlaybackStatus::Playing, Some(track)) => {
-                format!("deezer-tui: ▶ {} — {}", track.title, track.artist)
-            }
-            (PlaybackStatus::Paused, Some(track)) => {
-                format!("deezer-tui: ⏸ {} — {}", track.title, track.artist)
-            }
+            (PlaybackStatus::Playing, Some(track)) => format!(
+                "deezer-tui: ▶ {} — {}",
+                sanitize(&track.title),
+                sanitize(&track.artist)
+            ),
+            (PlaybackStatus::Paused, Some(track)) => format!(
+                "deezer-tui: ⏸ {} — {}",
+                sanitize(&track.title),
+                sanitize(&track.artist)
+            ),
             _ => "deezer-tui".to_string(),
         };
-        let _ = io::stdout().execute(SetTitle(title));
+        if title == self.last_terminal_title {
+            return;
+        }
+        let _ = io::stdout().execute(SetTitle(&title));
+        self.last_terminal_title = title;
     }
 
     async fn send_cmd(&mut self, cmd: &Command) -> std::io::Result<()> {
