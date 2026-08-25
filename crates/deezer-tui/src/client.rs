@@ -4,13 +4,14 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use crossterm::cursor::Show;
 use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
 };
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
@@ -1709,6 +1710,16 @@ pub struct Client {
     last_click: Option<(u16, u16, Instant)>,
 }
 
+/// Helper to restore standard terminal mode safely.
+pub fn restore_terminal() {
+    let mut stdout = io::stdout();
+    let _ = stdout.execute(DisableMouseCapture);
+    let _ = disable_raw_mode();
+    let _ = stdout.execute(LeaveAlternateScreen);
+    let _ = stdout.execute(Show);
+    let _ = stdout.execute(SetTitle(""));
+}
+
 impl Client {
     pub async fn connect() -> Result<Self> {
         let path = socket_path();
@@ -1843,6 +1854,20 @@ impl Client {
         });
     }
 
+    /// Update the terminal emulator window/tab title with current playback info.
+    fn update_terminal_title(&self) {
+        let title = match (&self.view.status, &self.view.current_track) {
+            (PlaybackStatus::Playing, Some(track)) => {
+                format!("deezer-tui: ▶ {} — {}", track.title, track.artist)
+            }
+            (PlaybackStatus::Paused, Some(track)) => {
+                format!("deezer-tui: ⏸ {} — {}", track.title, track.artist)
+            }
+            _ => "deezer-tui".to_string(),
+        };
+        let _ = io::stdout().execute(SetTitle(title));
+    }
+
     async fn send_cmd(&mut self, cmd: &Command) -> std::io::Result<()> {
         use tokio::io::AsyncWriteExt;
         let mut json = serde_json::to_string(cmd)
@@ -1853,6 +1878,13 @@ impl Client {
     }
 
     pub async fn run(&mut self, show_updated: bool) -> Result<()> {
+        // Setup panic hook to ensure terminal is restored cleanly if a crash occurs
+        let default_panic = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal();
+            default_panic(info);
+        }));
+
         // Load saved theme and opacity from config
         let config = Config::load();
         if let Some(ref theme_str) = config.theme {
@@ -1869,6 +1901,7 @@ impl Client {
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
+        self.update_terminal_title();
 
         // Spawn update check in background (non-blocking)
         let (update_tx, mut update_rx) = mpsc::unbounded_channel::<(String, String)>();
@@ -1887,6 +1920,7 @@ impl Client {
         match tokio::time::timeout(Duration::from_secs(3), self.server_rx.recv()).await {
             Ok(Some(Ok(ServerMessage::Snapshot(snap)))) => {
                 self.view.update_from_snapshot(snap);
+                self.update_terminal_title();
             }
             _ => {
                 // Timeout, disconnect, or error — proceed with default state
@@ -1975,9 +2009,7 @@ impl Client {
                     }
                     KeyAction::WebLogin => {
                         // Suspend TUI
-                        io::stdout().execute(DisableMouseCapture)?;
-                        disable_raw_mode()?;
-                        io::stdout().execute(LeaveAlternateScreen)?;
+                        restore_terminal();
                         drop(terminal);
 
                         // Run browser login (blocking)
@@ -1989,6 +2021,7 @@ impl Client {
                         io::stdout().execute(EnableMouseCapture)?;
                         terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
                         terminal.clear()?;
+                        self.update_terminal_title();
 
                         if let Ok(Some(arl)) = result {
                             self.view.login_loading = true;
@@ -2009,9 +2042,7 @@ impl Client {
                         })?;
 
                         // Suspend TUI so sudo can prompt for password if needed
-                        io::stdout().execute(DisableMouseCapture)?;
-                        disable_raw_mode()?;
-                        io::stdout().execute(LeaveAlternateScreen)?;
+                        restore_terminal();
                         drop(terminal);
 
                         let update_result = perform_update(&download_url).await;
@@ -2022,13 +2053,12 @@ impl Client {
                         io::stdout().execute(EnableMouseCapture)?;
                         terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
                         terminal.clear()?;
+                        self.update_terminal_title();
 
                         match update_result {
                             Ok(binary_path) => {
                                 // Restore terminal before exec
-                                io::stdout().execute(DisableMouseCapture)?;
-                                disable_raw_mode()?;
-                                io::stdout().execute(LeaveAlternateScreen)?;
+                                restore_terminal();
 
                                 // Shut down the daemon and wait for it to actually exit
                                 let _ = self.send_cmd(&Command::Shutdown).await;
@@ -2091,6 +2121,7 @@ impl Client {
             match self.server_rx.try_recv() {
                 Ok(Ok(ServerMessage::Snapshot(snap))) => {
                     self.view.update_from_snapshot(snap);
+                    self.update_terminal_title();
                     self.maybe_fetch_cover_image();
                 }
                 Ok(Ok(ServerMessage::Error(err))) => {
@@ -2137,9 +2168,7 @@ impl Client {
         }
 
         // Restore terminal
-        io::stdout().execute(DisableMouseCapture)?;
-        disable_raw_mode()?;
-        io::stdout().execute(LeaveAlternateScreen)?;
+        restore_terminal();
 
         if send_shutdown {
             let _ = self.send_cmd(&Command::Shutdown).await;

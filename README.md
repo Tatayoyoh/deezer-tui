@@ -53,7 +53,10 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ Offline mode with downloaded tracks<br>
 ✅ Album/Artist miniature (require Kitty or Ghostty for real image display)<br>
 ✅ Auto update<br>
-✅ MPRIS support for Linux desktops environments : play/next track/previous track<br>
+✅ MPRIS support for Linux desktop environments : play/next track/previous track<br>
+✅ CLI controls & status line integration (`--status`, `--json`, `--volume`, etc.) for tmux, Waybar, Polybar, and scripts<br>
+✅ Shell completions generator for Bash, Zsh, and Fish (`--completions <shell>`)<br>
+✅ Dynamic terminal window/tab title with now-playing track info and panic-safe terminal restoration<br>
 
 ## In action
 
