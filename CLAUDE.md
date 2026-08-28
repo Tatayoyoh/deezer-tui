@@ -265,8 +265,7 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | `?` | Show shortcuts help |
 | `g` | Shuffle play favorites |
 | `Ctrl+O` | Open settings (themes) |
-| `Ctrl+F` | Toggle fullscreen |
-| `Ctrl+P` | Open command palette |
+| `Ctrl+F` | Search / filter mode (same as `/`) |
 | `q` | Quit (sends Shutdown to daemon) |
 | `Ctrl+C` | Force quit |
 
