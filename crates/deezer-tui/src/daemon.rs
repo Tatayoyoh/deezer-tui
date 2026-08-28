@@ -2265,6 +2265,13 @@ impl Daemon {
 
     fn start_play_track(&mut self, track: TrackData) {
         if self.is_offline {
+            // Only `Command::PlayFromOffline*` used to reach the on-disk copy,
+            // so `next`, `previous` and the end-of-track auto-advance all died
+            // here even when the track was downloaded (issue #27).
+            if self.offline_index.has_track(&track.track_id) {
+                self.start_play_offline_track(track);
+                return;
+            }
             self.status_msg = Some(t().no_internet.into());
             return;
         }
@@ -2644,12 +2651,68 @@ impl Daemon {
             state.queue.get(next_idx).cloned()
         };
 
+        // Offline, the queue can hold tracks that were never downloaded: step
+        // over them instead of stopping on the first miss.
+        let next_track = match next_track {
+            Some(track) if self.is_offline && !self.offline_index.has_track(&track.track_id) => {
+                let found = self.advance_to_downloaded();
+                if found.is_none() {
+                    info!("play_next: offline, no downloaded track left in the queue");
+                    self.status_msg = Some(t().status_no_offline_track.into());
+                    if let Ok(mut state) = self.player_state.lock() {
+                        state.status = PlaybackStatus::Stopped;
+                    }
+                }
+                found
+            }
+            other => other,
+        };
+
         if let Some(ref track) = next_track {
             info!(track_id = %track.track_id, title = %track.title, "play_next: advancing to track");
             self.start_play_track(track.clone());
-        } else {
+        } else if !self.is_offline {
             warn!("play_next: next_track is None (queue_index out of bounds?)");
         }
+    }
+
+    /// Walk forward from the current queue position to the first track that is
+    /// available on disk, and leave the queue pointing at it.
+    ///
+    /// Used while offline, where a queue built from an online playlist holds
+    /// tracks that were never downloaded. The queue is only moved once a
+    /// downloaded track is found, so a fruitless scan leaves the state alone.
+    fn advance_to_downloaded(&mut self) -> Option<TrackData> {
+        let (queue, queue_index, shuffle, repeat_queue) = {
+            let state = self.player_state.lock().unwrap();
+            (
+                state.queue.clone(),
+                state.queue_index,
+                state.shuffle,
+                state.repeat == RepeatMode::Queue,
+            )
+        };
+
+        let candidates = forward_candidates(
+            queue.len(),
+            queue_index,
+            &self.shuffle_order,
+            self.shuffle_pos,
+            shuffle,
+            repeat_queue,
+        );
+
+        for (pos, idx) in candidates {
+            let Some(track) = queue.get(idx) else {
+                continue;
+            };
+            if self.offline_index.has_track(&track.track_id) {
+                self.shuffle_pos = pos;
+                self.player_state.lock().unwrap().queue_index = idx;
+                return Some(track.clone());
+            }
+        }
+        None
     }
 
     fn play_prev(&mut self) {
@@ -3371,6 +3434,21 @@ impl Daemon {
                         continue;
                     }
                     warn!(gen = generation, err = %err, consecutive_skips = self.consecutive_skip_count, "process_async: TrackFetchError, auto-skipping");
+                    // `is_offline` is computed once at startup, so a connection
+                    // lost mid-session still looks online. If the track is on
+                    // disk, play that instead of skipping it.
+                    let local = self
+                        .player_state
+                        .lock()
+                        .ok()
+                        .and_then(|state| state.current_track.clone())
+                        .filter(|track| self.offline_index.has_track(&track.track_id));
+                    if let Some(track) = local {
+                        info!(track_id = %track.track_id, "process_async: falling back to the downloaded copy");
+                        self.consecutive_skip_count = 0;
+                        self.start_play_offline_track(track);
+                        continue;
+                    }
                     self.status_msg = Some(t().fmt_error(t().status_track_error, &err));
                     // Auto-skip to next track instead of stopping,
                     // but limit consecutive skips to avoid infinite loop
@@ -3849,9 +3927,88 @@ fn shuffled_indices(len: usize, start: usize, seed: u64) -> Vec<usize> {
     order
 }
 
+/// Queue positions to try after the current one, in playback order, as
+/// `(shuffle_pos, queue_index)` pairs.
+///
+/// Shuffle walks the remainder of the current cycle; sequential playback walks
+/// to the end of the queue and wraps once when repeat-all is on. The list is
+/// always shorter than the queue, so scanning it always terminates.
+fn forward_candidates(
+    queue_len: usize,
+    queue_index: usize,
+    shuffle_order: &[usize],
+    shuffle_pos: usize,
+    shuffle: bool,
+    repeat_queue: bool,
+) -> Vec<(usize, usize)> {
+    if queue_len == 0 {
+        return Vec::new();
+    }
+    if shuffle {
+        return shuffle_order
+            .iter()
+            .enumerate()
+            .skip(shuffle_pos + 1)
+            .map(|(pos, &idx)| (pos, idx))
+            .collect();
+    }
+    let mut out = Vec::new();
+    let mut idx = queue_index;
+    for _ in 0..queue_len - 1 {
+        let next = idx + 1;
+        idx = if next >= queue_len {
+            if repeat_queue {
+                0
+            } else {
+                break;
+            }
+        } else {
+            next
+        };
+        out.push((shuffle_pos, idx));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::shuffled_indices;
+    use super::{forward_candidates, shuffled_indices};
+
+    #[test]
+    fn forward_candidates_stop_at_the_end_without_repeat() {
+        let got = forward_candidates(5, 2, &[], 0, false, false);
+        assert_eq!(got, vec![(0, 3), (0, 4)]);
+    }
+
+    #[test]
+    fn forward_candidates_wrap_once_with_repeat_all() {
+        let got: Vec<usize> = forward_candidates(5, 3, &[], 0, false, true)
+            .into_iter()
+            .map(|(_, idx)| idx)
+            .collect();
+        // Every other position exactly once, never back to the starting one.
+        assert_eq!(got, vec![4, 0, 1, 2]);
+    }
+
+    #[test]
+    fn forward_candidates_never_outlive_the_queue() {
+        for len in [0usize, 1, 2, 7, 64] {
+            for start in 0..len.max(1) {
+                for repeat in [false, true] {
+                    let got = forward_candidates(len, start, &[], 0, false, repeat);
+                    assert!(got.len() < len.max(1), "len={len} start={start}");
+                    assert!(got.iter().all(|&(_, idx)| idx < len || len == 0));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn forward_candidates_follow_the_shuffle_cycle() {
+        let order = vec![4, 1, 3, 0, 2];
+        let got = forward_candidates(5, 4, &order, 1, true, false);
+        assert_eq!(got, vec![(2, 3), (3, 0), (4, 2)]);
+    }
 
     /// The whole point of a cycle: "repeat all" can only repeat *the shuffle*
     /// if the shuffle is a full pass that plays each track exactly once.

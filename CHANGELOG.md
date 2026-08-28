@@ -12,6 +12,12 @@ All notable changes to this project will be documented in this file.
     * CLI playback flags: `--play`, `--pause`, `--stop`, `--volume`, `--volume-up/down`, `--seek`, `--seek-forward/backward`, `--shuffle`, `--repeat`, `--like`, `--dislike`
     * Shell completions generator (`--completions bash|zsh|fish`), installed by `install.sh`
 
+### Fixed
+- `next`, `previous` and end-of-track auto-advance now play the downloaded copy of a track while offline, instead of refusing with "No internet connection" and falling silent (#27)
+- While offline, a queue holding tracks that were never downloaded is walked forward to the next available one instead of stopping on the first miss (#27)
+- A track fetch that fails on a connection lost mid-session falls back to the downloaded copy when there is one, instead of skipping the track (#27)
+- Typing `i` in the filter of a downloaded playlist no longer opens the info modal instead of inserting the character; `?` had the same leak (#28)
+
 ### Security
 - Track and artist names from the API are stripped of control characters before being written to the terminal title (OSC escape) or printed by `--status`; a `BEL` in a track name could previously close the OSC string and let the remainder be interpreted as terminal escape sequences
 

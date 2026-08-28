@@ -1461,6 +1461,23 @@ impl ViewState {
             .min(self.favorites_filtered.len().saturating_sub(1));
     }
 
+    /// Whether a text input currently has focus, so single-letter global
+    /// shortcuts (`i`, `?`) must not fire.
+    ///
+    /// Every filter flag has to be listed here: the guards used to spell the
+    /// list out at each call site and `offline_detail_filter_typing` was
+    /// missing from it, so typing `i` while filtering inside a downloaded
+    /// playlist opened the info modal (issue #28).
+    pub fn is_text_input_active(&self) -> bool {
+        self.input_mode == InputMode::Typing
+            || self.radio_filter_typing
+            || self.genres_filter_typing
+            || self.favorites_filter_typing
+            || self.offline_filter_typing
+            || self.offline_detail_filter_typing
+            || self.playlist_detail_filter_typing
+    }
+
     /// Whether the favorites filter is active (has content or is being typed).
     pub fn favorites_filter_active(&self) -> bool {
         self.favorites_filter_typing || !self.favorites_filter_input.is_empty()
@@ -2226,12 +2243,7 @@ impl Client {
         // ? : toggle help overlay (not during text input)
         if key.code == KeyCode::Char('?')
             && self.view.screen == Screen::Main
-            && self.view.input_mode != InputMode::Typing
-            && !self.view.radio_filter_typing
-            && !self.view.genres_filter_typing
-            && !self.view.favorites_filter_typing
-            && !self.view.offline_filter_typing
-            && !self.view.playlist_detail_filter_typing
+            && !self.view.is_text_input_active()
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
@@ -2245,12 +2257,7 @@ impl Client {
         // i : toggle info modal (not during text input)
         if key.code == KeyCode::Char('i')
             && self.view.screen == Screen::Main
-            && self.view.input_mode != InputMode::Typing
-            && !self.view.radio_filter_typing
-            && !self.view.genres_filter_typing
-            && !self.view.favorites_filter_typing
-            && !self.view.offline_filter_typing
-            && !self.view.playlist_detail_filter_typing
+            && !self.view.is_text_input_active()
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Info)) {
@@ -5082,6 +5089,33 @@ mod tests {
         let rects = tab_rects(area, &["Aa", "Bbb", "C"]);
         assert_eq!(rects.len(), 2);
         assert_eq!((rects[1].x, rects[1].width), (5, 1));
+    }
+
+    #[test]
+    fn every_filter_input_suppresses_single_letter_shortcuts() {
+        // `i` and `?` are handled before the per-screen dispatch, so every
+        // filter flag must be reported here — the offline playlist filter was
+        // missing and swallowed `i` into the info modal (issue #28).
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.is_text_input_active());
+
+        let flags: [fn(&mut ViewState, bool); 6] = [
+            |v, b| v.radio_filter_typing = b,
+            |v, b| v.genres_filter_typing = b,
+            |v, b| v.favorites_filter_typing = b,
+            |v, b| v.offline_filter_typing = b,
+            |v, b| v.offline_detail_filter_typing = b,
+            |v, b| v.playlist_detail_filter_typing = b,
+        ];
+        for set in flags {
+            set(&mut view, true);
+            assert!(view.is_text_input_active());
+            set(&mut view, false);
+            assert!(!view.is_text_input_active());
+        }
+
+        view.input_mode = InputMode::Typing;
+        assert!(view.is_text_input_active());
     }
 
     #[test]
