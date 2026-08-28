@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- Terminal integration (#26):
+- Terminal integration (PR #26):
     * Panic hook restoring raw mode / alternate screen / cursor on crash
     * Dynamic terminal window title with the playing track (rewritten only when it changes)
     * `--status` with human-readable and `--json` output for tmux, Waybar, Polybar and scripts
