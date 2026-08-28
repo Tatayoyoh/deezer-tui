@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.17.0] - 2026-08-28
 
 ### Added
 - Terminal integration (PR #26):
