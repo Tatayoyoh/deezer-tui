@@ -27,6 +27,9 @@ pub struct Config {
     /// Background transparency in percent (0–100, steps of 10). 0 = opaque, 100 = fully transparent.
     #[serde(default)]
     pub bg_transparency: u8,
+    /// Enable vim-style navigation keys (h, j, k, l). Disabled by default.
+    #[serde(default)]
+    pub vim_keys: bool,
 }
 
 fn default_quality() -> AudioQuality {
@@ -47,6 +50,7 @@ impl Default for Config {
             language: None,
             skip_update_check: false,
             bg_transparency: 0,
+            vim_keys: false,
         }
     }
 }

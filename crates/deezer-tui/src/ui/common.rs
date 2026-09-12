@@ -99,20 +99,38 @@ pub fn tab_rects(area: Rect, titles: &[&str]) -> Vec<Rect> {
 /// to be `▶` and `>`, which read as the same arrow at a glance.
 const PLAYING_MARKER: &str = "●";
 
-/// Number cell of a track row: `● 12` for the playing track, ` 12` otherwise.
-/// The marker column is always one cell wide, so numbers stay aligned.
-pub fn track_number(index: usize, is_playing: bool) -> Span<'static> {
-    let (marker, style) = if is_playing {
-        (
-            PLAYING_MARKER,
-            Style::default()
-                .fg(Theme::primary())
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        (" ", Theme::dim())
-    };
-    Span::styled(format!("{marker}{:>3}", index + 1), style)
+
+/// Status column of a track row:
+/// - 1st character: `>` if selected, else ` `
+/// - 2nd character: `●` if playing, else ` `
+/// - 3rd character: `♥` if favorite, else ` `
+pub fn track_status(is_selected: bool, is_playing: bool, is_favorite: bool) -> Line<'static> {
+    let cursor = if is_selected { ">" } else { " " };
+    let bullet = if is_playing { PLAYING_MARKER } else { " " };
+    let heart = if is_favorite { "♥" } else { " " };
+    Line::from(vec![
+        Span::styled(cursor, Theme::highlight()),
+        Span::styled(
+            bullet,
+            if is_playing {
+                Style::default()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Theme::dim()
+            },
+        ),
+        Span::styled(
+            heart,
+            if is_favorite {
+                Style::default()
+                    .fg(Color::Rgb(255, 75, 100))
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Theme::dim()
+            },
+        ),
+    ])
 }
 
 /// Render a `[key] label` (or bare `key label`) hint string with the key on a
@@ -252,20 +270,23 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn track_number_marks_only_the_playing_row() {
-        assert_eq!(track_number(0, true).content, "●  1");
-        assert_eq!(track_number(0, false).content, "   1");
-    }
 
-    /// Numbers must not shift when a row starts playing.
     #[test]
-    fn track_number_keeps_a_fixed_width() {
-        for index in [0, 9, 99] {
-            assert_eq!(
-                track_number(index, true).content.chars().count(),
-                track_number(index, false).content.chars().count(),
-            );
-        }
+    fn track_status_displays_expected_characters() {
+        let line = track_status(true, true, true);
+        let s: String = line.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        assert_eq!(s, ">●♥");
+
+        let line2 = track_status(false, false, false);
+        let s2: String = line2.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        assert_eq!(s2, "   ");
+
+        let line3 = track_status(true, false, true);
+        let s3: String = line3.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        assert_eq!(s3, "> ♥");
+
+        let line4 = track_status(false, true, false);
+        let s4: String = line4.spans.iter().map(|sp| sp.content.as_ref()).collect();
+        assert_eq!(s4, " ● ");
     }
 }

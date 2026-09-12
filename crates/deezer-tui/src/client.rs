@@ -149,6 +149,10 @@ pub enum SubMenu {
     ConfirmDeletePlaylist {
         confirm_yes: bool,
     },
+    /// Yes/no confirmation for removing a track from favorites while in Favorites tab.
+    ConfirmRemoveFavorite {
+        confirm_yes: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -326,6 +330,19 @@ impl PopupMenu {
             target: PopupTarget::Track(Box::new(track)),
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
+        }
+    }
+
+    /// Build a confirmation modal for removing a track from favorites.
+    pub fn confirm_remove_favorite(track: TrackData) -> Self {
+        Self {
+            title: None,
+            items: Vec::new(),
+            selected: 0,
+            target: PopupTarget::Track(Box::new(track)),
+            is_favorite: true,
+            sub_menu: Some(SubMenu::ConfirmRemoveFavorite { confirm_yes: false }),
             playlist_context: None,
         }
     }
@@ -728,6 +745,7 @@ pub struct ViewState {
     pub favorite_track_ids: Vec<String>,
     pub favorite_artist_ids: Vec<String>,
     pub favorite_album_ids: Vec<String>,
+    pub vim_keys: bool,
     pub offline_category: OfflineCategory,
     pub offline_tracks: Vec<OfflineTrack>,
     pub offline_albums: Vec<AlbumDetail>,
@@ -966,6 +984,7 @@ impl ViewState {
             login_loading: snap.login_loading,
             user_name: snap.user_name.clone(),
             is_offline: snap.is_offline,
+            vim_keys: Config::load().vim_keys,
 
             offline_filter_input: String::new(),
             offline_filter_typing: false,
@@ -996,6 +1015,42 @@ impl ViewState {
             click: RefCell::default(),
             scroll: RefCell::default(),
         }
+    }
+
+    /// Whether a key represents navigating up (Up arrow, or 'k' if vim_keys is enabled).
+    pub fn is_nav_up(&self, code: KeyCode) -> bool {
+        Self::nav_up(code, self.vim_keys)
+    }
+
+    pub fn nav_up(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Up || (vim_keys && code == KeyCode::Char('k'))
+    }
+
+    /// Whether a key represents navigating down (Down arrow, or 'j' if vim_keys is enabled).
+    pub fn is_nav_down(&self, code: KeyCode) -> bool {
+        Self::nav_down(code, self.vim_keys)
+    }
+
+    pub fn nav_down(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Down || (vim_keys && code == KeyCode::Char('j'))
+    }
+
+    /// Whether a key represents navigating left (Left arrow, or 'h' if vim_keys is enabled).
+    pub fn is_nav_left(&self, code: KeyCode) -> bool {
+        Self::nav_left(code, self.vim_keys)
+    }
+
+    pub fn nav_left(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Left || (vim_keys && code == KeyCode::Char('h'))
+    }
+
+    /// Whether a key represents navigating right (Right arrow, or 'l' if vim_keys is enabled).
+    pub fn is_nav_right(&self, code: KeyCode) -> bool {
+        Self::nav_right(code, self.vim_keys)
+    }
+
+    pub fn nav_right(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Right || (vim_keys && code == KeyCode::Char('l'))
     }
 
     /// Set the transient status notification and restart its display timer.
@@ -2513,11 +2568,11 @@ impl Client {
             }
 
             // Category navigation (h/l or left/right)
-            KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
-            KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
+            code if self.view.is_nav_left(code) => KeyAction::SendCommand(Command::PrevCategory),
+            code if self.view.is_nav_right(code) => KeyAction::SendCommand(Command::NextCategory),
 
             // List navigation
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.active_tab == ActiveTab::Explore {
                     match self.view.explore_category {
                         ExploreCategory::Moods => {
@@ -2547,7 +2602,7 @@ impl Client {
                 }
                 KeyAction::SendCommand(Command::SelectUp)
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.active_tab == ActiveTab::Explore {
                     match self.view.explore_category {
                         ExploreCategory::Moods => {
@@ -2709,7 +2764,7 @@ impl Client {
             KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
 
             // Toggle favorite / like for focused track or playing track
-            KeyCode::Char('L') => self.toggle_like_focused_or_playing(),
+            KeyCode::Char('L') | KeyCode::Char('l') => self.toggle_like_focused_or_playing(),
 
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
@@ -2740,6 +2795,7 @@ impl Client {
 
     /// Handle key events when an overlay is open.
     fn handle_overlay_key(&mut self, key: KeyEvent) -> KeyAction {
+        let vim_keys = self.view.vim_keys;
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
             Overlay::Help { scroll } => {
@@ -2747,10 +2803,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *scroll += 1;
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *scroll = scroll.saturating_sub(1);
                     }
                     _ => {}
@@ -2767,16 +2823,22 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 7;
+                const SETTINGS_COUNT: usize = 8;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(SETTINGS_COUNT - 1);
+                    }
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *selected == 4 => {
+                        self.view.vim_keys = !self.view.vim_keys;
+                        let mut config = Config::load();
+                        config.vim_keys = self.view.vim_keys;
+                        let _ = config.save();
                     }
                     KeyCode::Enter => {
                         match *selected {
@@ -2815,15 +2877,23 @@ impl Client {
                                 return KeyAction::Continue;
                             }
                             4 => {
+                                // Vim navigation keys toggle
+                                self.view.vim_keys = !self.view.vim_keys;
+                                let mut config = Config::load();
+                                config.vim_keys = self.view.vim_keys;
+                                let _ = config.save();
+                                return KeyAction::Continue;
+                            }
+                            5 => {
                                 // Logout
                                 self.view.pop_overlay();
                                 return KeyAction::SendCommand(Command::Logout);
                             }
-                            5 => {
+                            6 => {
                                 // Send to background
                                 return KeyAction::Detach;
                             }
-                            6 => {
+                            7 => {
                                 // Quit
                                 return KeyAction::Quit;
                             }
@@ -2844,10 +2914,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                     }
                     KeyCode::Enter => {
@@ -2868,10 +2938,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                     }
                     KeyCode::Enter => {
@@ -2900,11 +2970,11 @@ impl Client {
                         let _ = config.save();
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                         Theme::set(ThemeId::ALL[*selected]);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                         Theme::set(ThemeId::ALL[*selected]);
                     }
@@ -2939,10 +3009,10 @@ impl Client {
                     KeyCode::Esc => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(UPDATE_OPTIONS - 1);
                     }
                     KeyCode::Enter => match *selected {
@@ -3110,6 +3180,11 @@ impl Client {
                         };
                         if let Some(item) = items.get(selected) {
                             if let Some(ref track) = item.track {
+                                if self.view.favorites_category == FavoritesCategory::Tracks {
+                                    self.view.popup =
+                                        Some(PopupMenu::confirm_remove_favorite(track.clone()));
+                                    return KeyAction::Continue;
+                                }
                                 let track_id = track.track_id.clone();
                                 return self.toggle_track_favorite(&track_id);
                             }
@@ -3264,11 +3339,11 @@ impl Client {
                 self.set_offline_detail_selected(0);
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 self.set_offline_detail_selected(selected.saturating_sub(1));
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = tracks.len().saturating_sub(1);
                 self.set_offline_detail_selected((selected + 1).min(max));
                 KeyAction::Continue
@@ -3446,8 +3521,11 @@ impl Client {
             }
             return KeyAction::Continue;
         }
-        // f / L: toggle favorite for focused track
-        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+        // f / L / l: toggle favorite for focused track
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
             if let Some(ref detail) = self.view.album_detail {
                 if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
                     let track_id = track.track_id.clone();
@@ -3461,17 +3539,17 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            code if self.view.is_nav_left(code) => {
                 if self.view.album_detail_left_scrollable {
                     self.view.album_detail_left_focused = true;
                 }
                 KeyAction::Continue
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            code if self.view.is_nav_right(code) => {
                 self.view.album_detail_left_focused = false;
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.album_detail_left_focused {
                     self.view.album_detail_left_scroll =
                         self.view.album_detail_left_scroll.saturating_sub(1);
@@ -3481,7 +3559,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.album_detail_left_focused {
                     self.view.album_detail_left_scroll =
                         self.view.album_detail_left_scroll.saturating_add(1);
@@ -3553,8 +3631,11 @@ impl Client {
             }
             return KeyAction::Continue;
         }
-        // f / L: toggle favorite for focused track or artist
-        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+        // f / L / l: toggle favorite for focused track or artist
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
             if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
                 if let Some(ref detail) = self.view.artist_detail {
                     if let Some(track) = detail.top_tracks.get(self.view.artist_detail_selected) {
@@ -3589,7 +3670,7 @@ impl Client {
                 KeyAction::Continue
             }
             // Switch sub-tab with h/l; left panel is a virtual tab before TopTracks
-            KeyCode::Char('h') | KeyCode::Left => {
+            code if self.view.is_nav_left(code) => {
                 if self.view.artist_detail_left_focused {
                     // Already on left panel, nothing to do
                 } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks
@@ -3603,7 +3684,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            code if self.view.is_nav_right(code) => {
                 if self.view.artist_detail_left_focused {
                     // Step out of left panel into TopTracks
                     self.view.artist_detail_left_focused = false;
@@ -3615,7 +3696,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.artist_detail_left_focused {
                     self.view.artist_detail_left_scroll =
                         self.view.artist_detail_left_scroll.saturating_sub(1);
@@ -3625,7 +3706,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.artist_detail_left_focused {
                     self.view.artist_detail_left_scroll =
                         self.view.artist_detail_left_scroll.saturating_add(1);
@@ -3813,8 +3894,11 @@ impl Client {
             return KeyAction::Continue;
         }
 
-        // f / L: toggle favorite for focused track
-        if key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L') {
+        // f / L / l: toggle favorite for focused track
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
             if let Some((_, track)) = focused.as_ref() {
                 let track_id = track.track_id.clone();
                 return self.toggle_track_favorite(&track_id);
@@ -3834,12 +3918,12 @@ impl Client {
                 self.set_playlist_detail_selected(0);
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = filtered_len.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
@@ -3901,12 +3985,12 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = episode_count.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
@@ -3946,8 +4030,10 @@ impl Client {
             })
             .unwrap_or(0);
 
-        // f / L: toggle favorite for focused track
-        if (key.code == KeyCode::Char('f') || key.code == KeyCode::Char('L'))
+        // f / L / l: toggle favorite for focused track
+        if (key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys))
             && sub_tab == GenreDetailSubTab::Tracks
         {
             if let Some(ref detail) = self.view.genre_detail {
@@ -3964,21 +4050,21 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            code if self.view.is_nav_left(code) => {
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab: sub_tab.prev(),
                     selected: 0,
                 });
                 KeyAction::Continue
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            code if self.view.is_nav_right(code) => {
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab: sub_tab.next(),
                     selected: 0,
                 });
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab,
@@ -3986,7 +4072,7 @@ impl Client {
                 });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = count.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::GenreDetail {
@@ -4088,12 +4174,12 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = self.view.queue.len().saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
@@ -4117,7 +4203,11 @@ impl Client {
                 KeyAction::Continue
             }
             // Toggle favorite
-            KeyCode::Char('f') | KeyCode::Char('L') => {
+            KeyCode::Char('f') | KeyCode::Char('L') | KeyCode::Char('l')
+                if key.code == KeyCode::Char('f')
+                    || key.code == KeyCode::Char('L')
+                    || !self.view.vim_keys =>
+            {
                 if let Some(track) = self.view.queue.get(selected) {
                     let track_id = track.track_id.clone();
                     return self.toggle_track_favorite(&track_id);
@@ -4134,6 +4224,7 @@ impl Client {
 
     /// Handle key events when a popup menu is open.
     fn handle_popup_key(&mut self, key: KeyEvent) -> KeyAction {
+        let vim_keys = self.view.vim_keys;
         let popup = self.view.popup.as_mut().unwrap();
 
         // Pre-extract track_id for playlist picker (avoids borrow conflict)
@@ -4200,11 +4291,11 @@ impl Client {
                             *filter_typing = true;
                             return KeyAction::Continue;
                         }
-                        KeyCode::Up | KeyCode::Char('k') => {
+                        code if ViewState::nav_up(code, vim_keys) => {
                             *selected = selected.saturating_sub(1);
                             return KeyAction::Continue;
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
+                        code if ViewState::nav_down(code, vim_keys) => {
                             *selected = (*selected + 1).min(total.saturating_sub(1));
                             return KeyAction::Continue;
                         }
@@ -4353,11 +4444,14 @@ impl Client {
                         self.view.popup = None;
                         return KeyAction::SendCommand(Command::DeletePlaylist { playlist_id });
                     }
-                    KeyCode::Left
+                    KeyCode::Tab
+                    | KeyCode::Left
                     | KeyCode::Right
                     | KeyCode::Char('h')
                     | KeyCode::Char('l')
-                    | KeyCode::Tab => {
+                        if matches!(key.code, KeyCode::Tab | KeyCode::Left | KeyCode::Right)
+                            || vim_keys =>
+                    {
                         *confirm_yes = !*confirm_yes;
                         return KeyAction::Continue;
                     }
@@ -4376,6 +4470,45 @@ impl Client {
                     }
                     _ => return KeyAction::Continue,
                 },
+                SubMenu::ConfirmRemoveFavorite { confirm_yes } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                        self.view.popup = None;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let track_id = match &popup.target {
+                            PopupTarget::Track(track) => track.track_id.clone(),
+                            _ => return KeyAction::Continue,
+                        };
+                        self.view.popup = None;
+                        return KeyAction::SendCommand(Command::RemoveFavorite { track_id });
+                    }
+                    KeyCode::Tab
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                        if matches!(key.code, KeyCode::Tab | KeyCode::Left | KeyCode::Right)
+                            || vim_keys =>
+                    {
+                        *confirm_yes = !*confirm_yes;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Enter => {
+                        if *confirm_yes {
+                            let track_id = match &popup.target {
+                                PopupTarget::Track(track) => track.track_id.clone(),
+                                _ => return KeyAction::Continue,
+                            };
+                            self.view.popup = None;
+                            return KeyAction::SendCommand(Command::RemoveFavorite { track_id });
+                        } else {
+                            self.view.popup = None;
+                            return KeyAction::Continue;
+                        }
+                    }
+                    _ => return KeyAction::Continue,
+                },
             }
         }
 
@@ -4385,11 +4518,11 @@ impl Client {
                 self.view.popup = None;
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if ViewState::nav_up(code, vim_keys) => {
                 popup.select_prev();
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if ViewState::nav_down(code, vim_keys) => {
                 popup.select_next();
                 KeyAction::Continue
             }
@@ -5355,5 +5488,52 @@ mod tests {
         view.update_from_snapshot(snap);
         assert!(!view.is_track_favorite("123"));
         assert!(view.is_track_favorite("456"));
+    }
+
+    #[test]
+    fn vim_keys_navigation_behavior() {
+        use crossterm::event::KeyCode;
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.vim_keys);
+
+        // Arrows always work
+        assert!(view.is_nav_up(KeyCode::Up));
+        assert!(view.is_nav_down(KeyCode::Down));
+        assert!(view.is_nav_left(KeyCode::Left));
+        assert!(view.is_nav_right(KeyCode::Right));
+
+        // Vim keys disabled by default
+        assert!(!view.is_nav_up(KeyCode::Char('k')));
+        assert!(!view.is_nav_down(KeyCode::Char('j')));
+        assert!(!view.is_nav_left(KeyCode::Char('h')));
+        assert!(!view.is_nav_right(KeyCode::Char('l')));
+
+        // Enable vim keys
+        view.vim_keys = true;
+        assert!(view.is_nav_up(KeyCode::Char('k')));
+        assert!(view.is_nav_down(KeyCode::Char('j')));
+        assert!(view.is_nav_left(KeyCode::Char('h')));
+        assert!(view.is_nav_right(KeyCode::Char('l')));
+        assert!(view.is_nav_up(KeyCode::Up));
+    }
+
+    #[test]
+    fn confirm_remove_favorite_popup_structure() {
+        let track: TrackData = serde_json::from_value(serde_json::json!({
+            "SNG_ID": "999",
+            "SNG_TITLE": "Test Track",
+            "ART_NAME": "Test Artist",
+        }))
+        .unwrap();
+        let popup = PopupMenu::confirm_remove_favorite(track);
+        assert_eq!(popup.track().unwrap().track_id, "999");
+        assert!(popup.is_favorite);
+        match popup.sub_menu {
+            Some(SubMenu::ConfirmRemoveFavorite { confirm_yes }) => {
+                assert!(!confirm_yes);
+            }
+            _ => panic!("Expected ConfirmRemoveFavorite sub_menu"),
+        }
     }
 }

@@ -11,7 +11,7 @@ use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::{shortcut_hint, track_number};
+use crate::ui::common::{shortcut_hint, track_status};
 
 /// Draw the artist detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect, as_background: bool) {
@@ -328,7 +328,7 @@ fn draw_top_tracks(
     }
 
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(s.header_title, Theme::dim())),
         Cell::from(Span::styled(s.header_album, Theme::dim())),
         Cell::from(Span::styled(s.header_duration, Theme::dim())),
@@ -342,14 +342,11 @@ fn draw_top_tracks(
         .map(|(i, track)| {
             let dur = track.duration_secs();
             let is_fav = view.is_track_favorite(&track.track_id);
-            let title_text = if is_fav {
-                format!("{} ♥", track.title)
-            } else {
-                track.title.clone()
-            };
+            let is_selected = !view.artist_detail_left_focused && i == selected;
+            let is_playing = view.is_playing_track(&track.track_id);
             Row::new(vec![
-                Cell::from(track_number(i, view.is_playing_track(&track.track_id))),
-                Cell::from(Span::styled(title_text, Theme::text())),
+                Cell::from(track_status(is_selected, is_playing, is_fav)),
+                Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.album,
                     Style::default().fg(Theme::primary()),
@@ -363,7 +360,7 @@ fn draw_top_tracks(
         .collect();
 
     let widths = [
-        Constraint::Length(4),
+        Constraint::Length(3),
         Constraint::Percentage(50),
         Constraint::Percentage(30),
         Constraint::Length(6),
@@ -377,7 +374,7 @@ fn draw_top_tracks(
                 .padding(ratatui::widgets::Padding::new(1, 1, 0, 0)),
         )
         .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::ArtistDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);

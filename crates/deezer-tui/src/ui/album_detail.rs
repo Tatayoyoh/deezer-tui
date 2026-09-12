@@ -10,7 +10,7 @@ use deezer_core::api::models::AlbumDetail;
 use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
-use crate::ui::common::{shortcut_hint, track_number};
+use crate::ui::common::{shortcut_hint, track_status};
 
 /// Draw the album detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect, as_background: bool) {
@@ -291,7 +291,7 @@ fn draw_track_list(
     }
 
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(s.header_title, Theme::dim())),
         Cell::from(Span::styled(s.header_artist, Theme::dim())),
         Cell::from(Span::styled(s.header_duration, Theme::dim())),
@@ -305,14 +305,11 @@ fn draw_track_list(
         .map(|(i, track)| {
             let dur = track.duration_secs();
             let is_fav = view.is_track_favorite(&track.track_id);
-            let title_text = if is_fav {
-                format!("{} ♥", track.title)
-            } else {
-                track.title.clone()
-            };
+            let is_selected = !left_focused && i == selected;
+            let is_playing = view.is_playing_track(&track.track_id);
             Row::new(vec![
-                Cell::from(track_number(i, view.is_playing_track(&track.track_id))),
-                Cell::from(Span::styled(title_text, Theme::text())),
+                Cell::from(track_status(is_selected, is_playing, is_fav)),
+                Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
                     Style::default().fg(Theme::primary()),
@@ -327,7 +324,7 @@ fn draw_track_list(
 
     let title = s.album_tracks_title(&detail.title, detail.tracks.len());
     let widths = [
-        Constraint::Length(4),
+        Constraint::Length(3),
         Constraint::Percentage(50),
         Constraint::Percentage(30),
         Constraint::Length(6),
@@ -347,7 +344,7 @@ fn draw_track_list(
         } else {
             Theme::highlight()
         })
-        .highlight_symbol(if left_focused { "  " } else { "> " });
+        .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::AlbumDetail, selected);
     frame.render_stateful_widget(table, area, &mut table_state);

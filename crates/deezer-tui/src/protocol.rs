@@ -317,21 +317,21 @@ impl SearchCategory {
         use ratatui::prelude::Constraint;
         match self {
             Self::Album => [
-                Constraint::Length(4),
+                Constraint::Length(3),
                 Constraint::Percentage(40),
                 Constraint::Percentage(30),
                 Constraint::Length(0),
                 Constraint::Length(10),
             ],
             Self::Artist => [
-                Constraint::Length(4),
+                Constraint::Length(3),
                 Constraint::Percentage(45),
                 Constraint::Percentage(25),
                 Constraint::Length(0),
                 Constraint::Length(0),
             ],
             _ => [
-                Constraint::Length(4),
+                Constraint::Length(3),
                 Constraint::Percentage(35),
                 Constraint::Percentage(25),
                 Constraint::Percentage(25),

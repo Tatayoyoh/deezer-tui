@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::GenreDetailSubTab;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::track_number;
+use crate::ui::common::track_status;
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
@@ -94,14 +94,13 @@ fn draw_content(
                     .map(|(i, t)| {
                         let dur = t.duration_secs();
                         let is_fav = view.is_track_favorite(&t.track_id);
-                        let title_text = if is_fav {
-                            format!("{} ♥", t.title)
-                        } else {
-                            t.title.clone()
-                        };
                         Row::new(vec![
-                            Cell::from(track_number(i, view.is_playing_track(&t.track_id))),
-                            Cell::from(Span::styled(title_text, Theme::text())),
+                            Cell::from(track_status(
+                                i == selected,
+                                view.is_playing_track(&t.track_id),
+                                is_fav,
+                            )),
+                            Cell::from(Span::styled(t.title.clone(), Theme::text())),
                             Cell::from(Span::styled(t.artist.clone(), Theme::text())),
                             Cell::from(Span::styled(t.album.clone(), Theme::dim())),
                             Cell::from(Span::styled(
@@ -112,14 +111,14 @@ fn draw_content(
                     })
                     .collect();
                 let header = vec![
-                    Cell::from(Span::styled("#", Theme::dim())),
+                    Cell::from(Span::raw("")),
                     Cell::from(Span::styled(s.header_title, Theme::dim())),
                     Cell::from(Span::styled(s.header_artist, Theme::dim())),
                     Cell::from(Span::styled(s.header_album, Theme::dim())),
                     Cell::from(Span::styled(s.header_duration, Theme::dim())),
                 ];
                 let widths = vec![
-                    Constraint::Length(4),
+                    Constraint::Length(3),
                     Constraint::Percentage(35),
                     Constraint::Percentage(25),
                     Constraint::Percentage(25),
@@ -238,7 +237,11 @@ fn draw_content(
                 .title_style(Theme::title()),
         )
         .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .highlight_symbol(if sub_tab == GenreDetailSubTab::Tracks {
+            ""
+        } else {
+            "> "
+        });
 
     let mut state = view.table_state(RowsKind::GenreDetail, selected.min(count - 1));
     frame.render_stateful_widget(table, area, &mut state);

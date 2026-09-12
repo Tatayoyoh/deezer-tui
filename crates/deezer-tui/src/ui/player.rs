@@ -46,9 +46,8 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         } else {
             Span::styled("♡", Theme::dim())
         };
-        // Status icon (5) + Title + " - " (3) + Artist + " " (1)
-        let heart_x =
-            5 + track.title.chars().count() as u16 + 3 + track.artist.chars().count() as u16 + 1;
+        // Status icon (5) + Title (chars) + " " (1)
+        let heart_x = 5 + track.title.chars().count() as u16 + 1;
         (
             Line::from(vec![
                 status_icon,
@@ -58,10 +57,12 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                         .fg(Theme::text_color())
                         .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(" - ", Theme::dim()),
-                Span::styled(&track.artist, Style::default().fg(Theme::primary())),
                 Span::raw(" "),
                 heart_span,
+                Span::raw(" "),
+                Span::styled("L", Theme::shortcut_key()),
+                Span::styled(" - ", Theme::dim()),
+                Span::styled(&track.artist, Style::default().fg(Theme::primary())),
                 Span::styled(format!("  ({})", &track.album), Theme::dim()),
             ]),
             Line::from(Span::styled(
@@ -91,7 +92,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         let heart_start = track_chunks[0].x + x_off;
         if heart_start < track_chunks[0].right() {
             let click_x = heart_start.saturating_sub(1);
-            let click_w = 3.min(track_chunks[0].right().saturating_sub(click_x));
+            let click_w = 4.min(track_chunks[0].right().saturating_sub(click_x));
             let heart_rect = Rect {
                 x: click_x,
                 y: track_chunks[0].y,
@@ -163,20 +164,6 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
     };
-    let (like_icon, like_style) = if view
-        .current_track
-        .as_ref()
-        .is_some_and(|t| view.is_track_favorite(&t.track_id))
-    {
-        (
-            "♥",
-            Style::default()
-                .fg(Color::Rgb(255, 75, 100))
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        ("♡", Theme::dim())
-    };
 
     // Shortcut keys render as a white "chip" (no brackets, no padding); labels
     // have no bg.
@@ -195,9 +182,6 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled(format!(" {}  ", s.shuffle), shuffle_style),
         Span::styled("r", key),
         Span::styled(format!(" {}  ", repeat_label), repeat_style),
-        Span::styled("L", key),
-        Span::styled(format!(" {} ", s.like), Theme::dim()),
-        Span::styled(like_icon, like_style),
     ]);
 
     // Flow is special: the whole "f Flow" chip is white on a secondary bg,
