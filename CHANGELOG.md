@@ -11,6 +11,24 @@ All notable changes to this project will be documented in this file.
     * `L` / `f` shortcuts in Album, Playlist, Artist Top Tracks, and Genre track detail overlays
     * Heart indicator ` ♥` next to track titles across all lists and tables for liked tracks
     * Synchronized and cached favorite track IDs between daemon and client
+## [1.17.0] - 2026-08-28
+
+### Added
+- Terminal integration (PR #26):
+    * Panic hook restoring raw mode / alternate screen / cursor on crash
+    * Dynamic terminal window title with the playing track (rewritten only when it changes)
+    * `--status` with human-readable and `--json` output for tmux, Waybar, Polybar and scripts
+    * CLI playback flags: `--play`, `--pause`, `--stop`, `--volume`, `--volume-up/down`, `--seek`, `--seek-forward/backward`, `--shuffle`, `--repeat`, `--like`, `--dislike`
+    * Shell completions generator (`--completions bash|zsh|fish`), installed by `install.sh`
+
+### Fixed
+- `next`, `previous` and end-of-track auto-advance now play the downloaded copy of a track while offline, instead of refusing with "No internet connection" and falling silent (#27)
+- While offline, a queue holding tracks that were never downloaded is walked forward to the next available one instead of stopping on the first miss (#27)
+- A track fetch that fails on a connection lost mid-session falls back to the downloaded copy when there is one, instead of skipping the track (#27)
+- Typing `i` in the filter of a downloaded playlist no longer opens the info modal instead of inserting the character; `?` had the same leak (#28)
+
+### Security
+- Track and artist names from the API are stripped of control characters before being written to the terminal title (OSC escape) or printed by `--status`; a `BEL` in a track name could previously close the OSC string and let the remainder be interpreted as terminal escape sequences
 
 ## [1.16.0] - 2026-08-17
 

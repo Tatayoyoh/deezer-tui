@@ -4,13 +4,14 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
+use crossterm::cursor::Show;
 use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
     MouseEventKind,
 };
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
 };
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
@@ -38,6 +39,7 @@ use crate::protocol::{
     FavoritesCategory, GenreDetailSubTab, GenreItem, MoodEntry, NavOverlay, OfflineCategory,
     RadioItem, Screen, SearchCategory, ServerMessage,
 };
+use crate::terminal_text::sanitize;
 use crate::theme::{Theme, ThemeId};
 use crate::ui;
 use deezer_core::api::models::GenreDetail;
@@ -1520,6 +1522,23 @@ impl ViewState {
             .min(self.favorites_filtered.len().saturating_sub(1));
     }
 
+    /// Whether a text input currently has focus, so single-letter global
+    /// shortcuts (`i`, `?`) must not fire.
+    ///
+    /// Every filter flag has to be listed here: the guards used to spell the
+    /// list out at each call site and `offline_detail_filter_typing` was
+    /// missing from it, so typing `i` while filtering inside a downloaded
+    /// playlist opened the info modal (issue #28).
+    pub fn is_text_input_active(&self) -> bool {
+        self.input_mode == InputMode::Typing
+            || self.radio_filter_typing
+            || self.genres_filter_typing
+            || self.favorites_filter_typing
+            || self.offline_filter_typing
+            || self.offline_detail_filter_typing
+            || self.playlist_detail_filter_typing
+    }
+
     /// Whether the favorites filter is active (has content or is being typed).
     pub fn favorites_filter_active(&self) -> bool {
         self.favorites_filter_typing || !self.favorites_filter_input.is_empty()
@@ -1768,6 +1787,19 @@ pub struct Client {
     image_cache: HashMap<String, image::DynamicImage>,
     /// Cell and time of the last left click, for double-click detection.
     last_click: Option<(u16, u16, Instant)>,
+    /// Last string written to the terminal title, to avoid rewriting it on
+    /// every snapshot (the daemon ticks 4x per second).
+    last_terminal_title: String,
+}
+
+/// Helper to restore standard terminal mode safely.
+pub fn restore_terminal() {
+    let mut stdout = io::stdout();
+    let _ = stdout.execute(DisableMouseCapture);
+    let _ = disable_raw_mode();
+    let _ = stdout.execute(LeaveAlternateScreen);
+    let _ = stdout.execute(Show);
+    let _ = stdout.execute(SetTitle(""));
 }
 
 impl Client {
@@ -1809,6 +1841,7 @@ impl Client {
             image_rx,
             image_cache: HashMap::new(),
             last_click: None,
+            last_terminal_title: String::new(),
         })
     }
 
@@ -1904,6 +1937,33 @@ impl Client {
         });
     }
 
+    /// Update the terminal emulator window/tab title with current playback info.
+    ///
+    /// Track metadata comes from the Deezer API and is written inside an OSC
+    /// escape (`ESC ] 0 ; … BEL`), so it must be stripped of control characters
+    /// first — a raw BEL would end the OSC string and let the rest of the name
+    /// be parsed by the terminal as escape sequences.
+    fn update_terminal_title(&mut self) {
+        let title = match (&self.view.status, &self.view.current_track) {
+            (PlaybackStatus::Playing, Some(track)) => format!(
+                "deezer-tui: ▶ {} — {}",
+                sanitize(&track.title),
+                sanitize(&track.artist)
+            ),
+            (PlaybackStatus::Paused, Some(track)) => format!(
+                "deezer-tui: ⏸ {} — {}",
+                sanitize(&track.title),
+                sanitize(&track.artist)
+            ),
+            _ => "deezer-tui".to_string(),
+        };
+        if title == self.last_terminal_title {
+            return;
+        }
+        let _ = io::stdout().execute(SetTitle(&title));
+        self.last_terminal_title = title;
+    }
+
     async fn send_cmd(&mut self, cmd: &Command) -> std::io::Result<()> {
         use tokio::io::AsyncWriteExt;
         let mut json = serde_json::to_string(cmd)
@@ -1914,6 +1974,13 @@ impl Client {
     }
 
     pub async fn run(&mut self, show_updated: bool) -> Result<()> {
+        // Setup panic hook to ensure terminal is restored cleanly if a crash occurs
+        let default_panic = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            restore_terminal();
+            default_panic(info);
+        }));
+
         // Load saved theme and opacity from config
         let config = Config::load();
         if let Some(ref theme_str) = config.theme {
@@ -1930,6 +1997,7 @@ impl Client {
         let backend = CrosstermBackend::new(io::stdout());
         let mut terminal = Terminal::new(backend)?;
         terminal.clear()?;
+        self.update_terminal_title();
 
         // Spawn update check in background (non-blocking)
         let (update_tx, mut update_rx) = mpsc::unbounded_channel::<(String, String)>();
@@ -1948,6 +2016,7 @@ impl Client {
         match tokio::time::timeout(Duration::from_secs(3), self.server_rx.recv()).await {
             Ok(Some(Ok(ServerMessage::Snapshot(snap)))) => {
                 self.view.update_from_snapshot(snap);
+                self.update_terminal_title();
             }
             _ => {
                 // Timeout, disconnect, or error — proceed with default state
@@ -2036,9 +2105,7 @@ impl Client {
                     }
                     KeyAction::WebLogin => {
                         // Suspend TUI
-                        io::stdout().execute(DisableMouseCapture)?;
-                        disable_raw_mode()?;
-                        io::stdout().execute(LeaveAlternateScreen)?;
+                        restore_terminal();
                         drop(terminal);
 
                         // Run browser login (blocking)
@@ -2050,6 +2117,7 @@ impl Client {
                         io::stdout().execute(EnableMouseCapture)?;
                         terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
                         terminal.clear()?;
+                        self.update_terminal_title();
 
                         if let Ok(Some(arl)) = result {
                             self.view.login_loading = true;
@@ -2070,9 +2138,7 @@ impl Client {
                         })?;
 
                         // Suspend TUI so sudo can prompt for password if needed
-                        io::stdout().execute(DisableMouseCapture)?;
-                        disable_raw_mode()?;
-                        io::stdout().execute(LeaveAlternateScreen)?;
+                        restore_terminal();
                         drop(terminal);
 
                         let update_result = perform_update(&download_url).await;
@@ -2083,13 +2149,12 @@ impl Client {
                         io::stdout().execute(EnableMouseCapture)?;
                         terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
                         terminal.clear()?;
+                        self.update_terminal_title();
 
                         match update_result {
                             Ok(binary_path) => {
                                 // Restore terminal before exec
-                                io::stdout().execute(DisableMouseCapture)?;
-                                disable_raw_mode()?;
-                                io::stdout().execute(LeaveAlternateScreen)?;
+                                restore_terminal();
 
                                 // Shut down the daemon and wait for it to actually exit
                                 let _ = self.send_cmd(&Command::Shutdown).await;
@@ -2152,6 +2217,7 @@ impl Client {
             match self.server_rx.try_recv() {
                 Ok(Ok(ServerMessage::Snapshot(snap))) => {
                     self.view.update_from_snapshot(snap);
+                    self.update_terminal_title();
                     self.maybe_fetch_cover_image();
                 }
                 Ok(Ok(ServerMessage::Error(err))) => {
@@ -2198,9 +2264,7 @@ impl Client {
         }
 
         // Restore terminal
-        io::stdout().execute(DisableMouseCapture)?;
-        disable_raw_mode()?;
-        io::stdout().execute(LeaveAlternateScreen)?;
+        restore_terminal();
 
         if send_shutdown {
             let _ = self.send_cmd(&Command::Shutdown).await;
@@ -2240,12 +2304,7 @@ impl Client {
         // ? : toggle help overlay (not during text input)
         if key.code == KeyCode::Char('?')
             && self.view.screen == Screen::Main
-            && self.view.input_mode != InputMode::Typing
-            && !self.view.radio_filter_typing
-            && !self.view.genres_filter_typing
-            && !self.view.favorites_filter_typing
-            && !self.view.offline_filter_typing
-            && !self.view.playlist_detail_filter_typing
+            && !self.view.is_text_input_active()
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Help { .. })) {
@@ -2259,12 +2318,7 @@ impl Client {
         // i : toggle info modal (not during text input)
         if key.code == KeyCode::Char('i')
             && self.view.screen == Screen::Main
-            && self.view.input_mode != InputMode::Typing
-            && !self.view.radio_filter_typing
-            && !self.view.genres_filter_typing
-            && !self.view.favorites_filter_typing
-            && !self.view.offline_filter_typing
-            && !self.view.playlist_detail_filter_typing
+            && !self.view.is_text_input_active()
             && !popup_typing
         {
             if matches!(self.view.overlay, Some(Overlay::Info)) {
@@ -5433,6 +5487,33 @@ mod tests {
         let rects = tab_rects(area, &["Aa", "Bbb", "C"]);
         assert_eq!(rects.len(), 2);
         assert_eq!((rects[1].x, rects[1].width), (5, 1));
+    }
+
+    #[test]
+    fn every_filter_input_suppresses_single_letter_shortcuts() {
+        // `i` and `?` are handled before the per-screen dispatch, so every
+        // filter flag must be reported here — the offline playlist filter was
+        // missing and swallowed `i` into the info modal (issue #28).
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.is_text_input_active());
+
+        let flags: [fn(&mut ViewState, bool); 6] = [
+            |v, b| v.radio_filter_typing = b,
+            |v, b| v.genres_filter_typing = b,
+            |v, b| v.favorites_filter_typing = b,
+            |v, b| v.offline_filter_typing = b,
+            |v, b| v.offline_detail_filter_typing = b,
+            |v, b| v.playlist_detail_filter_typing = b,
+        ];
+        for set in flags {
+            set(&mut view, true);
+            assert!(view.is_text_input_active());
+            set(&mut view, false);
+            assert!(!view.is_text_input_active());
+        }
+
+        view.input_mode = InputMode::Typing;
+        assert!(view.is_text_input_active());
     }
 
     #[test]

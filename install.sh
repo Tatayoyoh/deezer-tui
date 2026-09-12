@@ -90,6 +90,48 @@ add_to_path() {
     echo "  Run: source ${RC_FILE}"
 }
 
+# Install shell completions
+# Generates to a temp file first so a failed run never leaves an empty
+# completion file behind (a plain `> file` redirect truncates before exec).
+gen_completions() {
+    _shell="$1"
+    _dest="$2"
+    _tmp="$(mktemp)"
+    if "${INSTALL_DIR}/${BINARY_NAME}" --completions "${_shell}" > "${_tmp}" 2>/dev/null \
+        && [ -s "${_tmp}" ]; then
+        mkdir -p "$(dirname "${_dest}")"
+        mv "${_tmp}" "${_dest}"
+        echo "  Installed ${_shell} completions to ${_dest}"
+        return 0
+    fi
+    rm -f "${_tmp}"
+    return 1
+}
+
+install_completions() {
+    SHELL_NAME="$(basename "${SHELL:-/bin/sh}")"
+    case "${SHELL_NAME}" in
+        bash)
+            gen_completions bash "${HOME}/.local/share/bash-completion/completions/${BINARY_NAME}"
+            ;;
+        zsh)
+            # site-functions is on the default fpath on most zsh setups;
+            # ~/.zsh/completion is not, and would be silently ignored.
+            COMP_DIR="${HOME}/.local/share/zsh/site-functions"
+            if gen_completions zsh "${COMP_DIR}/_${BINARY_NAME}"; then
+                case ":${FPATH}:" in
+                    *":${COMP_DIR}:"*) ;;
+                    *) echo "  Add to ~/.zshrc if completions do not show up:"
+                       echo "    fpath=(${COMP_DIR} \$fpath) && autoload -U compinit && compinit" ;;
+                esac
+            fi
+            ;;
+        fish)
+            gen_completions fish "${HOME}/.config/fish/completions/${BINARY_NAME}.fish"
+            ;;
+    esac
+}
+
 echo ""
 echo "Installed ${BINARY_NAME} to ${INSTALL_DIR}/${BINARY_NAME}"
 
@@ -98,5 +140,8 @@ case ":${PATH}:" in
     *":${INSTALL_DIR}:"*) ;;
     *) add_to_path ;;
 esac
+
+# Install shell completions
+install_completions
 
 echo "Run 'deezer-tui' to start!"
