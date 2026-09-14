@@ -146,6 +146,8 @@ pub struct Strings {
     pub delete_playlist: &'static str,
     pub confirm_delete_playlist_title: &'static str,
     pub confirm_delete_playlist_body_fmt: &'static str,
+    pub confirm_remove_favorite_title: &'static str,
+    pub confirm_remove_favorite_body_fmt: &'static str,
     pub yes: &'static str,
     pub no: &'static str,
 
@@ -174,6 +176,7 @@ pub struct Strings {
     pub help_waiting_list: &'static str,
     pub help_context_menu: &'static str,
     pub help_playing_menu: &'static str,
+    pub help_like_track: &'static str,
     pub help_start_flow: &'static str,
     pub help_shuffle_favorites: &'static str,
     pub help_this_help: &'static str,
@@ -188,6 +191,7 @@ pub struct Strings {
     pub settings_themes: &'static str,
     pub settings_quality: &'static str,
     pub settings_language: &'static str,
+    pub settings_vim_keys: &'static str,
     pub settings_logout: &'static str,
     pub settings_background: &'static str,
     pub settings_quit: &'static str,
@@ -537,6 +541,14 @@ impl Strings {
             .replace("{n}", &nb_songs.to_string())
     }
 
+    /// Confirmation prompt body with track title + artist.
+    /// Format string supports `{title}` and `{artist}` placeholders.
+    pub fn confirm_remove_favorite_body(&self, title: &str, artist: &str) -> String {
+        self.confirm_remove_favorite_body_fmt
+            .replace("{title}", title)
+            .replace("{artist}", artist)
+    }
+
     /// Format playlist item "name (N tracks)"
     pub fn playlist_item(&self, name: &str, count: u64) -> String {
         format!("{} ({} {})", name, count, self.header_tracks)
@@ -729,6 +741,8 @@ static EN: Strings = Strings {
     delete_playlist: "Delete playlist",
     confirm_delete_playlist_title: " Delete playlist ",
     confirm_delete_playlist_body_fmt: "Delete playlist \"{title}\" ({n} tracks)?",
+    confirm_remove_favorite_title: " Remove from favorites ",
+    confirm_remove_favorite_body_fmt: "Remove \"{title}\" by {artist} from favorites?",
     yes: "Yes",
     no: "No",
 
@@ -756,6 +770,7 @@ static EN: Strings = Strings {
     help_waiting_list: "Waiting list (queue)",
     help_context_menu: "Track context menu",
     help_playing_menu: "Playing track menu",
+    help_like_track: "Like / favorite track",
     help_start_flow: "Start Deezer Flow",
     help_shuffle_favorites: "Shuffle favorites",
     help_this_help: "This help",
@@ -769,6 +784,7 @@ static EN: Strings = Strings {
     settings_themes: "Themes",
     settings_quality: "Audio quality",
     settings_language: "Language",
+    settings_vim_keys: "Vim navigation (HJKL)",
     settings_logout: "Logout",
     settings_background: "Send to background",
     settings_quit: "Quit",
@@ -1046,6 +1062,8 @@ static FR: Strings = Strings {
     delete_playlist: "Supprimer la playlist",
     confirm_delete_playlist_title: " Supprimer la playlist ",
     confirm_delete_playlist_body_fmt: "Supprimer la playlist \"{title}\" ({n} titres) ?",
+    confirm_remove_favorite_title: " Supprimer des favoris ",
+    confirm_remove_favorite_body_fmt: "Supprimer « {title} » de {artist} des favoris ?",
     yes: "Oui",
     no: "Non",
 
@@ -1073,6 +1091,7 @@ static FR: Strings = Strings {
     help_waiting_list: "File d'attente",
     help_context_menu: "Menu contextuel",
     help_playing_menu: "Menu titre en cours",
+    help_like_track: "Ajouter/retirer des favoris",
     help_start_flow: "Lancer Deezer Flow",
     help_shuffle_favorites: "Lecture aléatoire favoris",
     help_this_help: "Cette aide",
@@ -1086,6 +1105,7 @@ static FR: Strings = Strings {
     settings_themes: "Thèmes",
     settings_quality: "Qualité audio",
     settings_language: "Langue",
+    settings_vim_keys: "Navigation Vim (HJKL)",
     settings_logout: "Déconnexion",
     settings_background: "Mettre en arrière-plan",
     settings_quit: "Quitter",
@@ -1362,6 +1382,8 @@ static ES: Strings = Strings {
     delete_playlist: "Eliminar playlist",
     confirm_delete_playlist_title: " Eliminar playlist ",
     confirm_delete_playlist_body_fmt: "¿Eliminar la playlist \"{title}\" ({n} pistas)?",
+    confirm_remove_favorite_title: " Eliminar de favoritos ",
+    confirm_remove_favorite_body_fmt: "¿Eliminar « {title} » de {artist} de favoritos?",
     yes: "Sí",
     no: "No",
 
@@ -1389,6 +1411,7 @@ static ES: Strings = Strings {
     help_waiting_list: "Cola de reproducción",
     help_context_menu: "Menú contextual",
     help_playing_menu: "Menú canción actual",
+    help_like_track: "Añadir/quitar de favoritos",
     help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatorios",
     help_this_help: "Esta ayuda",
@@ -1402,6 +1425,7 @@ static ES: Strings = Strings {
     settings_themes: "Temas",
     settings_quality: "Calidad de audio",
     settings_language: "Idioma",
+    settings_vim_keys: "Navegación Vim (HJKL)",
     settings_logout: "Cerrar sesión",
     settings_background: "Enviar al fondo",
     settings_quit: "Salir",
@@ -1678,6 +1702,8 @@ static PT: Strings = Strings {
     delete_playlist: "Excluir playlist",
     confirm_delete_playlist_title: " Excluir playlist ",
     confirm_delete_playlist_body_fmt: "Excluir a playlist \"{title}\" ({n} faixas)?",
+    confirm_remove_favorite_title: " Remover dos favoritos ",
+    confirm_remove_favorite_body_fmt: "Remover \"{title}\" de {artist} dos favoritos?",
     yes: "Sim",
     no: "Não",
 
@@ -1705,6 +1731,7 @@ static PT: Strings = Strings {
     help_waiting_list: "Fila de reprodução",
     help_context_menu: "Menu de contexto",
     help_playing_menu: "Menu da música atual",
+    help_like_track: "Adicionar/remover dos favoritos",
     help_start_flow: "Iniciar Deezer Flow",
     help_shuffle_favorites: "Favoritos aleatórios",
     help_this_help: "Esta ajuda",
@@ -1718,6 +1745,7 @@ static PT: Strings = Strings {
     settings_themes: "Temas",
     settings_quality: "Qualidade de áudio",
     settings_language: "Idioma",
+    settings_vim_keys: "Navegação Vim (HJKL)",
     settings_logout: "Sair",
     settings_background: "Enviar para segundo plano",
     settings_quit: "Sair do aplicativo",
@@ -1994,6 +2022,8 @@ static DE: Strings = Strings {
     delete_playlist: "Playlist löschen",
     confirm_delete_playlist_title: " Playlist löschen ",
     confirm_delete_playlist_body_fmt: "Playlist \"{title}\" ({n} Titel) löschen?",
+    confirm_remove_favorite_title: " Aus Favoriten entfernen ",
+    confirm_remove_favorite_body_fmt: "\"{title}\" von {artist} aus Favoriten entfernen?",
     yes: "Ja",
     no: "Nein",
 
@@ -2021,6 +2051,7 @@ static DE: Strings = Strings {
     help_waiting_list: "Warteschlange",
     help_context_menu: "Kontextmenü",
     help_playing_menu: "Menü laufender Titel",
+    help_like_track: "Zu Favoriten hinzufügen/entfernen",
     help_start_flow: "Deezer Flow starten",
     help_shuffle_favorites: "Favoriten zufällig",
     help_this_help: "Diese Hilfe",
@@ -2034,6 +2065,7 @@ static DE: Strings = Strings {
     settings_themes: "Themen",
     settings_quality: "Audioqualität",
     settings_language: "Sprache",
+    settings_vim_keys: "Vim-Navigation (HJKL)",
     settings_logout: "Abmelden",
     settings_background: "In den Hintergrund senden",
     settings_quit: "Beenden",

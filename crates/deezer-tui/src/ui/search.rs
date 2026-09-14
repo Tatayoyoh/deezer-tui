@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::SearchCategory;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::track_number;
+use crate::ui::common::track_status;
 
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     let has_results = !view.search_display.is_empty() || view.search_loading;
@@ -108,7 +108,7 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
 
     let headers = s.search_category_headers(view.search_category);
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(headers[0], Theme::dim())),
         Cell::from(Span::styled(headers[1], Theme::dim())),
         Cell::from(Span::styled(headers[2], Theme::dim())),
@@ -125,8 +125,12 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
                 .track
                 .as_ref()
                 .is_some_and(|t| view.is_playing_track(&t.track_id));
+            let is_fav = item
+                .track
+                .as_ref()
+                .is_some_and(|t| view.is_track_favorite(&t.track_id));
             Row::new(vec![
-                Cell::from(track_number(i, is_playing)),
+                Cell::from(track_status(i == view.search_selected, is_playing, is_fav)),
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,
@@ -149,7 +153,7 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
                 .title_style(Theme::title()),
         )
         .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::Tab, view.search_selected);
     frame.render_stateful_widget(table, area, &mut table_state);
