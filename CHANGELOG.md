@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.18.0] - 2026-09-14
 
 ### Added
 - Like/favorite track mechanism similar to Deezer web interface:
