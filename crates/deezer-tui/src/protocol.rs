@@ -311,34 +311,6 @@ impl SearchCategory {
             Self::Profile => "USER",
         }
     }
-
-    /// Column width constraints for this category's table.
-    pub fn column_widths(&self) -> [ratatui::prelude::Constraint; 5] {
-        use ratatui::prelude::Constraint;
-        match self {
-            Self::Album => [
-                Constraint::Length(3),
-                Constraint::Percentage(40),
-                Constraint::Percentage(30),
-                Constraint::Length(0),
-                Constraint::Length(10),
-            ],
-            Self::Artist => [
-                Constraint::Length(3),
-                Constraint::Percentage(45),
-                Constraint::Percentage(25),
-                Constraint::Length(0),
-                Constraint::Length(0),
-            ],
-            _ => [
-                Constraint::Length(3),
-                Constraint::Percentage(35),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Length(6),
-            ],
-        }
-    }
 }
 
 /// Favorites category filter.

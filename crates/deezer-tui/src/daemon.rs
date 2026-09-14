@@ -2366,6 +2366,9 @@ impl Daemon {
             // Lock the client only for the short API calls (token + stream URL),
             // then release it before the potentially long CDN download.
             info!(gen = generation, track_id = %track.track_id, "fetch_task: waiting for client lock");
+            // Kept so a FALLBACK substitution below stays invisible to the UI:
+            // the played track keeps the id and credits the user picked.
+            let requested = track.clone();
             let (track, url, actual_quality) = {
                 let lock_wait = Instant::now();
                 let client = client.lock().await;
@@ -2488,7 +2491,7 @@ impl Daemon {
                     );
                     let _ = tx.send(AsyncResult::TrackReady {
                         audio_data,
-                        track,
+                        track: track.with_identity_of(&requested),
                         quality: actual_quality,
                         generation,
                     });

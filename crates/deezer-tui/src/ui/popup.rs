@@ -7,7 +7,7 @@ use ratatui::widgets::{
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
-use crate::ui::common::{shortcut_hint, shortcut_line, track_status};
+use crate::ui::common::{shortcut_hint, shortcut_line, track_status, STATUS_WIDTH};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
@@ -851,7 +851,11 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
 /// Draw the settings overlay with selectable entries.
 fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
     let s = t();
-    let vim_status = if view.vim_keys { "ON [ ●]" } else { "OFF [● ]" };
+    let vim_status = if view.vim_keys {
+        "ON [ ●]"
+    } else {
+        "OFF [● ]"
+    };
     let entries: &[(&str, &str)] = &[
         (s.settings_shortcuts, "?"),
         (s.settings_themes, ""),
@@ -1289,7 +1293,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
                 .is_some_and(|ct| ct.track_id == track.track_id);
 
             Row::new(vec![
-                Cell::from(track_status(is_selected, is_current, is_fav)),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -1305,7 +1309,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .collect();
 
     let widths = [
-        Constraint::Length(3),
+        Constraint::Length(STATUS_WIDTH),
         Constraint::Percentage(35),
         Constraint::Percentage(25),
         Constraint::Percentage(25),
@@ -1429,7 +1433,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
             let is_fav = view.is_track_favorite(&track.track_id);
 
             Row::new(vec![
-                Cell::from(track_status(is_selected, is_current, is_fav)),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -1445,7 +1449,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         .collect();
 
     let widths = [
-        Constraint::Length(3),
+        Constraint::Length(STATUS_WIDTH),
         Constraint::Percentage(35),
         Constraint::Percentage(25),
         Constraint::Percentage(25),
@@ -1574,7 +1578,7 @@ fn draw_offline_detail(
                 .is_some_and(|ct| ct.track_id == track.track_id);
             let is_fav = view.is_track_favorite(&track.track_id);
             Row::new(vec![
-                Cell::from(track_status(is_selected, is_current, is_fav)),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -1591,7 +1595,7 @@ fn draw_offline_detail(
     let table = Table::new(
         rows,
         [
-            Constraint::Length(3),
+            Constraint::Length(STATUS_WIDTH),
             Constraint::Percentage(45),
             Constraint::Percentage(35),
             Constraint::Length(6),

@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::FavoritesCategory;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::{shortcut_line, track_status};
+use crate::ui::common::{shortcut_line, track_status, STATUS_WIDTH};
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -158,7 +158,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .is_some_and(|t| view.is_playing_track(&t.track_id));
             // In "My favorites", hearts are not shown (Point 5)
             Row::new(vec![
-                Cell::from(track_status(i == selected, is_playing, false)),
+                Cell::from(track_status(i == selected, is_playing, false, view.status)),
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,
@@ -174,7 +174,7 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(3),
+            Constraint::Length(STATUS_WIDTH),
             Constraint::Percentage(35),
             Constraint::Percentage(25),
             Constraint::Percentage(25),

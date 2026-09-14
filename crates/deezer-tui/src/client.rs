@@ -1937,24 +1937,31 @@ impl Client {
         });
     }
 
-    /// Update the terminal emulator window/tab title with current playback info.
+    /// Build the window/tab title for a track: `deezer-tui: ▶ ♥ Title — Artist`.
+    /// The heart is only present when the track is one of the user's favorites.
     ///
     /// Track metadata comes from the Deezer API and is written inside an OSC
     /// escape (`ESC ] 0 ; … BEL`), so it must be stripped of control characters
     /// first — a raw BEL would end the OSC string and let the rest of the name
     /// be parsed by the terminal as escape sequences.
+    fn terminal_title(status_icon: &str, track: &TrackData, is_favorite: bool) -> String {
+        let heart = if is_favorite { "♥ " } else { "" };
+        format!(
+            "deezer-tui: {status_icon} {heart}{} — {}",
+            sanitize(&track.title),
+            sanitize(&track.artist)
+        )
+    }
+
+    /// Update the terminal emulator window/tab title with current playback info.
     fn update_terminal_title(&mut self) {
         let title = match (&self.view.status, &self.view.current_track) {
-            (PlaybackStatus::Playing, Some(track)) => format!(
-                "deezer-tui: ▶ {} — {}",
-                sanitize(&track.title),
-                sanitize(&track.artist)
-            ),
-            (PlaybackStatus::Paused, Some(track)) => format!(
-                "deezer-tui: ⏸ {} — {}",
-                sanitize(&track.title),
-                sanitize(&track.artist)
-            ),
+            (PlaybackStatus::Playing, Some(track)) => {
+                Self::terminal_title("▶", track, self.view.is_track_favorite(&track.track_id))
+            }
+            (PlaybackStatus::Paused, Some(track)) => {
+                Self::terminal_title("⏸", track, self.view.is_track_favorite(&track.track_id))
+            }
             _ => "deezer-tui".to_string(),
         };
         if title == self.last_terminal_title {
@@ -5440,6 +5447,36 @@ mod tests {
             len,
             kind: RowsKind::Tab,
         }
+    }
+
+    fn title_track(title: &str, artist: &str) -> TrackData {
+        serde_json::from_value(serde_json::json!({
+            "SNG_ID": "42",
+            "SNG_TITLE": title,
+            "ART_NAME": artist,
+        }))
+        .expect("track fixture")
+    }
+
+    #[test]
+    fn terminal_title_marks_favorites_with_a_heart() {
+        let track = title_track("Song", "Artist");
+        assert_eq!(
+            Client::terminal_title("▶", &track, true),
+            "deezer-tui: ▶ ♥ Song — Artist"
+        );
+        assert_eq!(
+            Client::terminal_title("⏸", &track, false),
+            "deezer-tui: ⏸ Song — Artist"
+        );
+    }
+
+    /// A raw BEL in the metadata would terminate the OSC title string early.
+    #[test]
+    fn terminal_title_strips_control_characters() {
+        let track = title_track("So\x07ng", "Art\nist");
+        let title = Client::terminal_title("▶", &track, true);
+        assert!(!title.contains('\x07') && !title.contains('\n'), "{title}");
     }
 
     #[test]

@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::GenreDetailSubTab;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::track_status;
+use crate::ui::common::{track_status, STATUS_WIDTH};
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let s = t();
@@ -99,6 +99,7 @@ fn draw_content(
                                 i == selected,
                                 view.is_playing_track(&t.track_id),
                                 is_fav,
+                                view.status,
                             )),
                             Cell::from(Span::styled(t.title.clone(), Theme::text())),
                             Cell::from(Span::styled(t.artist.clone(), Theme::text())),
@@ -118,7 +119,7 @@ fn draw_content(
                     Cell::from(Span::styled(s.header_duration, Theme::dim())),
                 ];
                 let widths = vec![
-                    Constraint::Length(3),
+                    Constraint::Length(STATUS_WIDTH),
                     Constraint::Percentage(35),
                     Constraint::Percentage(25),
                     Constraint::Percentage(25),

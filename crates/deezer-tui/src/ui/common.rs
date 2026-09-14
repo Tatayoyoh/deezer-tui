@@ -2,8 +2,12 @@ use ratatui::prelude::*;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+use std::sync::LazyLock;
+use std::time::Instant;
+
 use crate::client::{ClickTarget, ViewState};
 use crate::theme::Theme;
+use deezer_core::player::state::PlaybackStatus;
 
 /// Blank columns drawn between two category labels.
 const CATEGORY_GAP: u16 = 2;
@@ -94,22 +98,61 @@ pub fn tab_rects(area: Rect, titles: &[&str]) -> Vec<Rect> {
     rects
 }
 
-/// Marker placed in front of the row number of the track being played.
-/// A filled bullet, deliberately unlike the `>` selection cursor — the two used
-/// to be `▶` and `>`, which read as the same arrow at a glance.
-const PLAYING_MARKER: &str = "●";
+/// Marker for the loaded-but-not-running track. Deliberately unlike the `>`
+/// selection cursor — the two used to be `▶` and `>`, which read as the same
+/// arrow at a glance.
+const PAUSED_MARKER: &str = "⏸";
 
+/// Frames of the playing-row marker: two audio bars pulsing on a beat. A
+/// braille cell is 2 columns of 4 dots, so one character holds both bars —
+/// each frame is a left height plus a right height, filled from the bottom
+/// (dots 7,3,2,1 on the left, 8,6,5,4 on the right).
+///
+/// Heights, two beats per loop: `11 32 44 34 23 12 | 11 23 44 43 32 21`.
+const PULSE: [&str; 12] = ["⣀", "⣦", "⣿", "⣾", "⣴", "⣠", "⣀", "⣴", "⣿", "⣷", "⣦", "⣄"];
+
+/// 12 frames of two beats: 100 ms reads as a beat rather than a flicker.
+const PULSE_INTERVAL_MS: u128 = 100;
+
+/// Width of the status column: selection cursor + playback marker + heart.
+pub const STATUS_WIDTH: u16 = 3;
+
+/// Wall-clock origin of the animation, so every row pulses in phase regardless
+/// of when it was first drawn.
+static PULSE_ORIGIN: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+/// Marker for the current track: pulsing while it plays, a static pause glyph
+/// otherwise — a stopped animation would read as a frozen UI.
+fn current_track_marker(status: PlaybackStatus) -> &'static str {
+    if status == PlaybackStatus::Playing {
+        let step = PULSE_ORIGIN.elapsed().as_millis() / PULSE_INTERVAL_MS;
+        PULSE[(step % PULSE.len() as u128) as usize]
+    } else {
+        PAUSED_MARKER
+    }
+}
 
 /// Status column of a track row:
 /// - 1st character: `>` if selected, else ` `
-/// - 2nd character: `●` if playing, else ` `
+/// - 2nd character: pulse (playing) / `⏸` (paused) for the current track, else ` `
 /// - 3rd character: `♥` if favorite, else ` `
-pub fn track_status(is_selected: bool, is_playing: bool, is_favorite: bool) -> Line<'static> {
+pub fn track_status(
+    is_selected: bool,
+    is_playing: bool,
+    is_favorite: bool,
+    status: PlaybackStatus,
+) -> Line<'static> {
     let cursor = if is_selected { ">" } else { " " };
-    let bullet = if is_playing { PLAYING_MARKER } else { " " };
+    let bullet = if is_playing {
+        current_track_marker(status)
+    } else {
+        " "
+    };
     let heart = if is_favorite { "♥" } else { " " };
     Line::from(vec![
-        Span::styled(cursor, Theme::highlight()),
+        // Bold only: no explicit colors, so the cell inherits the row style and
+        // does not paint a colored background down the left edge of the table.
+        Span::styled(cursor, Style::default().add_modifier(Modifier::BOLD)),
         Span::styled(
             bullet,
             if is_playing {
@@ -270,23 +313,112 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
 mod tests {
     use super::*;
 
+    fn cells(line: &Line<'static>) -> String {
+        line.spans.iter().map(|sp| sp.content.as_ref()).collect()
+    }
 
+    /// Paused swaps the pulse for a static marker.
     #[test]
     fn track_status_displays_expected_characters() {
-        let line = track_status(true, true, true);
-        let s: String = line.spans.iter().map(|sp| sp.content.as_ref()).collect();
-        assert_eq!(s, ">●♥");
+        let paused = PlaybackStatus::Paused;
+        assert_eq!(
+            cells(&track_status(true, true, true, paused)),
+            format!(">{PAUSED_MARKER}♥")
+        );
+        assert_eq!(cells(&track_status(false, false, false, paused)), "   ");
+        assert_eq!(cells(&track_status(true, false, true, paused)), "> ♥");
+        assert_eq!(
+            cells(&track_status(false, true, false, paused)),
+            format!(" {PAUSED_MARKER} ")
+        );
+    }
 
-        let line2 = track_status(false, false, false);
-        let s2: String = line2.spans.iter().map(|sp| sp.content.as_ref()).collect();
-        assert_eq!(s2, "   ");
+    /// A frame wider than one cell would make the column jitter mid-animation.
+    #[test]
+    fn every_marker_is_one_cell_wide() {
+        for frame in PULSE {
+            assert_eq!(frame.chars().count(), 1, "{frame:?}");
+        }
+        assert_eq!(PAUSED_MARKER.chars().count(), 1);
+    }
 
-        let line3 = track_status(true, false, true);
-        let s3: String = line3.spans.iter().map(|sp| sp.content.as_ref()).collect();
-        assert_eq!(s3, "> ♥");
+    /// The cursor, marker and heart must fill exactly the declared column.
+    #[test]
+    fn status_column_matches_its_declared_width() {
+        for status in [PlaybackStatus::Playing, PlaybackStatus::Paused] {
+            for is_current in [true, false] {
+                let line = track_status(true, is_current, true, status);
+                assert_eq!(cells(&line).chars().count(), STATUS_WIDTH as usize);
+            }
+        }
+    }
 
-        let line4 = track_status(false, true, false);
-        let s4: String = line4.spans.iter().map(|sp| sp.content.as_ref()).collect();
-        assert_eq!(s4, " ● ");
+    /// Playing swaps the static marker for a pulse frame.
+    #[test]
+    fn track_status_pulses_while_playing() {
+        let line = track_status(false, true, false, PlaybackStatus::Playing);
+        let s = cells(&line);
+        assert_eq!(s.chars().count(), STATUS_WIDTH as usize);
+        let marker = s.chars().nth(1).unwrap().to_string();
+        assert!(PULSE.contains(&marker.as_str()), "{s:?}");
+    }
+
+    /// Rows that are not the current track never show a marker, whatever the
+    /// player is doing.
+    #[test]
+    fn track_status_leaves_other_rows_blank_while_playing() {
+        assert_eq!(
+            cells(&track_status(false, false, false, PlaybackStatus::Playing)),
+            "   "
+        );
+    }
+
+    /// Decode a braille cell into its two bar heights, bottom-up.
+    fn bar_heights(frame: &str) -> (usize, usize) {
+        let bits = frame.chars().next().unwrap() as u32 - 0x2800;
+        let height = |dots: [u32; 4]| dots.iter().take_while(|d| bits & *d != 0).count();
+        // Left column: dots 7,3,2,1. Right column: dots 8,6,5,4.
+        (
+            height([0x40, 0x04, 0x02, 0x01]),
+            height([0x80, 0x20, 0x10, 0x08]),
+        )
+    }
+
+    /// Each bar must be filled from the bottom without gaps, or a mistyped
+    /// codepoint shows up as a dot floating mid-cell.
+    #[test]
+    fn pulse_frames_are_two_bottom_anchored_bars() {
+        let expected = [
+            (1, 1),
+            (3, 2),
+            (4, 4),
+            (3, 4),
+            (2, 3),
+            (1, 2),
+            (1, 1),
+            (2, 3),
+            (4, 4),
+            (4, 3),
+            (3, 2),
+            (2, 1),
+        ];
+        for (frame, want) in PULSE.iter().zip(expected) {
+            let bits = frame.chars().next().unwrap() as u32 - 0x2800;
+            let (left, right) = bar_heights(frame);
+            assert_eq!((left, right), want, "{frame:?}");
+            // No stray dots above the filled part of either column.
+            let filled = [0x40, 0x04, 0x02, 0x01][..left].iter().sum::<u32>()
+                + [0x80, 0x20, 0x10, 0x08][..right].iter().sum::<u32>();
+            assert_eq!(bits, filled, "{frame:?} has a floating dot");
+        }
+    }
+
+    /// Neighbouring duplicates would stall the animation mid-loop.
+    #[test]
+    fn pulse_never_repeats_a_frame_back_to_back() {
+        for pair in PULSE.windows(2) {
+            assert_ne!(pair[0], pair[1]);
+        }
+        assert_ne!(PULSE[PULSE.len() - 1], PULSE[0], "loop seam");
     }
 }

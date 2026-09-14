@@ -6,7 +6,7 @@ use crate::i18n::t;
 use crate::protocol::OfflineCategory;
 use crate::theme::Theme;
 use crate::ui::common;
-use crate::ui::common::{shortcut_hint, shortcut_line, track_status};
+use crate::ui::common::{shortcut_hint, shortcut_line, track_status, STATUS_WIDTH};
 
 pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
     let chunks = Layout::default()
@@ -123,7 +123,7 @@ fn draw_tracks_table(frame: &mut Frame, view: &ViewState, area: Rect) {
             let is_fav = view.is_track_favorite(&track.track_id);
 
             Row::new(vec![
-                Cell::from(track_status(is_selected, is_current, is_fav)),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -146,7 +146,7 @@ fn draw_tracks_table(frame: &mut Frame, view: &ViewState, area: Rect) {
     let table = Table::new(
         rows,
         [
-            Constraint::Length(3),
+            Constraint::Length(STATUS_WIDTH),
             Constraint::Percentage(35),
             Constraint::Percentage(25),
             Constraint::Percentage(25),

@@ -10,7 +10,7 @@ use deezer_core::api::models::AlbumDetail;
 use crate::client::{ClickTarget, RowsKind, ViewState};
 use crate::i18n::t;
 use crate::theme::Theme;
-use crate::ui::common::{shortcut_hint, track_status};
+use crate::ui::common::{shortcut_hint, track_status, STATUS_WIDTH};
 
 /// Draw the album detail overlay (replaces the content area).
 pub fn draw(frame: &mut Frame, view: &mut ViewState, area: Rect, as_background: bool) {
@@ -308,7 +308,7 @@ fn draw_track_list(
             let is_selected = !left_focused && i == selected;
             let is_playing = view.is_playing_track(&track.track_id);
             Row::new(vec![
-                Cell::from(track_status(is_selected, is_playing, is_fav)),
+                Cell::from(track_status(is_selected, is_playing, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -324,7 +324,7 @@ fn draw_track_list(
 
     let title = s.album_tracks_title(&detail.title, detail.tracks.len());
     let widths = [
-        Constraint::Length(3),
+        Constraint::Length(STATUS_WIDTH),
         Constraint::Percentage(50),
         Constraint::Percentage(30),
         Constraint::Length(6),
