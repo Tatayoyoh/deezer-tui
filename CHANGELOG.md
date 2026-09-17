@@ -12,6 +12,9 @@ All notable changes to this project will be documented in this file.
     * CLI playback flags: `--play`, `--pause`, `--stop`, `--volume`, `--volume-up/down`, `--seek`, `--seek-forward/backward`, `--shuffle`, `--repeat`, `--like`, `--dislike`
     * Shell completions generator (`--completions bash|zsh|fish`), installed by `install.sh`
 
+### Changed
+- Vim Keys Collision: Made h, j, k, l navigation keys optional, toggleable from the Settings overlay, and disabled by default. When disabled, l works as the like shortcut along with L (Shift+L) and Ctrl+L. When enabled, l navigates right while L and Ctrl+L still toggle like without collisions.
+
 ### Fixed
 - `next`, `previous` and end-of-track auto-advance now play the downloaded copy of a track while offline, instead of refusing with "No internet connection" and falling silent (#27)
 - While offline, a queue holding tracks that were never downloaded is walked forward to the next available one instead of stopping on the first miss (#27)
