@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.18.0] - 2026-09-14
+
+### Added
+- Like/favorite track mechanism similar to Deezer web interface:
+    * Player bar heart icon (`♥` / `♡`) for currently playing track with click-to-toggle
+    * `L` (Shift+L) and `Ctrl+L` global shortcuts to toggle like on focused track or currently playing track
+    * `L` / `f` shortcuts in Album, Playlist, Artist Top Tracks, and Genre track detail overlays
+    * Heart indicator ` ♥` next to track titles across all lists and tables for liked tracks
+    * Synchronized and cached favorite track IDs between daemon and client
+    * Heart indicator (`♥`) in the terminal window/tab title when the playing track is liked
+
+### Changed
+- Current playing track marker in track lists is now animated. Paused tracks marker is `⏸`.
+
+### Fixed
+- Playing a track that Deezer substitutes with a `FALLBACK` release no longer breaks UI matching: the played track keeps the requested `SNG_ID` and credits, so its row shows the playing marker, the player bar heart reflects the real favorite state and the terminal title heart appears
+
 ## [1.17.0] - 2026-08-28
 
 ### Added

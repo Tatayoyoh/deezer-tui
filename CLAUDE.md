@@ -258,11 +258,13 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | `b` | Previous track |
 | `s` | Toggle shuffle |
 | `r` | Cycle repeat (Off → All → One) |
+| `L` / `Ctrl+L` | Like / favorite track (focused or playing) |
 | `+` / `-` | Volume up / down |
-| `m` | Open context menu for selected track |
+| `m` / `x` | Open context menu for selected track |
 | `a` | Open album detail for selected track |
 | `w` | Open waiting list (queue) |
 | `?` | Show shortcuts help |
+| `f` | Start Deezer Flow |
 | `g` | Shuffle play favorites |
 | `Ctrl+O` | Open settings (themes) |
 | `Ctrl+F` | Search / filter mode (same as `/`) |
@@ -273,15 +275,16 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | Key | Action |
 |-----|--------|
 | `d` / `Delete` | Remove track from queue |
-| `f` | Toggle favorite |
-| `m` | Open context menu |
+| `L` / `f` | Toggle favorite |
+| `x` | Open context menu |
 | `Esc` / `w` | Close queue |
 
 ### Album / Playlist Detail
 | Key | Action |
 |-----|--------|
 | `Enter` | Play track |
-| `m` | Open context menu |
+| `L` / `f` | Toggle favorite |
+| `x` | Open context menu |
 | `Esc` | Close detail |
 
 ## Development Guidelines

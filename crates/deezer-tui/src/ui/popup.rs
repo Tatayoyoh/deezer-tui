@@ -7,7 +7,7 @@ use ratatui::widgets::{
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
-use crate::ui::common::{shortcut_hint, shortcut_line, track_number};
+use crate::ui::common::{shortcut_hint, shortcut_line, track_status, STATUS_WIDTH};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
@@ -184,6 +184,15 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
                 _ => ("", 0),
             };
             draw_confirm_delete_playlist(frame, view, title, nb_songs, *confirm_yes);
+        }
+        Some(SubMenu::ConfirmRemoveFavorite { confirm_yes }) => {
+            let (title, artist) = match &popup.target {
+                crate::client::PopupTarget::Track(track) => {
+                    (track.title.as_str(), track.artist.as_str())
+                }
+                _ => ("", ""),
+            };
+            draw_confirm_remove_favorite(frame, view, title, artist, *confirm_yes);
         }
         None => {
             draw_main_menu(frame, view, popup);
@@ -487,6 +496,81 @@ fn draw_confirm_delete_playlist(
     }
 }
 
+fn draw_confirm_remove_favorite(
+    frame: &mut Frame,
+    view: &ViewState,
+    title: &str,
+    artist: &str,
+    confirm_yes: bool,
+) {
+    let s = t();
+    let area = frame.area();
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let popup_area = centered_rect_abs(width, 8, area);
+
+    frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(s.confirm_remove_favorite_title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(inner);
+
+    let prompt = s.confirm_remove_favorite_body(title, artist);
+    let para = Paragraph::new(prompt)
+        .style(Theme::text())
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .alignment(Alignment::Center);
+    frame.render_widget(para, chunks[0]);
+
+    let yes_style = if confirm_yes {
+        Theme::highlight()
+    } else {
+        Theme::dim()
+    };
+    let no_style = if !confirm_yes {
+        Theme::highlight()
+    } else {
+        Theme::dim()
+    };
+    let yes_label = format!("  [ {} ]  ", s.yes);
+    let no_label = format!("  [ {} ]  ", s.no);
+    let yes_width = Span::raw(yes_label.as_str()).width() as u16;
+    let no_width = Span::raw(no_label.as_str()).width() as u16;
+    let buttons = Line::from(vec![
+        Span::styled(yes_label, yes_style),
+        Span::styled(no_label, no_style),
+    ]);
+    let para = Paragraph::new(buttons).alignment(Alignment::Center);
+    frame.render_widget(para, chunks[1]);
+
+    let total = yes_width + no_width;
+    if total <= chunks[1].width {
+        let x = chunks[1].x + (chunks[1].width - total) / 2;
+        let button = |x: u16, width: u16| Rect {
+            x,
+            y: chunks[1].y,
+            width,
+            height: 1,
+        };
+        view.record_click(button(x, yes_width), ClickTarget::ConfirmChoice(true));
+        view.record_click(
+            button(x + yes_width, no_width),
+            ClickTarget::ConfirmChoice(false),
+        );
+    }
+}
+
 /// Render a small modal with a single-line text input and a title.
 fn draw_text_input_modal(
     frame: &mut Frame,
@@ -591,8 +675,22 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         (Some("Ctrl+F or /"), s.help_search),
         (Some("Enter"), s.help_play_submit),
         (Some("Esc"), s.help_settings_back),
-        (Some("j/k or Up/Down"), s.help_navigate_list),
-        (Some("h/l or Left/Right"), s.help_navigate_categories),
+        (
+            Some(if view.vim_keys {
+                "j/k or Up/Down"
+            } else {
+                "Up/Down"
+            }),
+            s.help_navigate_list,
+        ),
+        (
+            Some(if view.vim_keys {
+                "h/l or Left/Right"
+            } else {
+                "Left/Right"
+            }),
+            s.help_navigate_categories,
+        ),
         // Playback
         (None, s.help_section_playback),
         (Some("Space"), s.help_play_pause),
@@ -602,6 +700,14 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         (Some("Ctrl+←"), s.help_seek_backward),
         (Some("s"), s.help_toggle_shuffle),
         (Some("r"), s.help_cycle_repeat),
+        (
+            Some(if view.vim_keys {
+                "L or Ctrl+L"
+            } else {
+                "l, L or Ctrl+L"
+            }),
+            s.help_like_track,
+        ),
         (Some("+/-"), s.help_volume),
         // Menus
         (None, s.help_section_menus),
@@ -745,11 +851,17 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
 /// Draw the settings overlay with selectable entries.
 fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
     let s = t();
+    let vim_status = if view.vim_keys {
+        "ON [ ●]"
+    } else {
+        "OFF [● ]"
+    };
     let entries: &[(&str, &str)] = &[
         (s.settings_shortcuts, "?"),
         (s.settings_themes, ""),
         (s.settings_quality, ""),
         (s.settings_language, ""),
+        (s.settings_vim_keys, vim_status),
         (s.settings_logout, ""),
         (s.settings_background, "Ctrl+Z"),
         (s.settings_quit, "Ctrl+Q"),
@@ -757,7 +869,7 @@ fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     let area = frame.area();
     let height = entries.len() as u16 + 4;
-    let popup_area = centered_rect(40, height, area);
+    let popup_area = centered_rect(42, height, area);
 
     frame.render_widget(Clear, popup_area);
 
@@ -792,17 +904,21 @@ fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
                 // are multi-byte in UTF-8 but one column wide.
                 let used = (text_part.chars().count() + shortcut.chars().count()) as u16;
                 let pad = inner.width.saturating_sub(used) as usize;
+                let right_style = if i == selected {
+                    style
+                } else if i == 4 {
+                    if view.vim_keys {
+                        Style::default().fg(Theme::primary())
+                    } else {
+                        Theme::dim()
+                    }
+                } else {
+                    Theme::shortcut_key()
+                };
                 ListItem::new(Line::from(vec![
                     Span::styled(text_part, style),
                     Span::styled(" ".repeat(pad), style),
-                    Span::styled(
-                        *shortcut,
-                        if i == selected {
-                            style
-                        } else {
-                            Theme::shortcut_key()
-                        },
-                    ),
+                    Span::styled(*shortcut, right_style),
                 ]))
             }
         })
@@ -1149,7 +1265,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         (s.header_title, s.header_artist)
     };
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(col_title, Theme::dim())),
         Cell::from(Span::styled(col_author, Theme::dim())),
         Cell::from(Span::styled(
@@ -1160,26 +1276,25 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     ])
     .height(1);
 
-    // Table rows — `track_index` is the position in the full playlist, so the
-    // `#` column stays meaningful even when the list is filtered.
     let rows: Vec<Row> = tracks
         .iter()
-        .map(|(track_index, track)| {
+        .enumerate()
+        .map(|(i, (_track_index, track))| {
             let dur = track.duration_secs();
-            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
+            let is_selected = i == selected;
+            let is_fav = if is_show {
+                false
+            } else {
+                view.is_track_favorite(&track.track_id)
+            };
             let is_current = view
                 .current_track
                 .as_ref()
                 .is_some_and(|ct| ct.track_id == track.track_id);
 
-            let fav_marker = if is_fav { " ♥" } else { "" };
-
             Row::new(vec![
-                Cell::from(track_number(*track_index, is_current)),
-                Cell::from(Span::styled(
-                    format!("{}{}", track.title, fav_marker),
-                    Theme::text(),
-                )),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
+                Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
                     Style::default().fg(Theme::primary()),
@@ -1194,7 +1309,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .collect();
 
     let widths = [
-        Constraint::Length(5),
+        Constraint::Length(STATUS_WIDTH),
         Constraint::Percentage(35),
         Constraint::Percentage(25),
         Constraint::Percentage(25),
@@ -1204,7 +1319,7 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     let table = Table::new(rows, widths)
         .header(header)
         .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::PlaylistDetail, selected);
     frame.render_stateful_widget(table, list_area, &mut table_state);
@@ -1223,6 +1338,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
     ];
     if !is_show {
         hint_spans.extend([
+            Span::styled("L / f", Theme::shortcut_key()),
+            Span::styled(s.hint_favorite, Theme::dim()),
             Span::styled("/", Theme::shortcut_key()),
             Span::styled(s.hint_filter, Theme::dim()),
             Span::styled("x", Theme::shortcut_key()),
@@ -1298,7 +1415,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     // Table header
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(s.header_title, Theme::dim())),
         Cell::from(Span::styled(s.header_artist, Theme::dim())),
         Cell::from(Span::styled(s.header_album, Theme::dim())),
@@ -1311,17 +1428,13 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         .enumerate()
         .map(|(i, track)| {
             let dur = track.duration_secs();
+            let is_selected = i == selected;
             let is_current = i == view.queue_index;
-            let is_fav = view.favorites.iter().any(|f| f.track_id == track.track_id);
-
-            let fav_marker = if is_fav { " ♥" } else { "" };
+            let is_fav = view.is_track_favorite(&track.track_id);
 
             Row::new(vec![
-                Cell::from(track_number(i, is_current)),
-                Cell::from(Span::styled(
-                    format!("{}{}", track.title, fav_marker),
-                    Theme::text(),
-                )),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
+                Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
                     Style::default().fg(Theme::primary()),
@@ -1336,7 +1449,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
         .collect();
 
     let widths = [
-        Constraint::Length(5),
+        Constraint::Length(STATUS_WIDTH),
         Constraint::Percentage(35),
         Constraint::Percentage(25),
         Constraint::Percentage(25),
@@ -1346,7 +1459,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let table = Table::new(rows, widths)
         .header(header)
         .row_highlight_style(Theme::highlight())
-        .highlight_symbol("> ");
+        .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::WaitingList, selected);
     frame.render_stateful_widget(table, chunks[0], &mut table_state);
@@ -1362,7 +1475,7 @@ fn draw_waiting_list(frame: &mut Frame, view: &ViewState, selected: usize) {
     let hints = Line::from(vec![
         Span::styled("d", Theme::shortcut_key()),
         Span::styled(s.hint_remove, Theme::dim()),
-        Span::styled("f", Theme::shortcut_key()),
+        Span::styled("L / f", Theme::shortcut_key()),
         Span::styled(s.hint_favorite, Theme::dim()),
         Span::styled("x", Theme::shortcut_key()),
         Span::styled(s.hint_menu, Theme::dim()),
@@ -1446,7 +1559,7 @@ fn draw_offline_detail(
     }
 
     let header = Row::new(vec![
-        Cell::from(Span::styled("#", Theme::dim())),
+        Cell::from(Span::raw("")),
         Cell::from(Span::styled(s.header_title, Theme::dim())),
         Cell::from(Span::styled(s.header_artist, Theme::dim())),
         Cell::from(Span::styled(s.header_duration, Theme::dim())),
@@ -1455,14 +1568,17 @@ fn draw_offline_detail(
 
     let rows: Vec<Row> = tracks
         .iter()
-        .map(|(track_index, track)| {
+        .enumerate()
+        .map(|(i, (_track_index, track))| {
             let dur = track.duration_secs();
+            let is_selected = i == selected;
             let is_current = view
                 .current_track
                 .as_ref()
                 .is_some_and(|ct| ct.track_id == track.track_id);
+            let is_fav = view.is_track_favorite(&track.track_id);
             Row::new(vec![
-                Cell::from(track_number(*track_index, is_current)),
+                Cell::from(track_status(is_selected, is_current, is_fav, view.status)),
                 Cell::from(Span::styled(&track.title, Theme::text())),
                 Cell::from(Span::styled(
                     &track.artist,
@@ -1479,7 +1595,7 @@ fn draw_offline_detail(
     let table = Table::new(
         rows,
         [
-            Constraint::Length(5),
+            Constraint::Length(STATUS_WIDTH),
             Constraint::Percentage(45),
             Constraint::Percentage(35),
             Constraint::Length(6),
@@ -1487,7 +1603,7 @@ fn draw_offline_detail(
     )
     .header(header)
     .row_highlight_style(Theme::highlight())
-    .highlight_symbol("> ");
+    .highlight_symbol("");
 
     let mut table_state = view.table_state(RowsKind::OfflineDetail, selected);
     frame.render_stateful_widget(table, chunks[1], &mut table_state);

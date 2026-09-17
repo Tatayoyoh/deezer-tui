@@ -151,6 +151,10 @@ pub enum SubMenu {
     ConfirmDeletePlaylist {
         confirm_yes: bool,
     },
+    /// Yes/no confirmation for removing a track from favorites while in Favorites tab.
+    ConfirmRemoveFavorite {
+        confirm_yes: bool,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -328,6 +332,19 @@ impl PopupMenu {
             target: PopupTarget::Track(Box::new(track)),
             is_favorite,
             sub_menu: None,
+            playlist_context: None,
+        }
+    }
+
+    /// Build a confirmation modal for removing a track from favorites.
+    pub fn confirm_remove_favorite(track: TrackData) -> Self {
+        Self {
+            title: None,
+            items: Vec::new(),
+            selected: 0,
+            target: PopupTarget::Track(Box::new(track)),
+            is_favorite: true,
+            sub_menu: Some(SubMenu::ConfirmRemoveFavorite { confirm_yes: false }),
             playlist_context: None,
         }
     }
@@ -613,6 +630,8 @@ pub enum ClickTarget {
     FilterInput,
     /// "f Flow" chip in the player bar.
     FlowChip,
+    /// Heart icon / Like button in the player bar to toggle favorite for current track.
+    ToggleLikeCurrentTrack,
     /// Playing track's name / progress bar in the player bar.
     CurrentTrack,
     /// "g Shuffle" button on the Favorites tab.
@@ -725,8 +744,10 @@ pub struct ViewState {
     pub favorites_filter_typing: bool,
     pub favorites_filtered: Vec<(usize, DisplayItem)>,
     pub favorites_filter_selected: usize,
+    pub favorite_track_ids: Vec<String>,
     pub favorite_artist_ids: Vec<String>,
     pub favorite_album_ids: Vec<String>,
+    pub vim_keys: bool,
     pub offline_category: OfflineCategory,
     pub offline_tracks: Vec<OfflineTrack>,
     pub offline_albums: Vec<AlbumDetail>,
@@ -913,6 +934,7 @@ impl ViewState {
                 .map(|(i, item)| (i, item.clone()))
                 .collect(),
             favorites_filter_selected: 0,
+            favorite_track_ids: snap.favorite_track_ids.clone(),
             favorite_artist_ids: snap.favorite_artist_ids.clone(),
             favorite_album_ids: snap.favorite_album_ids.clone(),
             offline_category: snap.offline_category,
@@ -964,6 +986,7 @@ impl ViewState {
             login_loading: snap.login_loading,
             user_name: snap.user_name.clone(),
             is_offline: snap.is_offline,
+            vim_keys: Config::load().vim_keys,
 
             offline_filter_input: String::new(),
             offline_filter_typing: false,
@@ -994,6 +1017,42 @@ impl ViewState {
             click: RefCell::default(),
             scroll: RefCell::default(),
         }
+    }
+
+    /// Whether a key represents navigating up (Up arrow, or 'k' if vim_keys is enabled).
+    pub fn is_nav_up(&self, code: KeyCode) -> bool {
+        Self::nav_up(code, self.vim_keys)
+    }
+
+    pub fn nav_up(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Up || (vim_keys && code == KeyCode::Char('k'))
+    }
+
+    /// Whether a key represents navigating down (Down arrow, or 'j' if vim_keys is enabled).
+    pub fn is_nav_down(&self, code: KeyCode) -> bool {
+        Self::nav_down(code, self.vim_keys)
+    }
+
+    pub fn nav_down(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Down || (vim_keys && code == KeyCode::Char('j'))
+    }
+
+    /// Whether a key represents navigating left (Left arrow, or 'h' if vim_keys is enabled).
+    pub fn is_nav_left(&self, code: KeyCode) -> bool {
+        Self::nav_left(code, self.vim_keys)
+    }
+
+    pub fn nav_left(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Left || (vim_keys && code == KeyCode::Char('h'))
+    }
+
+    /// Whether a key represents navigating right (Right arrow, or 'l' if vim_keys is enabled).
+    pub fn is_nav_right(&self, code: KeyCode) -> bool {
+        Self::nav_right(code, self.vim_keys)
+    }
+
+    pub fn nav_right(code: KeyCode, vim_keys: bool) -> bool {
+        code == KeyCode::Right || (vim_keys && code == KeyCode::Char('l'))
     }
 
     /// Set the transient status notification and restart its display timer.
@@ -1242,6 +1301,7 @@ impl ViewState {
         self.favorites_category = snap.favorites_category;
         self.favorites_display = snap.favorites_display;
         self.apply_favorites_filter();
+        self.favorite_track_ids = snap.favorite_track_ids;
         self.favorite_artist_ids = snap.favorite_artist_ids;
         self.favorite_album_ids = snap.favorite_album_ids;
         self.offline_category = snap.offline_category;
@@ -1389,8 +1449,9 @@ impl ViewState {
     }
 
     /// Check if a track is in the user's favorites.
-    fn is_track_favorite(&self, track_id: &str) -> bool {
-        self.favorites.iter().any(|t| t.track_id == track_id)
+    pub fn is_track_favorite(&self, track_id: &str) -> bool {
+        self.favorite_track_ids.iter().any(|id| id == track_id)
+            || self.favorites.iter().any(|t| t.track_id == track_id)
     }
 
     /// True when this track is the one loaded in the player, playing or paused.
@@ -1876,24 +1937,31 @@ impl Client {
         });
     }
 
-    /// Update the terminal emulator window/tab title with current playback info.
+    /// Build the window/tab title for a track: `deezer-tui: ▶ ♥ Title — Artist`.
+    /// The heart is only present when the track is one of the user's favorites.
     ///
     /// Track metadata comes from the Deezer API and is written inside an OSC
     /// escape (`ESC ] 0 ; … BEL`), so it must be stripped of control characters
     /// first — a raw BEL would end the OSC string and let the rest of the name
     /// be parsed by the terminal as escape sequences.
+    fn terminal_title(status_icon: &str, track: &TrackData, is_favorite: bool) -> String {
+        let heart = if is_favorite { "♥ " } else { "" };
+        format!(
+            "deezer-tui: {status_icon} {heart}{} — {}",
+            sanitize(&track.title),
+            sanitize(&track.artist)
+        )
+    }
+
+    /// Update the terminal emulator window/tab title with current playback info.
     fn update_terminal_title(&mut self) {
         let title = match (&self.view.status, &self.view.current_track) {
-            (PlaybackStatus::Playing, Some(track)) => format!(
-                "deezer-tui: ▶ {} — {}",
-                sanitize(&track.title),
-                sanitize(&track.artist)
-            ),
-            (PlaybackStatus::Paused, Some(track)) => format!(
-                "deezer-tui: ⏸ {} — {}",
-                sanitize(&track.title),
-                sanitize(&track.artist)
-            ),
+            (PlaybackStatus::Playing, Some(track)) => {
+                Self::terminal_title("▶", track, self.view.is_track_favorite(&track.track_id))
+            }
+            (PlaybackStatus::Paused, Some(track)) => {
+                Self::terminal_title("⏸", track, self.view.is_track_favorite(&track.track_id))
+            }
             _ => "deezer-tui".to_string(),
         };
         if title == self.last_terminal_title {
@@ -2286,6 +2354,14 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // Ctrl+L: toggle favorite / like for focused track or playing track
+        if key.code == KeyCode::Char('l') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if self.view.screen == Screen::Main {
+                return self.toggle_like_focused_or_playing();
+            }
+            return KeyAction::Continue;
+        }
+
         // Ctrl+Right: seek forward 10s
         if key.code == KeyCode::Right && key.modifiers.contains(KeyModifiers::CONTROL) {
             return KeyAction::SendCommand(Command::SeekForward { secs: 10 });
@@ -2553,11 +2629,11 @@ impl Client {
             }
 
             // Category navigation (h/l or left/right)
-            KeyCode::Char('h') | KeyCode::Left => KeyAction::SendCommand(Command::PrevCategory),
-            KeyCode::Char('l') | KeyCode::Right => KeyAction::SendCommand(Command::NextCategory),
+            code if self.view.is_nav_left(code) => KeyAction::SendCommand(Command::PrevCategory),
+            code if self.view.is_nav_right(code) => KeyAction::SendCommand(Command::NextCategory),
 
             // List navigation
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.active_tab == ActiveTab::Explore {
                     match self.view.explore_category {
                         ExploreCategory::Moods => {
@@ -2587,7 +2663,7 @@ impl Client {
                 }
                 KeyAction::SendCommand(Command::SelectUp)
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.active_tab == ActiveTab::Explore {
                     match self.view.explore_category {
                         ExploreCategory::Moods => {
@@ -2748,6 +2824,9 @@ impl Client {
             // Deezer Flow
             KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
 
+            // Toggle favorite / like for focused track or playing track
+            KeyCode::Char('L') | KeyCode::Char('l') => self.toggle_like_focused_or_playing(),
+
             // Player controls
             KeyCode::Char(' ') => KeyAction::SendCommand(Command::TogglePause),
             KeyCode::Char('n') => KeyAction::SendCommand(Command::NextTrack),
@@ -2777,6 +2856,7 @@ impl Client {
 
     /// Handle key events when an overlay is open.
     fn handle_overlay_key(&mut self, key: KeyEvent) -> KeyAction {
+        let vim_keys = self.view.vim_keys;
         let overlay = self.view.overlay.as_mut().unwrap();
         match overlay {
             Overlay::Help { scroll } => {
@@ -2784,10 +2864,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *scroll += 1;
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *scroll = scroll.saturating_sub(1);
                     }
                     _ => {}
@@ -2804,16 +2884,22 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 7;
+                const SETTINGS_COUNT: usize = 8;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(SETTINGS_COUNT - 1);
+                    }
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *selected == 4 => {
+                        self.view.vim_keys = !self.view.vim_keys;
+                        let mut config = Config::load();
+                        config.vim_keys = self.view.vim_keys;
+                        let _ = config.save();
                     }
                     KeyCode::Enter => {
                         match *selected {
@@ -2852,15 +2938,23 @@ impl Client {
                                 return KeyAction::Continue;
                             }
                             4 => {
+                                // Vim navigation keys toggle
+                                self.view.vim_keys = !self.view.vim_keys;
+                                let mut config = Config::load();
+                                config.vim_keys = self.view.vim_keys;
+                                let _ = config.save();
+                                return KeyAction::Continue;
+                            }
+                            5 => {
                                 // Logout
                                 self.view.pop_overlay();
                                 return KeyAction::SendCommand(Command::Logout);
                             }
-                            5 => {
+                            6 => {
                                 // Send to background
                                 return KeyAction::Detach;
                             }
-                            6 => {
+                            7 => {
                                 // Quit
                                 return KeyAction::Quit;
                             }
@@ -2881,10 +2975,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                     }
                     KeyCode::Enter => {
@@ -2905,10 +2999,10 @@ impl Client {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                     }
                     KeyCode::Enter => {
@@ -2937,11 +3031,11 @@ impl Client {
                         let _ = config.save();
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                         Theme::set(ThemeId::ALL[*selected]);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(count - 1);
                         Theme::set(ThemeId::ALL[*selected]);
                     }
@@ -2976,10 +3070,10 @@ impl Client {
                     KeyCode::Esc => {
                         self.view.pop_overlay();
                     }
-                    KeyCode::Up | KeyCode::Char('k') => {
+                    code if ViewState::nav_up(code, vim_keys) => {
                         *selected = selected.saturating_sub(1);
                     }
-                    KeyCode::Down | KeyCode::Char('j') => {
+                    code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(UPDATE_OPTIONS - 1);
                     }
                     KeyCode::Enter => match *selected {
@@ -3038,6 +3132,182 @@ impl Client {
         KeyAction::Continue
     }
 
+    /// Optimistically toggle a track's favorite status in the local view and send
+    /// the corresponding AddFavorite/RemoveFavorite command to the daemon.
+    fn toggle_track_favorite(&mut self, track_id: &str) -> KeyAction {
+        let is_fav = self.view.is_track_favorite(track_id);
+        if is_fav {
+            self.view.favorite_track_ids.retain(|id| id != track_id);
+            self.view.favorites.retain(|t| t.track_id != track_id);
+            KeyAction::SendCommand(Command::RemoveFavorite {
+                track_id: track_id.to_string(),
+            })
+        } else {
+            if !self.view.favorite_track_ids.iter().any(|id| id == track_id) {
+                self.view.favorite_track_ids.push(track_id.to_string());
+            }
+            KeyAction::SendCommand(Command::AddFavorite {
+                track_id: track_id.to_string(),
+            })
+        }
+    }
+
+    /// Toggle favorite for the currently focused track in any list/overlay, or
+    /// fall back to toggling the currently playing track.
+    fn toggle_like_focused_or_playing(&mut self) -> KeyAction {
+        // 1. If an overlay with tracks is open:
+        if let Some(ref overlay) = self.view.overlay {
+            match overlay {
+                Overlay::AlbumDetail { .. } => {
+                    if let Some(ref detail) = self.view.album_detail {
+                        if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
+                            let track_id = track.track_id.clone();
+                            return self.toggle_track_favorite(&track_id);
+                        }
+                    }
+                }
+                Overlay::ArtistDetail => {
+                    if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                        if let Some(ref detail) = self.view.artist_detail {
+                            if let Some(track) =
+                                detail.top_tracks.get(self.view.artist_detail_selected)
+                            {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                Overlay::PlaylistDetail { selected } => {
+                    let filtered = self.view.playlist_detail_tracks_filtered();
+                    if let Some((_, track)) = filtered.get(*selected) {
+                        let track_id = track.track_id.clone();
+                        drop(filtered);
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+                Overlay::GenreDetail { sub_tab, selected } => {
+                    if *sub_tab == GenreDetailSubTab::Tracks {
+                        if let Some(ref detail) = self.view.genre_detail {
+                            if let Some(track) = detail.tracks.get(*selected) {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                Overlay::WaitingList { selected } => {
+                    if let Some(track) = self.view.queue.get(*selected) {
+                        let track_id = track.track_id.clone();
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        // 2. If on main screen without popup/modal:
+        if self.view.screen == Screen::Main
+            && self.view.overlay.is_none()
+            && self.view.popup.is_none()
+        {
+            match self.view.active_tab {
+                ActiveTab::Search => {
+                    if self.view.search_category == SearchCategory::Track {
+                        if let Some(item) = self.view.search_display.get(self.view.search_selected)
+                        {
+                            if let Some(ref track) = item.track {
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                }
+                ActiveTab::Favorites => match self.view.favorites_category {
+                    FavoritesCategory::Tracks | FavoritesCategory::RecentlyPlayed => {
+                        let selected = if self.view.favorites_filter_active() {
+                            self.view.favorites_filter_selected
+                        } else {
+                            self.view.favorites_selected
+                        };
+                        let items: Vec<_> = if self.view.favorites_filter_active() {
+                            self.view
+                                .favorites_filtered
+                                .iter()
+                                .map(|(_, item)| item)
+                                .collect()
+                        } else {
+                            self.view.favorites_display.iter().collect()
+                        };
+                        if let Some(item) = items.get(selected) {
+                            if let Some(ref track) = item.track {
+                                if self.view.favorites_category == FavoritesCategory::Tracks {
+                                    self.view.popup =
+                                        Some(PopupMenu::confirm_remove_favorite(track.clone()));
+                                    return KeyAction::Continue;
+                                }
+                                let track_id = track.track_id.clone();
+                                return self.toggle_track_favorite(&track_id);
+                            }
+                        }
+                    }
+                    FavoritesCategory::Artists => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref artist_id) = item.artist_id {
+                                let is_fav = self.view.is_artist_favorite(artist_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteArtist {
+                                        artist_id: artist_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    FavoritesCategory::Albums => {
+                        if let Some(item) = self
+                            .view
+                            .favorites_display
+                            .get(self.view.favorites_selected)
+                        {
+                            if let Some(ref album_id) = item.album_id {
+                                let is_fav = self.view.is_album_favorite(album_id);
+                                let cmd = if is_fav {
+                                    Command::RemoveFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                } else {
+                                    Command::AddFavoriteAlbum {
+                                        album_id: album_id.clone(),
+                                    }
+                                };
+                                return KeyAction::SendCommand(cmd);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        // 3. Fallback: toggle currently playing track
+        if let Some(ref track) = self.view.current_track {
+            let track_id = track.track_id.clone();
+            return self.toggle_track_favorite(&track_id);
+        }
+
+        KeyAction::Continue
+    }
+
     /// Player controls that stay available while a detail overlay is open.
     /// Returns `None` when the key is not a player control, so callers keep
     /// their own fallthrough behaviour.
@@ -3051,6 +3321,22 @@ impl Client {
             KeyCode::Char('b') => Command::PrevTrack,
             KeyCode::Char('s') => Command::ToggleShuffle,
             KeyCode::Char('r') => Command::CycleRepeat,
+            KeyCode::Char('L') => {
+                if let Some(ref track) = self.view.current_track {
+                    let is_fav = self.view.is_track_favorite(&track.track_id);
+                    let cmd = if is_fav {
+                        Command::RemoveFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    } else {
+                        Command::AddFavorite {
+                            track_id: track.track_id.clone(),
+                        }
+                    };
+                    return Some(KeyAction::SendCommand(cmd));
+                }
+                return None;
+            }
             KeyCode::Char('+') | KeyCode::Char('=') => Command::SetVolume {
                 volume: (self.view.volume + 0.05).min(1.0),
             },
@@ -3114,11 +3400,11 @@ impl Client {
                 self.set_offline_detail_selected(0);
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 self.set_offline_detail_selected(selected.saturating_sub(1));
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = tracks.len().saturating_sub(1);
                 self.set_offline_detail_selected((selected + 1).min(max));
                 KeyAction::Continue
@@ -3296,22 +3582,35 @@ impl Client {
             }
             return KeyAction::Continue;
         }
+        // f / L / l: toggle favorite for focused track
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
+            if let Some(ref detail) = self.view.album_detail {
+                if let Some(track) = detail.tracks.get(self.view.album_detail_selected) {
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
+                }
+            }
+            return KeyAction::Continue;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            code if self.view.is_nav_left(code) => {
                 if self.view.album_detail_left_scrollable {
                     self.view.album_detail_left_focused = true;
                 }
                 KeyAction::Continue
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            code if self.view.is_nav_right(code) => {
                 self.view.album_detail_left_focused = false;
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.album_detail_left_focused {
                     self.view.album_detail_left_scroll =
                         self.view.album_detail_left_scroll.saturating_sub(1);
@@ -3321,7 +3620,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.album_detail_left_focused {
                     self.view.album_detail_left_scroll =
                         self.view.album_detail_left_scroll.saturating_add(1);
@@ -3393,13 +3692,46 @@ impl Client {
             }
             return KeyAction::Continue;
         }
+        // f / L / l: toggle favorite for focused track or artist
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
+            if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks {
+                if let Some(ref detail) = self.view.artist_detail {
+                    if let Some(track) = detail.top_tracks.get(self.view.artist_detail_selected) {
+                        let track_id = track.track_id.clone();
+                        return self.toggle_track_favorite(&track_id);
+                    }
+                }
+            } else if self.view.artist_detail_sub_tab == ArtistSubTab::Similar {
+                if let Some(ref detail) = self.view.artist_detail {
+                    if let Some(artist) =
+                        detail.similar_artists.get(self.view.artist_detail_selected)
+                    {
+                        let is_fav = self.view.is_artist_favorite(&artist.artist_id);
+                        let cmd = if is_fav {
+                            Command::RemoveFavoriteArtist {
+                                artist_id: artist.artist_id.clone(),
+                            }
+                        } else {
+                            Command::AddFavoriteArtist {
+                                artist_id: artist.artist_id.clone(),
+                            }
+                        };
+                        return KeyAction::SendCommand(cmd);
+                    }
+                }
+            }
+            return KeyAction::Continue;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
             // Switch sub-tab with h/l; left panel is a virtual tab before TopTracks
-            KeyCode::Char('h') | KeyCode::Left => {
+            code if self.view.is_nav_left(code) => {
                 if self.view.artist_detail_left_focused {
                     // Already on left panel, nothing to do
                 } else if self.view.artist_detail_sub_tab == ArtistSubTab::TopTracks
@@ -3413,7 +3745,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Char('l') | KeyCode::Right => {
+            code if self.view.is_nav_right(code) => {
                 if self.view.artist_detail_left_focused {
                     // Step out of left panel into TopTracks
                     self.view.artist_detail_left_focused = false;
@@ -3425,7 +3757,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 if self.view.artist_detail_left_focused {
                     self.view.artist_detail_left_scroll =
                         self.view.artist_detail_left_scroll.saturating_sub(1);
@@ -3435,7 +3767,7 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 if self.view.artist_detail_left_focused {
                     self.view.artist_detail_left_scroll =
                         self.view.artist_detail_left_scroll.saturating_add(1);
@@ -3623,6 +3955,18 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // f / L / l: toggle favorite for focused track
+        if key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys)
+        {
+            if let Some((_, track)) = focused.as_ref() {
+                let track_id = track.track_id.clone();
+                return self.toggle_track_favorite(&track_id);
+            }
+            return KeyAction::Continue;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.view.playlist_detail_filter_input.clear();
@@ -3635,12 +3979,12 @@ impl Client {
                 self.set_playlist_detail_selected(0);
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = filtered_len.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
@@ -3702,12 +4046,12 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = episode_count.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
@@ -3747,26 +4091,41 @@ impl Client {
             })
             .unwrap_or(0);
 
+        // f / L / l: toggle favorite for focused track
+        if (key.code == KeyCode::Char('f')
+            || key.code == KeyCode::Char('L')
+            || (key.code == KeyCode::Char('l') && !self.view.vim_keys))
+            && sub_tab == GenreDetailSubTab::Tracks
+        {
+            if let Some(ref detail) = self.view.genre_detail {
+                if let Some(track) = detail.tracks.get(selected) {
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
+                }
+            }
+            return KeyAction::Continue;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            code if self.view.is_nav_left(code) => {
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab: sub_tab.prev(),
                     selected: 0,
                 });
                 KeyAction::Continue
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            code if self.view.is_nav_right(code) => {
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab: sub_tab.next(),
                     selected: 0,
                 });
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::GenreDetail {
                     sub_tab,
@@ -3774,7 +4133,7 @@ impl Client {
                 });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = count.saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::GenreDetail {
@@ -3876,12 +4235,12 @@ impl Client {
                 self.view.pop_overlay();
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if self.view.is_nav_up(code) => {
                 let new_sel = selected.saturating_sub(1);
                 self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if self.view.is_nav_down(code) => {
                 let max = self.view.queue.len().saturating_sub(1);
                 let new_sel = (selected + 1).min(max);
                 self.view.overlay = Some(Overlay::WaitingList { selected: new_sel });
@@ -3905,19 +4264,14 @@ impl Client {
                 KeyAction::Continue
             }
             // Toggle favorite
-            KeyCode::Char('f') => {
+            KeyCode::Char('f') | KeyCode::Char('L') | KeyCode::Char('l')
+                if key.code == KeyCode::Char('f')
+                    || key.code == KeyCode::Char('L')
+                    || !self.view.vim_keys =>
+            {
                 if let Some(track) = self.view.queue.get(selected) {
-                    let is_fav = self.view.is_track_favorite(&track.track_id);
-                    let cmd = if is_fav {
-                        Command::RemoveFavorite {
-                            track_id: track.track_id.clone(),
-                        }
-                    } else {
-                        Command::AddFavorite {
-                            track_id: track.track_id.clone(),
-                        }
-                    };
-                    return KeyAction::SendCommand(cmd);
+                    let track_id = track.track_id.clone();
+                    return self.toggle_track_favorite(&track_id);
                 }
                 KeyAction::Continue
             }
@@ -3931,6 +4285,7 @@ impl Client {
 
     /// Handle key events when a popup menu is open.
     fn handle_popup_key(&mut self, key: KeyEvent) -> KeyAction {
+        let vim_keys = self.view.vim_keys;
         let popup = self.view.popup.as_mut().unwrap();
 
         // Pre-extract track_id for playlist picker (avoids borrow conflict)
@@ -3997,11 +4352,11 @@ impl Client {
                             *filter_typing = true;
                             return KeyAction::Continue;
                         }
-                        KeyCode::Up | KeyCode::Char('k') => {
+                        code if ViewState::nav_up(code, vim_keys) => {
                             *selected = selected.saturating_sub(1);
                             return KeyAction::Continue;
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
+                        code if ViewState::nav_down(code, vim_keys) => {
                             *selected = (*selected + 1).min(total.saturating_sub(1));
                             return KeyAction::Continue;
                         }
@@ -4150,11 +4505,14 @@ impl Client {
                         self.view.popup = None;
                         return KeyAction::SendCommand(Command::DeletePlaylist { playlist_id });
                     }
-                    KeyCode::Left
+                    KeyCode::Tab
+                    | KeyCode::Left
                     | KeyCode::Right
                     | KeyCode::Char('h')
                     | KeyCode::Char('l')
-                    | KeyCode::Tab => {
+                        if matches!(key.code, KeyCode::Tab | KeyCode::Left | KeyCode::Right)
+                            || vim_keys =>
+                    {
                         *confirm_yes = !*confirm_yes;
                         return KeyAction::Continue;
                     }
@@ -4173,6 +4531,45 @@ impl Client {
                     }
                     _ => return KeyAction::Continue,
                 },
+                SubMenu::ConfirmRemoveFavorite { confirm_yes } => match key.code {
+                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                        self.view.popup = None;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let track_id = match &popup.target {
+                            PopupTarget::Track(track) => track.track_id.clone(),
+                            _ => return KeyAction::Continue,
+                        };
+                        self.view.popup = None;
+                        return KeyAction::SendCommand(Command::RemoveFavorite { track_id });
+                    }
+                    KeyCode::Tab
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Char('h')
+                    | KeyCode::Char('l')
+                        if matches!(key.code, KeyCode::Tab | KeyCode::Left | KeyCode::Right)
+                            || vim_keys =>
+                    {
+                        *confirm_yes = !*confirm_yes;
+                        return KeyAction::Continue;
+                    }
+                    KeyCode::Enter => {
+                        if *confirm_yes {
+                            let track_id = match &popup.target {
+                                PopupTarget::Track(track) => track.track_id.clone(),
+                                _ => return KeyAction::Continue,
+                            };
+                            self.view.popup = None;
+                            return KeyAction::SendCommand(Command::RemoveFavorite { track_id });
+                        } else {
+                            self.view.popup = None;
+                            return KeyAction::Continue;
+                        }
+                    }
+                    _ => return KeyAction::Continue,
+                },
             }
         }
 
@@ -4182,11 +4579,11 @@ impl Client {
                 self.view.popup = None;
                 KeyAction::Continue
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            code if ViewState::nav_up(code, vim_keys) => {
                 popup.select_prev();
                 KeyAction::Continue
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            code if ViewState::nav_down(code, vim_keys) => {
                 popup.select_next();
                 KeyAction::Continue
             }
@@ -4703,6 +5100,14 @@ impl Client {
                 KeyAction::Continue
             }
             ClickTarget::FlowChip => KeyAction::SendCommand(Command::StartFlow),
+            ClickTarget::ToggleLikeCurrentTrack => {
+                if let Some(ref track) = self.view.current_track {
+                    let track_id = track.track_id.clone();
+                    self.toggle_track_favorite(&track_id)
+                } else {
+                    KeyAction::Continue
+                }
+            }
             ClickTarget::ShuffleFavorites => KeyAction::SendCommand(Command::ShuffleFavorites),
             // Player bar: right click only.
             ClickTarget::CurrentTrack => KeyAction::Continue,
@@ -5044,6 +5449,36 @@ mod tests {
         }
     }
 
+    fn title_track(title: &str, artist: &str) -> TrackData {
+        serde_json::from_value(serde_json::json!({
+            "SNG_ID": "42",
+            "SNG_TITLE": title,
+            "ART_NAME": artist,
+        }))
+        .expect("track fixture")
+    }
+
+    #[test]
+    fn terminal_title_marks_favorites_with_a_heart() {
+        let track = title_track("Song", "Artist");
+        assert_eq!(
+            Client::terminal_title("▶", &track, true),
+            "deezer-tui: ▶ ♥ Song — Artist"
+        );
+        assert_eq!(
+            Client::terminal_title("⏸", &track, false),
+            "deezer-tui: ⏸ Song — Artist"
+        );
+    }
+
+    /// A raw BEL in the metadata would terminate the OSC title string early.
+    #[test]
+    fn terminal_title_strips_control_characters() {
+        let track = title_track("So\x07ng", "Art\nist");
+        let title = Client::terminal_title("▶", &track, true);
+        assert!(!title.contains('\x07') && !title.contains('\n'), "{title}");
+    }
+
     #[test]
     fn row_index_accounts_for_scroll_offset() {
         let rows = rows(5, 4, 10, 20);
@@ -5153,5 +5588,70 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0, 1);
         assert_eq!(filtered[0].1.title, "Beta");
+    }
+
+    #[test]
+    fn is_track_favorite_checks_favorite_ids_and_favorites_list() {
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.is_track_favorite("123"));
+
+        view.favorite_track_ids.push("123".into());
+        assert!(view.is_track_favorite("123"));
+        assert!(!view.is_track_favorite("456"));
+
+        let snap = DaemonSnapshot {
+            favorite_track_ids: vec!["456".into()],
+            ..DaemonSnapshot::default()
+        };
+        view.update_from_snapshot(snap);
+        assert!(!view.is_track_favorite("123"));
+        assert!(view.is_track_favorite("456"));
+    }
+
+    #[test]
+    fn vim_keys_navigation_behavior() {
+        use crossterm::event::KeyCode;
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        assert!(!view.vim_keys);
+
+        // Arrows always work
+        assert!(view.is_nav_up(KeyCode::Up));
+        assert!(view.is_nav_down(KeyCode::Down));
+        assert!(view.is_nav_left(KeyCode::Left));
+        assert!(view.is_nav_right(KeyCode::Right));
+
+        // Vim keys disabled by default
+        assert!(!view.is_nav_up(KeyCode::Char('k')));
+        assert!(!view.is_nav_down(KeyCode::Char('j')));
+        assert!(!view.is_nav_left(KeyCode::Char('h')));
+        assert!(!view.is_nav_right(KeyCode::Char('l')));
+
+        // Enable vim keys
+        view.vim_keys = true;
+        assert!(view.is_nav_up(KeyCode::Char('k')));
+        assert!(view.is_nav_down(KeyCode::Char('j')));
+        assert!(view.is_nav_left(KeyCode::Char('h')));
+        assert!(view.is_nav_right(KeyCode::Char('l')));
+        assert!(view.is_nav_up(KeyCode::Up));
+    }
+
+    #[test]
+    fn confirm_remove_favorite_popup_structure() {
+        let track: TrackData = serde_json::from_value(serde_json::json!({
+            "SNG_ID": "999",
+            "SNG_TITLE": "Test Track",
+            "ART_NAME": "Test Artist",
+        }))
+        .unwrap();
+        let popup = PopupMenu::confirm_remove_favorite(track);
+        assert_eq!(popup.track().unwrap().track_id, "999");
+        assert!(popup.is_favorite);
+        match popup.sub_menu {
+            Some(SubMenu::ConfirmRemoveFavorite { confirm_yes }) => {
+                assert!(!confirm_yes);
+            }
+            _ => panic!("Expected ConfirmRemoveFavorite sub_menu"),
+        }
     }
 }

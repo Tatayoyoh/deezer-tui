@@ -219,6 +219,28 @@ impl TrackData {
     pub fn is_user_uploaded(&self) -> bool {
         self.track_id.starts_with('-')
     }
+
+    /// Re-label a FALLBACK stream with the track the user actually asked for.
+    ///
+    /// A FALLBACK is a different `SNG_ID` — another release of the song, often
+    /// with its own credits — that exists only because the requested one is no
+    /// longer streamable. Everything else keys off the requested id: the queue
+    /// row, the favorites entry the track was started from, the terminal title,
+    /// MPRIS. Handing them the fallback id leaves the playing row unmarked and
+    /// the track reading as un-favorited, so keep the requested identity and
+    /// take only `duration` from the stream, which is the audio that decodes.
+    ///
+    /// A no-op when nothing was substituted.
+    #[must_use]
+    pub fn with_identity_of(self, requested: &Self) -> Self {
+        if self.track_id == requested.track_id {
+            return self;
+        }
+        Self {
+            duration: self.duration,
+            ..requested.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -800,6 +822,41 @@ mod tests {
         "DURATION": "1357",
         "TRACK_TOKEN": "AAAAAWpm"
     }"#;
+
+    fn track(id: &str, artist: &str, duration: &str) -> TrackData {
+        serde_json::from_value(serde_json::json!({
+            "SNG_ID": id,
+            "SNG_TITLE": "Us and Them",
+            "ART_NAME": artist,
+            "ALB_TITLE": "Noir Lac",
+            "DURATION": duration,
+        }))
+        .unwrap()
+    }
+
+    /// A FALLBACK must not leak its own id or credits into the player state:
+    /// the UI matches the playing row and the favorites entry on the id the
+    /// user picked.
+    #[test]
+    fn fallback_stream_keeps_the_requested_identity() {
+        let requested = track("101", "David Neerman", "357");
+        let streamed = track("202", "Ensemble Sequenza 9.3", "360");
+
+        let played = streamed.with_identity_of(&requested);
+        assert_eq!(played.track_id, "101");
+        assert_eq!(played.artist, "David Neerman");
+        // Duration describes the audio that actually decodes, so it comes from
+        // the stream.
+        assert_eq!(played.duration, "360");
+    }
+
+    #[test]
+    fn with_identity_of_is_a_no_op_without_a_substitution() {
+        let requested = track("101", "David Neerman", "357");
+        let played = track("101", "David Neerman", "357").with_identity_of(&requested);
+        assert_eq!(played.track_id, "101");
+        assert_eq!(played.duration, "357");
+    }
 
     #[test]
     fn episode_parses_and_converts_to_a_playable_track() {

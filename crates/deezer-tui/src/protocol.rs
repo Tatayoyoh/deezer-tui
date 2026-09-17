@@ -311,34 +311,6 @@ impl SearchCategory {
             Self::Profile => "USER",
         }
     }
-
-    /// Column width constraints for this category's table.
-    pub fn column_widths(&self) -> [ratatui::prelude::Constraint; 5] {
-        use ratatui::prelude::Constraint;
-        match self {
-            Self::Album => [
-                Constraint::Length(4),
-                Constraint::Percentage(40),
-                Constraint::Percentage(30),
-                Constraint::Length(0),
-                Constraint::Length(10),
-            ],
-            Self::Artist => [
-                Constraint::Length(4),
-                Constraint::Percentage(45),
-                Constraint::Percentage(25),
-                Constraint::Length(0),
-                Constraint::Length(0),
-            ],
-            _ => [
-                Constraint::Length(4),
-                Constraint::Percentage(35),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Length(6),
-            ],
-        }
-    }
 }
 
 /// Favorites category filter.
@@ -452,6 +424,9 @@ pub struct DaemonSnapshot {
     pub favorites_category: FavoritesCategory,
     #[serde(default)]
     pub favorites_display: Vec<DisplayItem>,
+    /// IDs of tracks in the user's favorites (Loved Tracks).
+    #[serde(default)]
+    pub favorite_track_ids: Vec<String>,
     /// IDs of artists in the user's favorites.
     #[serde(default)]
     pub favorite_artist_ids: Vec<String>,
@@ -588,6 +563,7 @@ impl Default for DaemonSnapshot {
             favorites_loading: false,
             favorites_category: FavoritesCategory::default(),
             favorites_display: Vec::new(),
+            favorite_track_ids: Vec::new(),
             favorite_artist_ids: Vec::new(),
             favorite_album_ids: Vec::new(),
             offline_category: OfflineCategory::default(),
