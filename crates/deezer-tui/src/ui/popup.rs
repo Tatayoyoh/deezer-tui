@@ -823,46 +823,65 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         .fg(Theme::primary())
         .add_modifier(Modifier::BOLD);
 
-    let items: Vec<ListItem> = vec![
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_version), label_style),
-            Span::styled(version, Theme::text()),
-        ])),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_architecture), label_style),
-            Span::styled(format!("{os}/{arch}"), Theme::text()),
-        ])),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_author), label_style),
-            Span::styled("Tatayoyoh", Theme::text()),
-        ])),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_github), label_style),
-            Span::styled(github_url, link_style),
-        ])),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_changelog), label_style),
-            Span::styled(changelog_url, link_style),
-        ])),
-        ListItem::new(Line::from(vec![
-            Span::styled(format!("  {:<16}", s.about_license), label_style),
-            Span::styled("WTFPL", Theme::text()),
-            Span::styled("  ", Theme::text()),
-            Span::styled(license_url, link_style),
-        ])),
+    // (label, value, link). A link is printed whole: terminals find URLs in
+    // the text on screen, so a truncated one opens a page that doesn't exist.
+    let rows: [(&str, String, Option<&str>); 6] = [
+        (s.about_version, version.to_string(), None),
+        (s.about_architecture, format!("{os}/{arch}"), None),
+        (s.about_author, "Tatayoyoh".to_string(), None),
+        (s.about_github, String::new(), Some(github_url)),
+        (s.about_changelog, String::new(), Some(changelog_url)),
+        (s.about_license, "WTFPL".to_string(), Some(license_url)),
     ];
+    const LABEL_W: usize = 2 + 16;
+    let row_width = |value: &str, link: Option<&str>| {
+        let gap = if value.is_empty() { 0 } else { 2 };
+        LABEL_W + value.chars().count() + link.map_or(0, |l| gap + l.chars().count())
+    };
 
     let area = frame.area();
-    let info_height = items.len() as u16;
-    // 60% of the screen, widened so the longest line (the changelog link)
-    // fits when there is room. The width does not depend on the height: wrap
-    // the notes to it, then size the modal to fit them, up to
-    // RELEASE_NOTES_HEIGHT lines.
-    let content_width = items.iter().map(ListItem::width).max().unwrap_or(0) as u16 + 4;
+    // 60% of the screen, widened so every row fits on one line when there is
+    // room. The width does not depend on the height: wrap the notes to it,
+    // then size the modal to fit them, up to RELEASE_NOTES_HEIGHT lines.
+    let content_width = rows
+        .iter()
+        .map(|(_, value, link)| row_width(value, *link))
+        .max()
+        .unwrap_or(0) as u16
+        + 4;
     let width = centered_rect(60, 0, area)
         .width
         .max(content_width)
         .min(area.width);
+
+    // A row too wide for the modal moves its link to the next line.
+    let inner_width = width.saturating_sub(2) as usize;
+    let mut items: Vec<ListItem> = Vec::new();
+    for (label, value, link) in &rows {
+        let mut spans = vec![
+            Span::styled(format!("  {label:<16}"), label_style),
+            Span::styled(value.clone(), Theme::text()),
+        ];
+        match link {
+            Some(url) if row_width(value, Some(url)) <= inner_width => {
+                if !value.is_empty() {
+                    spans.push(Span::raw("  "));
+                }
+                spans.push(Span::styled(*url, link_style));
+                items.push(ListItem::new(Line::from(spans)));
+            }
+            Some(url) => {
+                items.push(ListItem::new(Line::from(spans)));
+                items.push(ListItem::new(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(*url, link_style),
+                ])));
+            }
+            None => items.push(ListItem::new(Line::from(spans))),
+        }
+    }
+    let info_height = items.len() as u16;
+
     // Borders, left indent (under the title), gap + scrollbar, right margin.
     let text_width = width.saturating_sub(2 + 2 + 2 + 1) as usize;
     let notes = release_note_lines(&view.release_notes, text_width);
