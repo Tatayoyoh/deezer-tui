@@ -3040,9 +3040,7 @@ impl Client {
                     }
                     KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *selected == 5 => {
                         self.view.vim_keys = !self.view.vim_keys;
-                        let mut config = Config::load();
-                        config.vim_keys = self.view.vim_keys;
-                        let _ = config.save();
+                        let _ = Config::update(|c| c.vim_keys = self.view.vim_keys);
                     }
                     KeyCode::Enter => {
                         match *selected {
@@ -3088,9 +3086,7 @@ impl Client {
                             5 => {
                                 // Vim navigation keys toggle
                                 self.view.vim_keys = !self.view.vim_keys;
-                                let mut config = Config::load();
-                                config.vim_keys = self.view.vim_keys;
-                                let _ = config.save();
+                                let _ = Config::update(|c| c.vim_keys = self.view.vim_keys);
                                 return KeyAction::Continue;
                             }
                             6 => {
@@ -3132,9 +3128,7 @@ impl Client {
                     KeyCode::Enter => {
                         let locale = Locale::ALL[*selected];
                         i18n::set(locale);
-                        let mut config = Config::load();
-                        config.language = Some(locale.as_str().to_string());
-                        let _ = config.save();
+                        let _ = Config::update(|c| c.language = Some(locale.as_str().to_string()));
                         self.view.pop_overlay();
                     }
                     _ => {}
@@ -3238,9 +3232,7 @@ impl Client {
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         // Save transparency then go back to settings
-                        let mut config = Config::load();
-                        config.bg_transparency = Theme::transparency();
-                        let _ = config.save();
+                        let _ = Config::update(|c| c.bg_transparency = Theme::transparency());
                         self.view.pop_overlay();
                     }
                     code if ViewState::nav_up(code, vim_keys) => {
@@ -3262,10 +3254,10 @@ impl Client {
                     KeyCode::Enter => {
                         // Confirm selection, save theme + transparency to config, back to settings
                         let theme_id = ThemeId::ALL[*selected];
-                        let mut config = Config::load();
-                        config.theme = Some(theme_id.as_str().to_string());
-                        config.bg_transparency = Theme::transparency();
-                        let _ = config.save();
+                        let _ = Config::update(|c| {
+                            c.theme = Some(theme_id.as_str().to_string());
+                            c.bg_transparency = Theme::transparency();
+                        });
                         self.view.pop_overlay();
                     }
                     _ => {}
@@ -3303,9 +3295,7 @@ impl Client {
                         }
                         2 => {
                             // "Never ask again" — persist to config
-                            let mut config = Config::load();
-                            config.skip_update_check = true;
-                            let _ = config.save();
+                            let _ = Config::update(|c| c.skip_update_check = true);
                             self.view.pop_overlay();
                         }
                         _ => {}

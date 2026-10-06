@@ -723,7 +723,7 @@ impl Daemon {
             Command::GetSnapshot => {} // Snapshot is sent after every command anyway
             Command::Login { arl } => {
                 self.config.arl = Some(arl.clone());
-                let _ = self.config.save();
+                let _ = Config::update(|c| c.arl = Some(arl.clone()));
                 self.start_login(arl);
             }
             Command::Search { query } => {
@@ -831,16 +831,16 @@ impl Daemon {
                     state.volume = volume;
                 }
                 self.config.volume = volume;
-                let _ = self.config.save();
+                let _ = Config::update(|c| c.volume = volume);
             }
             Command::SetEqualizer { settings } => {
                 self.eq.apply(&settings);
+                let _ = Config::update(|c| c.equalizer = settings.clone());
                 self.config.equalizer = settings;
-                let _ = self.config.save();
             }
             Command::SetQuality { quality } => {
                 self.config.quality = quality;
-                let _ = self.config.save();
+                let _ = Config::update(|c| c.quality = quality);
                 info!(
                     quality = quality.as_api_format(),
                     "preferred quality updated (applies to next track)"
@@ -1161,7 +1161,7 @@ impl Daemon {
             Command::Logout => {
                 // Clear ARL, stop playback, return to login screen
                 self.config.arl = None;
-                let _ = self.config.save();
+                let _ = Config::update(|c| c.arl = None);
                 self.screen = Screen::Login;
                 self.user_name = None;
                 self.master_key = None;
