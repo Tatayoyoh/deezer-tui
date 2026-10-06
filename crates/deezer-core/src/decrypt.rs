@@ -10,7 +10,7 @@ use crate::api::models::DeezerError;
 type BlowfishCbc = cbc::Decryptor<blowfish::Blowfish>;
 
 /// Size of each audio block (2 KB).
-const BLOCK_SIZE: usize = 2048;
+pub(crate) const BLOCK_SIZE: usize = 2048;
 
 /// Fixed IV for Blowfish CBC.
 const IV: [u8; 8] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07];
@@ -139,26 +139,32 @@ pub fn derive_track_key(track_id: &str, master_key: &[u8; 16]) -> [u8; 16] {
 /// Deezer uses "BF_CBC_STRIPE": only every 3rd 2048-byte block is encrypted.
 /// Blocks 0, 3, 6, 9… are encrypted; blocks 1, 2, 4, 5, 7, 8… are cleartext.
 pub fn decrypt_stream(data: &mut [u8], track_key: &[u8; 16]) -> Result<(), DeezerError> {
-    let num_blocks = data.len() / BLOCK_SIZE;
-
-    for block_idx in 0..num_blocks {
-        if block_idx % 3 != 0 {
-            continue;
-        }
-
-        let start = block_idx * BLOCK_SIZE;
-        let end = start + BLOCK_SIZE;
-        let block = &mut data[start..end];
-
-        let bf = blowfish::Blowfish::new_from_slice(track_key)
-            .map_err(|e| DeezerError::Decrypt(format!("Invalid key: {e}")))?;
-        let iv = GenericArray::from_slice(&IV);
-        let cipher = BlowfishCbc::inner_iv_init(bf, iv);
-        cipher
-            .decrypt_padded_mut::<NoPadding>(block)
-            .map_err(|e| DeezerError::Decrypt(format!("Blowfish decryption failed: {e}")))?;
+    for (block_idx, block) in data.chunks_exact_mut(BLOCK_SIZE).enumerate() {
+        decrypt_block(block, block_idx, track_key)?;
     }
+    Ok(())
+}
 
+/// Decrypt one full 2048-byte block in-place, given its index in the file.
+///
+/// Every encrypted block restarts the CBC chain from the same IV, so blocks can
+/// be decrypted independently, as they arrive from the network (streaming).
+/// Cleartext blocks (index not a multiple of 3) are left untouched.
+pub fn decrypt_block(
+    block: &mut [u8],
+    block_idx: usize,
+    track_key: &[u8; 16],
+) -> Result<(), DeezerError> {
+    if block_idx % 3 != 0 || block.len() != BLOCK_SIZE {
+        return Ok(());
+    }
+    let bf = blowfish::Blowfish::new_from_slice(track_key)
+        .map_err(|e| DeezerError::Decrypt(format!("Invalid key: {e}")))?;
+    let iv = GenericArray::from_slice(&IV);
+    let cipher = BlowfishCbc::inner_iv_init(bf, iv);
+    cipher
+        .decrypt_padded_mut::<NoPadding>(block)
+        .map_err(|e| DeezerError::Decrypt(format!("Blowfish decryption failed: {e}")))?;
     Ok(())
 }
 

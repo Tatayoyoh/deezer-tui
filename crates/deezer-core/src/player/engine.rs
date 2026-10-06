@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -8,6 +8,54 @@ use tracing::{debug, info};
 use crate::api::models::{AudioQuality, DeezerError, TrackData};
 use crate::player::eq::{EqHandle, Equalizer};
 use crate::player::state::{PlaybackStatus, PlayerState};
+use crate::player::stream::StreamReader;
+
+/// Audio handed to the engine: a fully downloaded file (offline tracks,
+/// podcast episodes) or a track still streaming from the CDN.
+pub enum AudioInput {
+    Bytes(Cursor<Vec<u8>>),
+    Stream(StreamReader),
+}
+
+impl From<Vec<u8>> for AudioInput {
+    fn from(data: Vec<u8>) -> Self {
+        Self::Bytes(Cursor::new(data))
+    }
+}
+
+impl From<StreamReader> for AudioInput {
+    fn from(reader: StreamReader) -> Self {
+        Self::Stream(reader)
+    }
+}
+
+impl AudioInput {
+    /// Size for logs: the full length for downloaded audio, `None` while streaming.
+    pub fn known_len(&self) -> Option<usize> {
+        match self {
+            Self::Bytes(c) => Some(c.get_ref().len()),
+            Self::Stream(_) => None,
+        }
+    }
+}
+
+impl Read for AudioInput {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Bytes(c) => c.read(buf),
+            Self::Stream(s) => s.read(buf),
+        }
+    }
+}
+
+impl Seek for AudioInput {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        match self {
+            Self::Bytes(c) => c.seek(pos),
+            Self::Stream(s) => s.seek(pos),
+        }
+    }
+}
 
 pub struct PlayerEngine {
     state: Arc<Mutex<PlayerState>>,
@@ -46,16 +94,15 @@ impl PlayerEngine {
         Arc::clone(&self.state)
     }
 
-    /// Play pre-fetched and decrypted audio data.
-    /// Called on the main thread with audio bytes from a background fetch.
+    /// Play decrypted audio: fully downloaded, or still streaming in.
+    /// Called on the main thread with audio from a background fetch.
     pub fn play_decoded(
         &mut self,
-        audio_data: Vec<u8>,
+        audio: impl Into<AudioInput>,
         track: &TrackData,
         quality: AudioQuality,
     ) -> Result<(), DeezerError> {
-        let cursor = Cursor::new(audio_data);
-        let source = Decoder::new(cursor)
+        let source = Decoder::new(audio.into())
             .map_err(|e| DeezerError::Playback(format!("Failed to decode audio: {e}")))?;
         let source = Equalizer::new(source, self.eq.clone());
 

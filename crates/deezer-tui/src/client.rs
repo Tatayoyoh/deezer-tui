@@ -1888,6 +1888,30 @@ pub struct Client {
 }
 
 /// Helper to restore standard terminal mode safely.
+/// Put the tty back in raw mode if something took it out behind our back.
+///
+/// The terminal-graphics probe (`Picker::from_query_stdio`) reads the reply on
+/// a helper thread; when the terminal answers after its timeout, that thread
+/// stays blocked on stdin and, on the first key or mouse event, restores the
+/// termios it saved *before* raw mode. Echo and line mode come back and every
+/// mouse report gets printed as `^[[<35;…M`. Cheap to check every tick.
+#[cfg(unix)]
+fn ensure_raw_mode() {
+    use std::os::unix::io::AsRawFd;
+    let fd = io::stdin().as_raw_fd();
+    // SAFETY: plain termios calls on our own stdin with a zeroed struct.
+    unsafe {
+        let mut t: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(fd, &mut t) == 0 && t.c_lflag & (libc::ECHO | libc::ICANON) != 0 {
+            libc::cfmakeraw(&mut t);
+            libc::tcsetattr(fd, libc::TCSANOW, &t);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn ensure_raw_mode() {}
+
 pub fn restore_terminal() {
     let mut stdout = io::stdout();
     let _ = stdout.execute(DisableMouseCapture);
@@ -2150,6 +2174,8 @@ impl Client {
         let mut prev_over_image = false;
 
         while running {
+            ensure_raw_mode();
+
             // Clear expired toast
             if self.view.toast.as_ref().is_some_and(|t| t.is_expired()) {
                 self.view.toast = None;
