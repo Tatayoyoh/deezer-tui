@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Tracks start playing after a few seconds of buffering instead of after the whole file is downloaded (faster skips, especially in FLAC)
+
 ## [1.20.0] - 2026-10-06
 
 ### Added

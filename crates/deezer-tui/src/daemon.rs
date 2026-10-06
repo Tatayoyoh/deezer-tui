@@ -13,7 +13,7 @@ use deezer_core::api::models::{
 };
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
-use deezer_core::player::engine::PlayerEngine;
+use deezer_core::player::engine::{AudioInput, PlayerEngine};
 use deezer_core::player::eq::EqHandle;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
@@ -45,7 +45,7 @@ enum AsyncResult {
     /// Display items for a favorites category (see `FavoritesLoaded`).
     FavoritesDisplayLoaded(FavoritesCategory, Vec<DisplayItem>),
     TrackReady {
-        audio_data: Vec<u8>,
+        audio_data: AudioInput,
         track: TrackData,
         quality: AudioQuality,
         generation: u64,
@@ -2414,7 +2414,7 @@ impl Daemon {
                             "fetch_task: direct stream download OK"
                         );
                         let _ = tx.send(AsyncResult::TrackReady {
-                            audio_data,
+                            audio_data: audio_data.into(),
                             track,
                             quality,
                             generation,
@@ -2531,7 +2531,8 @@ impl Daemon {
             };
             info!(gen = generation, track_id = %track.track_id, api_ms = start.elapsed().as_millis(), "fetch_task: client lock released, starting download");
 
-            // Download + decrypt without holding the client lock
+            // Stream + decrypt without holding the client lock: playback starts
+            // after a short prebuffer while the rest keeps downloading.
             let dl_start = Instant::now();
             let Some(master_key) = master_key else {
                 let _ = tx.send(AsyncResult::TrackFetchError {
@@ -2540,7 +2541,7 @@ impl Daemon {
                 });
                 return;
             };
-            match deezer_core::player::stream::download_and_decrypt(
+            match deezer_core::player::stream::stream_and_decrypt(
                 &url,
                 &track.track_id,
                 &master_key,
@@ -2548,17 +2549,16 @@ impl Daemon {
             )
             .await
             {
-                Ok(audio_data) => {
+                Ok(reader) => {
                     info!(
                         gen = generation,
                         track_id = %track.track_id,
-                        bytes = audio_data.len(),
-                        dl_ms = dl_start.elapsed().as_millis(),
+                        prebuffer_ms = dl_start.elapsed().as_millis(),
                         total_ms = start.elapsed().as_millis(),
-                        "fetch_task: download+decrypt OK"
+                        "fetch_task: stream prebuffered"
                     );
                     let _ = tx.send(AsyncResult::TrackReady {
-                        audio_data,
+                        audio_data: reader.into(),
                         track: track.with_identity_of(&requested),
                         quality: actual_quality,
                         generation,
@@ -2571,7 +2571,7 @@ impl Daemon {
                         err = %e,
                         dl_ms = dl_start.elapsed().as_millis(),
                         total_ms = start.elapsed().as_millis(),
-                        "fetch_task: download+decrypt FAILED"
+                        "fetch_task: stream+decrypt FAILED"
                     );
                     let _ = tx.send(AsyncResult::TrackFetchError {
                         err: e.to_string(),
@@ -3519,7 +3519,7 @@ impl Daemon {
                         gen = generation,
                         track_id = %track.track_id,
                         title = %track.title,
-                        bytes = audio_data.len(),
+                        bytes = ?audio_data.known_len(),
                         "process_async: TrackReady, calling play_decoded"
                     );
                     if let Some(ref mut engine) = self.engine {
@@ -3829,7 +3829,7 @@ impl Daemon {
             match OfflineIndex::load_track_audio(&track_id) {
                 Ok(audio_data) => {
                     let _ = tx.send(AsyncResult::TrackReady {
-                        audio_data,
+                        audio_data: audio_data.into(),
                         track,
                         quality: AudioQuality::Mp3_128, // actual quality stored in index
                         generation,
