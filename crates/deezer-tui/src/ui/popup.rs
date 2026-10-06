@@ -687,6 +687,8 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
             }),
             s.help_navigate_list,
         ),
+        (Some("Home/End"), s.help_list_first_last),
+        (Some("PgUp/PgDn"), s.help_list_page),
         (
             Some(if view.vim_keys {
                 "h/l or Left/Right"

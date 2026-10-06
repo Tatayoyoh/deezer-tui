@@ -2412,6 +2412,17 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // Home / End / PageUp / PageDown: jump within the focused list.
+        if matches!(
+            key.code,
+            KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown
+        ) && self.view.screen == Screen::Main
+            && !self.view.is_text_input_active()
+            && !popup_typing
+        {
+            return self.jump_in_list(key.code);
+        }
+
         // e : toggle equalizer (not during text input), from any page
         if key.code == KeyCode::Char('e')
             && self.view.screen == Screen::Main
@@ -5188,24 +5199,105 @@ impl Client {
                 return KeyAction::Continue;
             }
         }
-        let mut guard = 0;
-        while let Some(current) = self.modal_selection() {
-            if current == index || guard > MAX_MODAL_OPTIONS {
+        self.walk_modal_cursor(index);
+        self.handle_key(KeyEvent::from(KeyCode::Enter))
+    }
+
+    /// Walk the open modal's cursor towards `index` with the arrow keys. Stops
+    /// at an end of the list, or once it steps over `index` (a section title
+    /// the cursor skips).
+    fn walk_modal_cursor(&mut self, index: usize) {
+        let Some(start) = self.modal_selection() else {
+            return;
+        };
+        let down = start < index;
+        let key = KeyEvent::from(if down { KeyCode::Down } else { KeyCode::Up });
+        let mut current = start;
+        for _ in 0..MAX_MODAL_OPTIONS {
+            if current == index || (current < index) != down {
                 break;
             }
-            guard += 1;
-            let key = if current < index {
-                KeyCode::Down
-            } else {
-                KeyCode::Up
-            };
-            self.handle_key(KeyEvent::from(key));
-            // The cursor hit an end of the list: stop rather than spin.
-            if self.modal_selection() == Some(current) {
-                break;
+            self.handle_key(key);
+            match self.modal_selection() {
+                // The cursor hit an end of the list: stop rather than spin.
+                Some(next) if next != current => current = next,
+                _ => break,
             }
         }
-        self.handle_key(KeyEvent::from(KeyCode::Enter))
+    }
+
+    /// Home / End / PageUp / PageDown on the topmost list drawn last frame:
+    /// first row, last row, or one screenful up / down.
+    fn jump_in_list(&mut self, code: KeyCode) -> KeyAction {
+        let Some(rows) = self.view.click.borrow().rows else {
+            return KeyAction::Continue;
+        };
+        // A focused album / artist description scrolls with the arrows; there
+        // is no row cursor to move.
+        let left_panel_focused = match rows.kind {
+            RowsKind::AlbumDetail => self.view.album_detail_left_focused,
+            RowsKind::ArtistDetail => self.view.artist_detail_left_focused,
+            _ => false,
+        };
+        if rows.len == 0 || left_panel_focused {
+            return KeyAction::Continue;
+        }
+        let Some(current) = self.row_selection(rows.kind) else {
+            return KeyAction::Continue;
+        };
+        let target = jump_target(code, current, rows.len, rows.area.height as usize);
+        if rows.kind == RowsKind::Modal {
+            self.walk_modal_cursor(target);
+            return KeyAction::Continue;
+        }
+        match self.select_row(rows.kind, target) {
+            Some(cmd) => KeyAction::SendCommand(cmd),
+            None => KeyAction::Continue,
+        }
+    }
+
+    /// Cursor position of the list `kind` — the read side of `select_row`.
+    fn row_selection(&self, kind: RowsKind) -> Option<usize> {
+        let view = &self.view;
+        let selected = match kind {
+            RowsKind::Tab => match view.active_tab {
+                ActiveTab::Search => view.search_selected,
+                ActiveTab::Favorites if view.favorites_filter_active() => {
+                    view.favorites_filter_selected
+                }
+                ActiveTab::Favorites => view.favorites_selected,
+                ActiveTab::Explore => match view.explore_category {
+                    ExploreCategory::Moods => view.moods_selected,
+                    ExploreCategory::Categories => view.genres_selected,
+                    ExploreCategory::Radios => view.radios_selected,
+                },
+                ActiveTab::Downloads if view.offline_filter_active() => {
+                    view.offline_filter_selected
+                }
+                ActiveTab::Downloads => view.offline_selected,
+            },
+            RowsKind::AlbumDetail => view.album_detail_selected,
+            RowsKind::ArtistDetail => view.artist_detail_selected,
+            RowsKind::GenreDetail => match view.overlay {
+                Some(Overlay::GenreDetail { selected, .. }) => selected,
+                _ => return None,
+            },
+            RowsKind::PlaylistDetail => match view.overlay {
+                Some(Overlay::PlaylistDetail { selected })
+                | Some(Overlay::ShowDetail { selected }) => selected,
+                _ => return None,
+            },
+            RowsKind::WaitingList => match view.overlay {
+                Some(Overlay::WaitingList { selected }) => selected,
+                _ => return None,
+            },
+            RowsKind::OfflineDetail => match view.overlay {
+                Some(Overlay::OfflineDetail { selected, .. }) => selected,
+                _ => return None,
+            },
+            RowsKind::Modal => return self.modal_selection(),
+        };
+        Some(selected)
     }
 
     /// Cursor position within the open modal's option list.
@@ -5418,6 +5510,20 @@ impl Client {
             // Handled by `click_modal_row`, which walks the modal's own cursor.
             RowsKind::Modal => None,
         }
+    }
+}
+
+/// Row a Home / End / PageUp / PageDown key lands on in a list of `len` rows
+/// (`len > 0`), `page` of them visible, from the cursor at `current`.
+fn jump_target(code: KeyCode, current: usize, len: usize, page: usize) -> usize {
+    let page = page.max(1);
+    let last = len - 1;
+    match code {
+        KeyCode::Home => 0,
+        KeyCode::End => last,
+        KeyCode::PageUp => current.saturating_sub(page).min(last),
+        KeyCode::PageDown => (current + page).min(last),
+        _ => current.min(last),
     }
 }
 
@@ -5779,6 +5885,21 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0, 1);
         assert_eq!(filtered[0].1.title, "Beta");
+    }
+
+    #[test]
+    fn jump_target_moves_to_ends_and_by_page() {
+        // 50 rows, 10 visible, cursor on row 12.
+        assert_eq!(jump_target(KeyCode::Home, 12, 50, 10), 0);
+        assert_eq!(jump_target(KeyCode::End, 12, 50, 10), 49);
+        assert_eq!(jump_target(KeyCode::PageDown, 12, 50, 10), 22);
+        assert_eq!(jump_target(KeyCode::PageUp, 12, 50, 10), 2);
+        // Clamped at both ends.
+        assert_eq!(jump_target(KeyCode::PageDown, 45, 50, 10), 49);
+        assert_eq!(jump_target(KeyCode::PageUp, 3, 50, 10), 0);
+        // A stale cursor past the end and a zero-height area stay in range.
+        assert_eq!(jump_target(KeyCode::PageUp, 80, 50, 10), 49);
+        assert_eq!(jump_target(KeyCode::PageDown, 0, 50, 0), 1);
     }
 
     #[test]

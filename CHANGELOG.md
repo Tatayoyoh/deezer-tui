@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Search: new "All" category (default) mixing every result type — name, localized type and details columns. `Enter` opens the matching artist/album/playlist/podcast view; on a track it starts playback and queues a mix inspired by it.
 - 10-band graphic equalizer (`e`, or Settings → Equalizer): presets (Bass Boost, Rock, Vocal…), per-band ±12 dB plus a global gain, applied live to the playing track, saved in `config.json`. Pure-Rust biquad filters (`biquad` crate), with a transparent peak limiter so boosts never clip nor lower the overall level.
 - Playlist detail sorting (`o`): cycle Default → Recently added → Title → Artist → Album → Duration. The current order is shown on the filter box, the cursor and scroll position stay put while re-sorting, and playing a track queues the playlist in the displayed order. Suggested in #30.
+- List navigation shortcuts: `Home` / `End` jump to the first / last item, `PageUp` / `PageDown` move one screenful — in tab lists, detail views, the waiting list and menus.
 
 ## [1.18.0] - 2026-09-14
 

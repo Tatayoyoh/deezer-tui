@@ -253,6 +253,8 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | `Tab` / `Shift+Tab` | Switch tabs |
 | `h` / `l` or `←` / `→` | Switch category within tab |
 | `j` / `k` or `↑` / `↓` | Navigate list |
+| `Home` / `End` | First / last item of list |
+| `PgUp` / `PgDn` | Move one page up / down |
 | `/` | Enter search mode (on Search tab) |
 | `Enter` | Submit search / Play selected / Open detail |
 | `Esc` | Close overlay / Exit search mode |
