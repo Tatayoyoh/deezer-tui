@@ -332,6 +332,11 @@ Run `cargo clippy -- -D warnings` for lint checks when relevant.
 
 When adding features or fixes (not during release), add brief entry under `[Unreleased]` in `CHANGELOG.md`.
 
+**Changelog style — concise, user side.** Entries are shown to users in the info modal after an upgrade, so:
+- One short line per entry: what the user sees or can do, with the key if any. No implementation details (internals, files, causes, mechanisms).
+- Fixes: the symptom that is gone, not why it happened.
+- Examples: ``- Playlist sorting (`o`): Default / Recently added / Title / Artist / Album / Duration`` — ``- Settings changed in the TUI no longer revert after a volume change``
+
 ## Legal Notice
 
 Uses Deezer's undocumented private API for personal use. Users must have valid Deezer account. Master decryption secret NOT hardcoded — extracted at runtime from Deezer's public web resources, same as browser. Does not facilitate piracy — audio streamed, not saved.
