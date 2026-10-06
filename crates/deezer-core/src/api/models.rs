@@ -190,6 +190,12 @@ pub struct TrackData {
     #[serde(rename = "EPISODE_DIRECT_STREAM_URL")]
     #[serde(default)]
     pub direct_stream_url: Option<String>,
+    /// Unix timestamp the track was added to the playlist it was loaded from
+    /// (`deezer.pagePlaylist` only). 0 when unknown.
+    #[serde(rename = "DATE_ADD")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_string_or_number")]
+    pub date_add: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -379,6 +385,7 @@ impl EpisodeData {
             md5_origin: self.md5_origin.clone(),
             fallback: None,
             direct_stream_url: self.direct_stream_url.clone(),
+            date_add: 0,
         }
     }
 }

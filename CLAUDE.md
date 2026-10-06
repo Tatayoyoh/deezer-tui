@@ -289,6 +289,8 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | `Enter` | Play track |
 | `L` / `f` | Toggle favorite |
 | `x` | Open context menu |
+| `/` | Filter tracks (playlist) |
+| `o` | Cycle sort order (playlist) |
 | `Esc` | Close detail |
 
 ## Development Guidelines

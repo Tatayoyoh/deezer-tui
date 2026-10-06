@@ -1120,14 +1120,15 @@ impl Daemon {
             Command::GetShowDetail { show_id } => {
                 self.start_load_show_detail(show_id);
             }
-            Command::PlayFromPlaylist { index } => {
+            Command::PlayFromPlaylist { index, order } => {
                 if let Some(ref detail) = self.playlist_detail {
                     if let Some(track) = detail.tracks.get(index).cloned() {
                         self.flow_active = false;
                         self.active_mood = None;
+                        let (queue, queue_index) = playlist_queue(&detail.tracks, index, &order);
                         if let Ok(mut state) = self.player_state.lock() {
-                            state.queue = detail.tracks.clone();
-                            state.queue_index = index;
+                            state.queue = queue;
+                            state.queue_index = queue_index;
                         }
                         self.start_play_track(track);
                     }
@@ -4088,9 +4089,69 @@ fn forward_candidates(
     out
 }
 
+/// Queue for a track started from the playlist detail, and the started
+/// track's position in it.
+///
+/// `order` is the sorted display order sent by the client. It is honoured only
+/// when it is a permutation of the playlist: a stale order (playlist reloaded
+/// in between) falls back to the playlist's own order rather than dropping or
+/// duplicating tracks.
+fn playlist_queue(tracks: &[TrackData], index: usize, order: &[usize]) -> (Vec<TrackData>, usize) {
+    let mut seen = vec![false; tracks.len()];
+    let is_permutation = order.len() == tracks.len()
+        && order
+            .iter()
+            .all(|&i| i < tracks.len() && !std::mem::replace(&mut seen[i], true));
+    match order.iter().position(|&i| i == index) {
+        Some(pos) if is_permutation => (order.iter().map(|&i| tracks[i].clone()).collect(), pos),
+        _ => (tracks.to_vec(), index),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{forward_candidates, shuffled_indices};
+    use super::{forward_candidates, playlist_queue, shuffled_indices};
+    use deezer_core::api::models::TrackData;
+
+    fn track(id: &str) -> TrackData {
+        serde_json::from_value(serde_json::json!({
+            "SNG_ID": id,
+            "SNG_TITLE": id,
+            "ART_NAME": "artist",
+        }))
+        .unwrap()
+    }
+
+    fn ids(queue: &[TrackData]) -> Vec<&str> {
+        queue.iter().map(|t| t.track_id.as_str()).collect()
+    }
+
+    #[test]
+    fn playlist_queue_follows_the_sorted_order() {
+        let tracks = vec![track("a"), track("b"), track("c")];
+        let (queue, pos) = playlist_queue(&tracks, 0, &[2, 0, 1]);
+        assert_eq!(ids(&queue), vec!["c", "a", "b"]);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn playlist_queue_keeps_the_playlist_order_without_sort() {
+        let tracks = vec![track("a"), track("b"), track("c")];
+        let (queue, pos) = playlist_queue(&tracks, 1, &[]);
+        assert_eq!(ids(&queue), vec!["a", "b", "c"]);
+        assert_eq!(pos, 1);
+    }
+
+    #[test]
+    fn playlist_queue_ignores_a_stale_order() {
+        let tracks = vec![track("a"), track("b"), track("c")];
+        // Wrong length, out of range, duplicate.
+        for order in [&[1, 0][..], &[0, 1, 5], &[0, 0, 1]] {
+            let (queue, pos) = playlist_queue(&tracks, 2, order);
+            assert_eq!(ids(&queue), vec!["a", "b", "c"]);
+            assert_eq!(pos, 2);
+        }
+    }
 
     #[test]
     fn forward_candidates_stop_at_the_end_without_repeat() {

@@ -718,6 +718,72 @@ fn contains(rect: Rect, col: u16, row: u16) -> bool {
     col >= rect.x && col < rect.right() && row >= rect.y && row < rect.bottom()
 }
 
+/// Display order of the playlist detail modal's tracks, cycled with `o`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PlaylistSort {
+    /// The playlist's own order.
+    #[default]
+    Default,
+    /// Most recently added first (`DATE_ADD`).
+    RecentlyAdded,
+    Title,
+    Artist,
+    Album,
+    Duration,
+}
+
+impl PlaylistSort {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Default => Self::RecentlyAdded,
+            Self::RecentlyAdded => Self::Title,
+            Self::Title => Self::Artist,
+            Self::Artist => Self::Album,
+            Self::Album => Self::Duration,
+            Self::Duration => Self::Default,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        let s = t();
+        match self {
+            Self::Default => s.sort_default,
+            Self::RecentlyAdded => s.sort_recently_added,
+            Self::Title => s.sort_title,
+            Self::Artist => s.sort_artist,
+            Self::Album => s.sort_album,
+            Self::Duration => s.sort_duration,
+        }
+    }
+
+    /// Track indices of `tracks` in this display order. Ties keep the
+    /// playlist's order (stable sort), so an artist's tracks stay grouped by
+    /// album and an album's tracks stay in playlist order.
+    pub fn order(self, tracks: &[TrackData]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..tracks.len()).collect();
+        let key = |i: usize, f: fn(&TrackData) -> &str| f(&tracks[i]).to_lowercase();
+        match self {
+            Self::Default => {}
+            // Without any DATE_ADD (not every endpoint sends it), fall back to
+            // the reverse playlist order, which is the order tracks were added
+            // in for a playlist that was never reordered by hand.
+            Self::RecentlyAdded if tracks.iter().all(|t| t.date_add == 0) => order.reverse(),
+            Self::RecentlyAdded => order.sort_by_key(|&i| std::cmp::Reverse(tracks[i].date_add)),
+            Self::Title => {
+                order.sort_by_cached_key(|&i| (key(i, |t| &t.title), key(i, |t| &t.artist)))
+            }
+            Self::Artist => {
+                order.sort_by_cached_key(|&i| (key(i, |t| &t.artist), key(i, |t| &t.album)))
+            }
+            Self::Album => {
+                order.sort_by_cached_key(|&i| (key(i, |t| &t.album), key(i, |t| &t.artist)))
+            }
+            Self::Duration => order.sort_by_key(|&i| tracks[i].duration_secs()),
+        }
+        order
+    }
+}
+
 /// View state used by UI rendering functions.
 /// Combines daemon snapshot with local client-only state.
 pub struct ViewState {
@@ -795,6 +861,8 @@ pub struct ViewState {
     /// Fuzzy filter of the open playlist detail modal's track list (`/`).
     pub playlist_detail_filter_input: String,
     pub playlist_detail_filter_typing: bool,
+    /// Display order of the playlist detail modal (`o`). Client-only.
+    pub playlist_detail_sort: PlaylistSort,
     pub genre_detail: Option<GenreDetail>,
     pub genre_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -984,6 +1052,7 @@ impl ViewState {
             playlist_detail_loading: snap.playlist_detail_loading,
             playlist_detail_filter_input: String::new(),
             playlist_detail_filter_typing: false,
+            playlist_detail_sort: PlaylistSort::Default,
             genre_detail: snap.genre_detail.clone(),
             genre_detail_loading: snap.genre_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -1254,10 +1323,12 @@ impl ViewState {
         }
     }
 
-    /// Clear the playlist detail modal's track filter (on open / re-open).
+    /// Clear the playlist detail modal's track filter and sort (on open /
+    /// re-open).
     pub fn reset_playlist_detail_filter(&mut self) {
         self.playlist_detail_filter_input.clear();
         self.playlist_detail_filter_typing = false;
+        self.playlist_detail_sort = PlaylistSort::Default;
     }
 
     /// Leave every text input: the mouse moved the focus somewhere else.
@@ -1701,23 +1772,34 @@ impl ViewState {
             .collect()
     }
 
-    /// Tracks of the open playlist detail modal matching its `/` filter, each
-    /// paired with its original index in the playlist. Empty filter returns all.
+    /// Tracks of the open playlist detail modal matching its `/` filter, in
+    /// its sort order, each paired with its original index in the playlist.
+    /// Empty filter returns all.
     pub fn playlist_detail_tracks_filtered(&self) -> Vec<(usize, &TrackData)> {
         let Some(detail) = self.playlist_detail.as_ref() else {
             return Vec::new();
         };
         let query = self.playlist_detail_filter_input.to_lowercase();
-        detail
-            .tracks
-            .iter()
-            .enumerate()
+        self.playlist_detail_sort
+            .order(&detail.tracks)
+            .into_iter()
+            .map(|i| (i, &detail.tracks[i]))
             .filter(|(_, t)| {
                 query.is_empty()
                     || fuzzy_match(&query, &t.title.to_lowercase())
                     || fuzzy_match(&query, &t.artist.to_lowercase())
             })
             .collect()
+    }
+
+    /// Play the playlist detail's track `index`, queueing the whole playlist in
+    /// the on-screen sort order (the `/` filter only narrows what is shown).
+    fn play_from_playlist(&self, index: usize) -> Command {
+        let order = match (self.playlist_detail_sort, self.playlist_detail.as_ref()) {
+            (PlaylistSort::Default, _) | (_, None) => Vec::new(),
+            (sort, Some(detail)) => sort.order(&detail.tracks),
+        };
+        Command::PlayFromPlaylist { index, order }
     }
 
     /// Title shown by the offline detail modal.
@@ -2765,6 +2847,8 @@ impl Client {
                             });
                         }
                         if let Some(show_id) = item.show_id.clone() {
+                            // Shows reuse the playlist detail; drop its filter/sort.
+                            self.view.reset_playlist_detail_filter();
                             self.view
                                 .set_nav_overlay(Overlay::ShowDetail { selected: 0 });
                             return KeyAction::SendCommand(Command::GetShowDetail { show_id });
@@ -4088,9 +4172,15 @@ impl Client {
                 self.view.overlay = Some(Overlay::PlaylistDetail { selected: new_sel });
                 KeyAction::Continue
             }
+            // Cycle the sort order. The cursor and the scroll stay on the same
+            // row: only the tracks under them change.
+            KeyCode::Char('o') => {
+                self.view.playlist_detail_sort = self.view.playlist_detail_sort.next();
+                KeyAction::Continue
+            }
             KeyCode::Enter => match focused {
                 Some((track_index, _)) => {
-                    KeyAction::SendCommand(Command::PlayFromPlaylist { index: track_index })
+                    KeyAction::SendCommand(self.view.play_from_playlist(track_index))
                 }
                 None => KeyAction::Continue,
             },
@@ -4155,7 +4245,10 @@ impl Client {
                 self.view.overlay = Some(Overlay::ShowDetail { selected: new_sel });
                 KeyAction::Continue
             }
-            KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist { index: selected }),
+            KeyCode::Enter => KeyAction::SendCommand(Command::PlayFromPlaylist {
+                index: selected,
+                order: Vec::new(),
+            }),
             // Open waiting list on top of the show
             KeyCode::Char('w') => {
                 self.view.push_overlay(Overlay::WaitingList { selected: 0 });
@@ -5686,6 +5779,111 @@ mod tests {
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0, 1);
         assert_eq!(filtered[0].1.title, "Beta");
+    }
+
+    #[test]
+    fn playlist_sort_orders_and_breaks_ties_by_playlist_order() {
+        fn track(title: &str, artist: &str, album: &str, dur: u64, added: u64) -> TrackData {
+            serde_json::from_value(serde_json::json!({
+                "SNG_ID": title,
+                "SNG_TITLE": title,
+                "ART_NAME": artist,
+                "ALB_TITLE": album,
+                "DURATION": dur.to_string(),
+                "DATE_ADD": added,
+            }))
+            .unwrap()
+        }
+        let tracks = vec![
+            track("beta", "Zed", "B-side", 200, 30),
+            track("Alpha", "abba", "Gold", 100, 10),
+            track("gamma", "Zed", "A-side", 300, 20),
+            track("delta", "ABBA", "Gold", 150, 40),
+        ];
+
+        assert_eq!(PlaylistSort::Default.order(&tracks), [0, 1, 2, 3]);
+        assert_eq!(PlaylistSort::RecentlyAdded.order(&tracks), [3, 0, 2, 1]);
+        assert_eq!(PlaylistSort::Title.order(&tracks), [1, 0, 3, 2]);
+        // Case-insensitive; same artist grouped by album, then playlist order.
+        assert_eq!(PlaylistSort::Artist.order(&tracks), [1, 3, 2, 0]);
+        assert_eq!(PlaylistSort::Album.order(&tracks), [2, 0, 1, 3]);
+        assert_eq!(PlaylistSort::Duration.order(&tracks), [1, 3, 0, 2]);
+
+        // No DATE_ADD at all → newest first means reverse playlist order.
+        let undated: Vec<TrackData> = tracks
+            .into_iter()
+            .map(|mut t| {
+                t.date_add = 0;
+                t
+            })
+            .collect();
+        assert_eq!(PlaylistSort::RecentlyAdded.order(&undated), [3, 2, 1, 0]);
+
+        // The cycle visits every mode and comes back.
+        let mut sort = PlaylistSort::Default;
+        for _ in 0..6 {
+            sort = sort.next();
+        }
+        assert_eq!(sort, PlaylistSort::Default);
+    }
+
+    #[test]
+    fn playlist_detail_sort_applies_before_filter_and_drives_the_queue() {
+        fn track(id: &str, title: &str) -> TrackData {
+            serde_json::from_value(serde_json::json!({
+                "SNG_ID": id,
+                "SNG_TITLE": title,
+                "ART_NAME": "A",
+            }))
+            .unwrap()
+        }
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot::default());
+        view.playlist_detail = Some(PlaylistDetail {
+            playlist_id: "1".into(),
+            title: "Mix".into(),
+            creator: "Me".into(),
+            nb_tracks: 3,
+            tracks: vec![
+                track("10", "Charlie"),
+                track("20", "Alpha"),
+                track("30", "Bravo"),
+            ],
+        });
+
+        // Unsorted: the queue keeps the playlist order.
+        match view.play_from_playlist(1) {
+            Command::PlayFromPlaylist { index, order } => {
+                assert_eq!(index, 1);
+                assert!(order.is_empty());
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        view.playlist_detail_sort = PlaylistSort::Title;
+        let shown: Vec<usize> = view
+            .playlist_detail_tracks_filtered()
+            .iter()
+            .map(|(i, _)| *i)
+            .collect();
+        assert_eq!(shown, [1, 2, 0]);
+
+        // The filter narrows the view, but the queue is the full sorted playlist.
+        view.playlist_detail_filter_input = "br".into();
+        let shown = view.playlist_detail_tracks_filtered();
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].0, 2);
+        match view.play_from_playlist(2) {
+            Command::PlayFromPlaylist { index, order } => {
+                assert_eq!(index, 2);
+                assert_eq!(order, [1, 2, 0]);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+
+        // Re-opening resets both.
+        view.reset_playlist_detail_filter();
+        assert_eq!(view.playlist_detail_sort, PlaylistSort::Default);
+        assert!(view.playlist_detail_filter_input.is_empty());
     }
 
     #[test]

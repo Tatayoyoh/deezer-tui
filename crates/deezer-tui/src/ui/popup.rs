@@ -1443,6 +1443,14 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
             } else {
                 s.favorites_filter_normal
             }))
+            .title_top(
+                Line::from(vec![
+                    Span::styled(format!(" {}: ", s.sort_label), Theme::dim()),
+                    Span::styled(view.playlist_detail_sort.label(), Theme::title()),
+                    Span::raw(" "),
+                ])
+                .right_aligned(),
+            )
             .title_style(Theme::title());
         let input_text = if view.playlist_detail_filter_input.is_empty() && !is_typing {
             Span::styled(s.playlist_detail_filter_placeholder, Theme::dim())
@@ -1548,6 +1556,8 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
             Span::styled(s.hint_favorite, Theme::dim()),
             Span::styled("/", Theme::shortcut_key()),
             Span::styled(s.hint_filter, Theme::dim()),
+            Span::styled("o", Theme::shortcut_key()),
+            Span::styled(s.hint_sort, Theme::dim()),
             Span::styled("x", Theme::shortcut_key()),
             Span::styled(s.hint_menu, Theme::dim()),
             Span::styled("d", Theme::shortcut_key()),

@@ -127,8 +127,14 @@ pub enum Command {
     OpenArtistAlbum { index: usize },
     /// Load playlist detail (tracks, metadata).
     GetPlaylistDetail { playlist_id: String },
-    /// Play a track from the playlist detail view.
-    PlayFromPlaylist { index: usize },
+    /// Play a track from the playlist detail view. `order` is the playlist's
+    /// display order (track indices) when the user sorted it, so the queue
+    /// follows what is on screen; empty means the playlist's own order.
+    PlayFromPlaylist {
+        index: usize,
+        #[serde(default)]
+        order: Vec<usize>,
+    },
     /// Load a podcast show's episode list.
     GetShowDetail { show_id: String },
     /// Logout — clear ARL, return to login screen.
