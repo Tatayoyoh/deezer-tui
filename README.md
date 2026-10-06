@@ -37,7 +37,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ## Features
 
 ✅ Login through deezer.com<br>
-✅ A lot of [shortcuts](#main-shortcuts) [`?`]<br>
+✅ A lot of [shortcuts](#useful-shortcuts) [`?`]<br>
 ✅ Mouse events<br>
 ✅ Background player<br>
 ✅ Themes, from official Deezer themes<br>
