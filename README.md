@@ -37,16 +37,9 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ## Features
 
 ✅ Login through deezer.com<br>
-✅ Background player with `ctrl+z`<br>
-✅ Deezer Flow `f`<br>
-✅ Search / favorites / radios pages<br>
-✅ Playing track context menu `ctrl+space`<br>
-✅ Focused element context menu `x`<br>
-✅ Album page `a`<br>
-✅ Artist page `t`<br>
-✅ Waiting list `w`<br>
-✅ Shortcut menu `?`<br>
-✅ Global app menu `ctrl+o`<br>
+✅ A lot of [shortcuts](#main-shortcuts) [`?`]<br>
+✅ Mouse events<br>
+✅ Background player<br>
 ✅ Themes, from official Deezer themes<br>
 ✅ Audio quality selection (MP3 64/128/320, FLAC)<br>
 ✅ Translations <br>
@@ -56,8 +49,21 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ MPRIS support for Linux desktop environments : play/next track/previous track<br>
 ✅ CLI controls & status line integration (`--status`, `--json`, `--volume`, etc.) for tmux, Waybar, Polybar, and scripts<br>
 ✅ Shell completions generator for Bash, Zsh, and Fish (`--completions <shell>`)<br>
-✅ Dynamic terminal window/tab title with now-playing track info and panic-safe terminal restoration<br>
+✅ Dynamic terminal window/tab title<br>
 ✅ 10-band biquad Equalizer
+
+## Useful shortcuts
+
+* settings [`ctrl+o`] or `escape` on main window
+* background mode [`ctrl+z`]
+* Deezer Flow [`f`]
+* Element context menu : focused element [`x`], playing track [`ctrl+space`]
+* Equalizer [`e`]
+* Focused track's album page [`a`]
+* Focused track's artist page [`t`]
+* Waiting list [`w`]
+* Seek forward on playing track [`ctrl+→`]
+* Seek backward on playing track [`ctrl+←`]
 
 ## In action
 
