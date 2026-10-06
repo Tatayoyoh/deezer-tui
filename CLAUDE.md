@@ -31,6 +31,7 @@ deezer-tui/
 │   │       ├── player/     # Audio playback engine
 │   │       │   ├── mod.rs
 │   │       │   ├── engine.rs     # rodio/cpal playback, queue management
+│       │   ├── eq.rs         # 10-band biquad equalizer (rodio Source wrapper)
 │   │       │   ├── stream.rs     # HTTP progressive streaming + decrypt
 │   │       │   └── state.rs      # Player state (playing, paused, position, volume)
 │   │       └── config.rs   # Configuration (credentials, quality prefs)
@@ -140,6 +141,7 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 | Crypto       | `blowfish`, `cbc`, `md-5` | Track decryption + key derivation      |
 | Decoding     | `symphonia`               | Pure-Rust MP3/FLAC decoder             |
 | Playback     | `rodio` (wraps `cpal`)    | Cross-platform audio output            |
+| Equalizer    | `biquad`                  | RBJ cookbook IIR filters (graphic EQ)  |
 | Serialization| `serde`, `serde_json`     | API response parsing                   |
 | TUI          | `ratatui`, `crossterm`    | Terminal UI rendering                  |
 | Images       | `ratatui-image`, `image`  | Album/artist art (Sixel, Kitty, iTerm2, halfblocks) |
@@ -177,6 +179,7 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 - **Playlist detail** (`Enter` on playlist): Track listing for playlist
 - **Shortcuts help** (`?`): Keyboard shortcuts reference
 - **Settings** (`Ctrl+O`): Theme selection (official Deezer dark themes)
+- **Equalizer** (`e`): 10-band graphic EQ + global gain — `←/→` column, `↑/↓` gain, `Space` on/off, `p`/`P` preset, `0` reset column
 
 ### Search & Favorites Categories
 Both tabs support multi-category browsing (`h`/`l` to switch):
@@ -263,6 +266,7 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 | `m` / `x` | Open context menu for selected track |
 | `a` | Open album detail for selected track |
 | `w` | Open waiting list (queue) |
+| `e` | Open equalizer |
 | `?` | Show shortcuts help |
 | `f` | Start Deezer Flow |
 | `g` | Shuffle play favorites |

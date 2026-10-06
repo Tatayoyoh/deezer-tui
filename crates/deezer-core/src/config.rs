@@ -5,6 +5,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 use crate::api::models::{AudioQuality, DeezerError};
+use crate::player::eq::EqSettings;
 
 const APP_QUALIFIER: &str = "com";
 const APP_ORGANIZATION: &str = "deezer-tui";
@@ -30,6 +31,9 @@ pub struct Config {
     /// Enable vim-style navigation keys (h, j, k, l). Disabled by default.
     #[serde(default)]
     pub vim_keys: bool,
+    /// Graphic equalizer settings (disabled by default).
+    #[serde(default)]
+    pub equalizer: EqSettings,
 }
 
 fn default_quality() -> AudioQuality {
@@ -51,6 +55,7 @@ impl Default for Config {
             skip_update_check: false,
             bg_transparency: 0,
             vim_keys: false,
+            equalizer: EqSettings::default(),
         }
     }
 }

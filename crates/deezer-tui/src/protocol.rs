@@ -9,6 +9,7 @@ use deezer_core::api::models::{
     PlaylistDetail, TrackData,
 };
 use deezer_core::offline::OfflineTrack;
+use deezer_core::player::eq::EqSettings;
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 /// Commands sent from the TUI client to the daemon.
@@ -180,6 +181,8 @@ pub enum Command {
     ClearNavOverlayStack,
     /// Change the preferred audio quality (persisted to config). Takes effect on next track.
     SetQuality { quality: AudioQuality },
+    /// Replace the equalizer settings (applied live, persisted to config).
+    SetEqualizer { settings: EqSettings },
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -398,6 +401,8 @@ pub struct DaemonSnapshot {
     pub shuffle: bool,
     #[serde(default)]
     pub repeat: RepeatMode,
+    #[serde(default)]
+    pub equalizer: EqSettings,
 
     // Queue
     #[serde(default)]
@@ -555,6 +560,7 @@ impl Default for DaemonSnapshot {
             volume: 0.8,
             shuffle: false,
             repeat: RepeatMode::Off,
+            equalizer: EqSettings::default(),
             queue: Vec::new(),
             queue_index: 0,
             search_results: Vec::new(),

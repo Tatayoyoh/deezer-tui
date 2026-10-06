@@ -65,6 +65,10 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_quality_picker(frame, view, *selected);
             return;
         }
+        Some(Overlay::Equalizer { column }) => {
+            draw_equalizer(frame, view, *column);
+            return;
+        }
         Some(Overlay::Info) => {
             draw_info_overlay(frame, view);
             return;
@@ -719,6 +723,7 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         (Some("?"), s.help_this_help),
         (Some("Ctrl+O"), s.help_settings),
         (Some("i"), s.help_info),
+        (Some("e"), s.help_equalizer),
         // Actions
         (None, s.help_section_actions),
         (Some("f"), s.help_start_flow),
@@ -856,10 +861,16 @@ fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
     } else {
         "OFF [● ]"
     };
+    let eq_status = if view.equalizer.enabled {
+        "ON  [e]"
+    } else {
+        "OFF [e]"
+    };
     let entries: &[(&str, &str)] = &[
         (s.settings_shortcuts, "?"),
         (s.settings_themes, ""),
         (s.settings_quality, ""),
+        (s.settings_equalizer, eq_status),
         (s.settings_language, ""),
         (s.settings_vim_keys, vim_status),
         (s.settings_logout, ""),
@@ -906,7 +917,13 @@ fn draw_settings_overlay(frame: &mut Frame, view: &ViewState, selected: usize) {
                 let pad = inner.width.saturating_sub(used) as usize;
                 let right_style = if i == selected {
                     style
-                } else if i == 4 {
+                } else if i == 3 {
+                    if view.equalizer.enabled {
+                        Style::default().fg(Theme::primary())
+                    } else {
+                        Theme::dim()
+                    }
+                } else if i == 5 {
                     if view.vim_keys {
                         Style::default().fg(Theme::primary())
                     } else {
@@ -1080,6 +1097,195 @@ fn draw_language_picker(frame: &mut Frame, view: &ViewState, selected: usize) {
 
     let list = List::new(items);
     frame.render_widget(list, inner);
+}
+
+/// Draw the graphic equalizer: the global gain then one vertical bar per band,
+/// around a 0 dB baseline. Up to 2 dB per row (fewer rows on short terminals),
+/// with half blocks for half-row values. `column` 0 is the global gain, band
+/// `i` is column `i + 1`.
+fn draw_equalizer(frame: &mut Frame, view: &ViewState, column: usize) {
+    use deezer_core::player::eq::{EQ_BAND_COUNT, EQ_FREQUENCIES, EQ_MAX_GAIN_DB};
+
+    const AXIS_W: usize = 5;
+    /// Band column width; the global gain column is wider for its label.
+    const COL_W: usize = 5;
+    const GLOBAL_W: usize = 6;
+    // status (1) + blank (1) + freq (1) + gains (1) + blank (1) + hints (2) + borders (2)
+    const CHROME_H: i32 = 9;
+
+    let s = t();
+    let eq = &view.equalizer;
+    // Rows above (and below) the baseline: 2 dB each when it fits, shrunk on
+    // short terminals so the hints stay visible.
+    let avail = i32::from(modal_area(frame.area()).height) - 2;
+    let half_rows = ((avail - CHROME_H - 1) / 2).clamp(2, (EQ_MAX_GAIN_DB / 2.0) as i32);
+    let db_per_row = EQ_MAX_GAIN_DB / half_rows as f32;
+    // axis + global + separator (1) + bands + margins/borders (4)
+    let width = (AXIS_W + GLOBAL_W + 1 + COL_W * EQ_BAND_COUNT + 4) as u16;
+    let height = (half_rows * 2 + 1 + CHROME_H) as u16;
+    let popup_area = centered_rect_abs(width, height, frame.area());
+
+    frame.render_widget(Clear, popup_area);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(format!(" {} ", s.settings_equalizer))
+        .title_style(Theme::title());
+    let inner = block.inner(popup_area).inner(Margin::new(1, 0));
+    frame.render_widget(block, popup_area);
+    view.record_modal(popup_area);
+
+    let on_style = Style::default()
+        .fg(Theme::primary())
+        .add_modifier(Modifier::BOLD);
+    let mut lines: Vec<Line> = Vec::new();
+
+    // ── Status: preset + on/off switch ───────────────────────────
+    let (status, switch, switch_style) = if eq.enabled {
+        ("ON", "[ ●]", on_style)
+    } else {
+        ("OFF", "[● ]", Theme::dim())
+    };
+    let left = format!("{}: {}", s.eq_preset, eq.preset.label());
+    let right = format!("{status:<3} {switch}");
+    let pad = (inner.width as usize).saturating_sub(left.chars().count() + right.len());
+    lines.push(Line::from(vec![
+        Span::styled(left, Theme::text()),
+        Span::raw(" ".repeat(pad)),
+        Span::styled(right, switch_style),
+    ]));
+    lines.push(Line::from(""));
+
+    // Columns: (gain, top label, width). Global gain first, then the bands.
+    let freq_label = |f: f32| {
+        if f >= 1000.0 {
+            format!("{}k", (f / 1000.0) as u32)
+        } else {
+            format!("{}", f as u32)
+        }
+    };
+    let columns: Vec<(f32, String, usize)> =
+        std::iter::once((eq.preamp, s.eq_global_gain.to_string(), GLOBAL_W))
+            .chain(
+                eq.gains
+                    .iter()
+                    .zip(EQ_FREQUENCIES)
+                    .map(|(&g, f)| (g, freq_label(f), COL_W)),
+            )
+            .collect();
+    // Vertical rule between the global gain and the bands.
+    let separator = |spans: &mut Vec<Span>, i: usize, glyph: &'static str| {
+        if i == 0 {
+            spans.push(Span::styled(glyph, Theme::dim()));
+        }
+    };
+
+    // ── Bars ─────────────────────────────────────────────────────
+    // Foreground only: a background would paint the empty cells of the
+    // focused column and read as a full bar. The focused bar uses the text
+    // color, distinct from `primary` in every theme.
+    let bar_style = |i: usize| {
+        if i == column {
+            Style::default()
+                .fg(Theme::text_color())
+                .add_modifier(Modifier::BOLD)
+        } else if eq.enabled {
+            Style::default().fg(Theme::primary())
+        } else {
+            Theme::dim()
+        }
+    };
+    for row in (-half_rows..=half_rows).rev() {
+        let axis = match row {
+            r if r == half_rows => format!("{:+}", EQ_MAX_GAIN_DB as i32),
+            0 => "0".to_string(),
+            r if r == -half_rows => format!("{:+}", -EQ_MAX_GAIN_DB as i32),
+            _ => String::new(),
+        };
+        let mut spans = vec![Span::styled(
+            format!("{axis:>w$} ", w = AXIS_W - 1),
+            Theme::dim(),
+        )];
+        for (i, (gain, _, w)) in columns.iter().enumerate() {
+            // Gain measured outward from the baseline, in rows (sign folded
+            // into `row`'s direction).
+            let g = gain.round();
+            let fill = (if row > 0 { g } else { -g }) / db_per_row;
+            let depth = row.abs() as f32;
+            let cell = if row == 0 && i == column {
+                "━━━"
+            } else if row == 0 {
+                "───"
+            } else if fill >= depth {
+                "███"
+            } else if fill >= depth - 0.5 {
+                if row > 0 {
+                    "▄▄▄"
+                } else {
+                    "▀▀▀"
+                }
+            } else {
+                "   "
+            };
+            let style = if row == 0 && g == 0.0 && i != column {
+                Theme::dim()
+            } else {
+                bar_style(i)
+            };
+            let left = (w - 3) / 2;
+            spans.push(Span::raw(" ".repeat(left)));
+            spans.push(Span::styled(cell, style));
+            spans.push(Span::raw(" ".repeat(w - 3 - left)));
+            separator(&mut spans, i, "│");
+        }
+        lines.push(Line::from(spans));
+    }
+
+    // ── Column + gain labels ─────────────────────────────────────
+    let label_line = |labels: Vec<String>| {
+        let mut spans = vec![Span::raw(" ".repeat(AXIS_W))];
+        for (i, (label, (_, _, w))) in labels.into_iter().zip(&columns).enumerate() {
+            // The labels carry the cursor: highlighted chip under the focused column.
+            let label = format!("{label:^lw$}", lw = w - 2);
+            if i == column {
+                spans.push(Span::raw(" "));
+                spans.push(Span::styled(label, Theme::highlight()));
+                spans.push(Span::raw(" "));
+            } else {
+                spans.push(Span::styled(format!(" {label} "), Theme::dim()));
+            }
+            separator(&mut spans, i, " ");
+        }
+        Line::from(spans)
+    };
+    lines.push(label_line(columns.iter().map(|c| c.1.clone()).collect()));
+    lines.push(label_line(
+        columns
+            .iter()
+            .map(|&(g, _, _)| match g.round() as i32 {
+                0 => "0".to_string(),
+                g => format!("{g:+}"),
+            })
+            .collect(),
+    ));
+    lines.push(Line::from(""));
+
+    // ── Hints ────────────────────────────────────────────────────
+    let hints = |items: &[&'static str]| {
+        let mut spans = Vec::new();
+        for (i, h) in items.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled("  ", Theme::dim()));
+            }
+            spans.extend(shortcut_hint(h).spans);
+        }
+        Line::from(spans)
+    };
+    lines.push(hints(&[s.eq_hint_band, s.eq_hint_gain, s.eq_hint_toggle]));
+    lines.push(hints(&[s.eq_hint_preset, s.eq_hint_reset]));
+
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Draw the audio quality picker overlay.

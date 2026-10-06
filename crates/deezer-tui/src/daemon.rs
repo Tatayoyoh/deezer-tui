@@ -14,6 +14,7 @@ use deezer_core::api::models::{
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
 use deezer_core::player::engine::PlayerEngine;
+use deezer_core::player::eq::EqHandle;
 use deezer_core::player::state::{PlaybackStatus, PlayerState, RepeatMode};
 use deezer_core::Config;
 
@@ -236,6 +237,8 @@ pub struct Daemon {
 
     // Player
     player_state: Arc<Mutex<PlayerState>>,
+    /// Live equalizer parameters, shared with every `PlayerEngine`.
+    eq: EqHandle,
     client: Arc<tokio::sync::Mutex<DeezerClient>>,
     engine: Option<PlayerEngine>,
     master_key: Option<[u8; 16]>,
@@ -291,6 +294,7 @@ impl Daemon {
         let config = Config::load();
         let initial_volume = config.volume;
         let initial_quality = config.quality;
+        let eq = EqHandle::new(&config.equalizer);
 
         // Check network connectivity
         let is_offline = std::net::TcpStream::connect_timeout(
@@ -388,6 +392,7 @@ impl Daemon {
             nav_overlay: None,
             nav_overlay_stack: Vec::new(),
 
+            eq,
             player_state: Arc::new(Mutex::new(PlayerState {
                 volume: initial_volume,
                 quality: initial_quality,
@@ -442,7 +447,7 @@ impl Daemon {
 
         if self.is_offline {
             // In offline mode, create the audio engine immediately (no master key needed for local playback)
-            match PlayerEngine::new([0u8; 16], Arc::clone(&self.player_state)) {
+            match PlayerEngine::new([0u8; 16], Arc::clone(&self.player_state), self.eq.clone()) {
                 Ok(engine) => {
                     engine.set_volume(self.config.volume);
                     self.engine = Some(engine);
@@ -826,6 +831,11 @@ impl Daemon {
                     state.volume = volume;
                 }
                 self.config.volume = volume;
+                let _ = self.config.save();
+            }
+            Command::SetEqualizer { settings } => {
+                self.eq.apply(&settings);
+                self.config.equalizer = settings;
                 let _ = self.config.save();
             }
             Command::SetQuality { quality } => {
@@ -1319,6 +1329,7 @@ impl Daemon {
             volume: state.volume,
             shuffle: state.shuffle,
             repeat: state.repeat,
+            equalizer: self.config.equalizer.clone(),
             queue: state.queue.clone(),
             queue_index: state.queue_index,
             search_results: self.search_results.clone(),
@@ -2906,7 +2917,7 @@ impl Daemon {
                 AsyncResult::MasterKeyReady(key) => {
                     self.master_key = Some(key);
                     self.status_msg = Some(t().status_ready.into());
-                    match PlayerEngine::new(key, Arc::clone(&self.player_state)) {
+                    match PlayerEngine::new(key, Arc::clone(&self.player_state), self.eq.clone()) {
                         Ok(engine) => {
                             engine.set_volume(self.config.volume);
                             self.engine = Some(engine);

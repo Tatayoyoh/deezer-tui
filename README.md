@@ -57,6 +57,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ CLI controls & status line integration (`--status`, `--json`, `--volume`, etc.) for tmux, Waybar, Polybar, and scripts<br>
 ✅ Shell completions generator for Bash, Zsh, and Fish (`--completions <shell>`)<br>
 ✅ Dynamic terminal window/tab title with now-playing track info and panic-safe terminal restoration<br>
+✅ 10-band biquad Equalizer
 
 ## In action
 

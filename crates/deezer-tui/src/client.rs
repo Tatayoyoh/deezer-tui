@@ -29,6 +29,7 @@ use deezer_core::api::models::{
     PlaylistDetail, TrackData,
 };
 use deezer_core::config::Config;
+use deezer_core::player::eq::{EqPreset, EqSettings, EQ_BAND_COUNT};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::i18n::{self, t, Locale};
@@ -545,6 +546,9 @@ pub enum Overlay {
     QualityPicker { selected: usize },
     /// Language picker.
     LanguagePicker { selected: usize },
+    /// Graphic equalizer; `column` is the focused column: 0 is the global
+    /// gain, band `i` is column `i + 1`.
+    Equalizer { column: usize },
     /// Album detail view. `from_artist` is true when opened from the artist detail page.
     AlbumDetail { from_artist: bool },
     /// Artist detail view.
@@ -726,6 +730,7 @@ pub struct ViewState {
     pub position_secs: u64,
     pub duration_secs: u64,
     pub volume: f32,
+    pub equalizer: EqSettings,
     pub shuffle: bool,
     pub repeat: RepeatMode,
     pub queue: Vec<TrackData>,
@@ -911,6 +916,7 @@ impl ViewState {
             position_secs: snap.position_secs,
             duration_secs: snap.duration_secs,
             volume: snap.volume,
+            equalizer: snap.equalizer.clone(),
             shuffle: snap.shuffle,
             repeat: snap.repeat,
             queue: snap.queue.clone(),
@@ -1128,6 +1134,7 @@ impl ViewState {
                     | Overlay::ThemePicker { .. }
                     | Overlay::QualityPicker { .. }
                     | Overlay::LanguagePicker { .. }
+                    | Overlay::Equalizer { .. }
                     | Overlay::Info
                     | Overlay::UpdateAvailable { .. }
                     | Overlay::Updating { .. }
@@ -1281,6 +1288,7 @@ impl ViewState {
         self.position_secs = snap.position_secs;
         self.duration_secs = snap.duration_secs;
         self.volume = snap.volume;
+        self.equalizer = snap.equalizer;
         self.shuffle = snap.shuffle;
         self.repeat = snap.repeat;
         self.queue = snap.queue;
@@ -2322,6 +2330,20 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        // e : toggle equalizer (not during text input), from any page
+        if key.code == KeyCode::Char('e')
+            && self.view.screen == Screen::Main
+            && !self.view.is_text_input_active()
+            && !popup_typing
+        {
+            if matches!(self.view.overlay, Some(Overlay::Equalizer { .. })) {
+                self.view.pop_overlay();
+            } else {
+                self.view.push_overlay(Overlay::Equalizer { column: 1 });
+            }
+            return KeyAction::Continue;
+        }
+
         // i : toggle info modal (not during text input)
         if key.code == KeyCode::Char('i')
             && self.view.screen == Screen::Main
@@ -2884,7 +2906,7 @@ impl Client {
                 KeyAction::Continue
             }
             Overlay::Settings { selected } => {
-                const SETTINGS_COUNT: usize = 8;
+                const SETTINGS_COUNT: usize = 9;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') => {
                         self.view.pop_overlay();
@@ -2895,7 +2917,7 @@ impl Client {
                     code if ViewState::nav_down(code, vim_keys) => {
                         *selected = (*selected + 1).min(SETTINGS_COUNT - 1);
                     }
-                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *selected == 4 => {
+                    KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') if *selected == 5 => {
                         self.view.vim_keys = !self.view.vim_keys;
                         let mut config = Config::load();
                         config.vim_keys = self.view.vim_keys;
@@ -2929,6 +2951,11 @@ impl Client {
                                 return KeyAction::Continue;
                             }
                             3 => {
+                                // Equalizer
+                                self.view.push_overlay(Overlay::Equalizer { column: 1 });
+                                return KeyAction::Continue;
+                            }
+                            4 => {
                                 // Language
                                 let current = i18n::current_locale();
                                 let idx =
@@ -2937,7 +2964,7 @@ impl Client {
                                     .push_overlay(Overlay::LanguagePicker { selected: idx });
                                 return KeyAction::Continue;
                             }
-                            4 => {
+                            5 => {
                                 // Vim navigation keys toggle
                                 self.view.vim_keys = !self.view.vim_keys;
                                 let mut config = Config::load();
@@ -2945,16 +2972,16 @@ impl Client {
                                 let _ = config.save();
                                 return KeyAction::Continue;
                             }
-                            5 => {
+                            6 => {
                                 // Logout
                                 self.view.pop_overlay();
                                 return KeyAction::SendCommand(Command::Logout);
                             }
-                            6 => {
+                            7 => {
                                 // Send to background
                                 return KeyAction::Detach;
                             }
-                            7 => {
+                            8 => {
                                 // Quit
                                 return KeyAction::Quit;
                             }
@@ -2992,6 +3019,70 @@ impl Client {
                     _ => {}
                 }
                 KeyAction::Continue
+            }
+            Overlay::Equalizer { column } => {
+                let col = *column;
+                let mut eq = self.view.equalizer.clone();
+                // Gain of the focused column, and a setter writing it back.
+                let current = match col.checked_sub(1) {
+                    Some(band) => eq.gains[band],
+                    None => eq.preamp,
+                }
+                .round();
+                let set = |eq: &mut EqSettings, db: f32| match col.checked_sub(1) {
+                    Some(band) => eq.set_gain(band, db),
+                    None => eq.set_preamp(db),
+                };
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        self.view.pop_overlay();
+                        return KeyAction::Continue;
+                    }
+                    code if ViewState::nav_left(code, vim_keys) => {
+                        *column = col.saturating_sub(1);
+                        return KeyAction::Continue;
+                    }
+                    code if ViewState::nav_right(code, vim_keys) => {
+                        *column = (col + 1).min(EQ_BAND_COUNT);
+                        return KeyAction::Continue;
+                    }
+                    code if ViewState::nav_up(code, vim_keys) => {
+                        set(&mut eq, current + 1.0);
+                        eq.enabled = true;
+                    }
+                    code if ViewState::nav_down(code, vim_keys) => {
+                        set(&mut eq, current - 1.0);
+                        eq.enabled = true;
+                    }
+                    KeyCode::Char('0') => {
+                        set(&mut eq, 0.0);
+                    }
+                    KeyCode::Char(' ') | KeyCode::Enter => {
+                        eq.enabled = !eq.enabled;
+                    }
+                    KeyCode::Char('p') | KeyCode::Char('P') => {
+                        let presets = EqPreset::ALL;
+                        let n = presets.len();
+                        // From `Custom` (not in the list), `p` starts at the first preset.
+                        let next = match presets.iter().position(|&p| p == eq.preset) {
+                            Some(i) if key.code == KeyCode::Char('P') => (i + n - 1) % n,
+                            Some(i) => (i + 1) % n,
+                            None => 0,
+                        };
+                        eq.apply_preset(presets[next]);
+                        eq.enabled = true;
+                    }
+                    // Volume, next/prev, shuffle, repeat, like keep working
+                    // (Space stays the EQ on/off toggle above).
+                    code => {
+                        return self
+                            .player_control_action(code)
+                            .unwrap_or(KeyAction::Continue)
+                    }
+                }
+                // Optimistic update so the bars move before the daemon's snapshot.
+                self.view.equalizer = eq.clone();
+                KeyAction::SendCommand(Command::SetEqualizer { settings: eq })
             }
             Overlay::QualityPicker { selected } => {
                 let count = AudioQuality::ALL.len();

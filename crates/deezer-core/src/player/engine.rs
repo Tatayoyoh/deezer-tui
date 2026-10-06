@@ -6,6 +6,7 @@ use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
 use tracing::{debug, info};
 
 use crate::api::models::{AudioQuality, DeezerError, TrackData};
+use crate::player::eq::{EqHandle, Equalizer};
 use crate::player::state::{PlaybackStatus, PlayerState};
 
 pub struct PlayerEngine {
@@ -13,13 +14,19 @@ pub struct PlayerEngine {
     _stream: OutputStream,
     stream_handle: OutputStreamHandle,
     sink: Sink,
+    eq: EqHandle,
 }
 
 impl PlayerEngine {
     /// Builds the engine on top of an existing shared state handle, so callers that
     /// already handed out `Arc` clones (e.g. MPRIS) keep seeing live updates instead
-    /// of a snapshot frozen before the engine existed.
-    pub fn new(_master_key: [u8; 16], state: Arc<Mutex<PlayerState>>) -> Result<Self, DeezerError> {
+    /// of a snapshot frozen before the engine existed. `eq` is likewise shared:
+    /// settings applied to it are heard live on the playing track.
+    pub fn new(
+        _master_key: [u8; 16],
+        state: Arc<Mutex<PlayerState>>,
+        eq: EqHandle,
+    ) -> Result<Self, DeezerError> {
         let (stream, stream_handle) =
             OutputStream::try_default().map_err(|e| DeezerError::Playback(e.to_string()))?;
 
@@ -31,6 +38,7 @@ impl PlayerEngine {
             _stream: stream,
             stream_handle,
             sink,
+            eq,
         })
     }
 
@@ -49,6 +57,7 @@ impl PlayerEngine {
         let cursor = Cursor::new(audio_data);
         let source = Decoder::new(cursor)
             .map_err(|e| DeezerError::Playback(format!("Failed to decode audio: {e}")))?;
+        let source = Equalizer::new(source, self.eq.clone());
 
         // Preserve current volume before recreating the sink
         let current_volume = self.state.lock().unwrap().volume;

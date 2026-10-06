@@ -31,6 +31,9 @@ blowfish = "0.9"
 cbc = "0.1"
 md-5 = "0.10"
 
+# Equalizer (biquad IIR filters)
+biquad = "0.6"
+
 # Audio decoding & playback
 symphonia = { version = "0.5", features = ["mp3", "flac", "pcm"] }
 rodio = { version = "0.19", default-features = false, features = ["symphonia-mp3", "symphonia-flac"] }

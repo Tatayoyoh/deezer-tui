@@ -16,6 +16,7 @@ cbc = { workspace = true }
 md-5 = { workspace = true }
 symphonia = { workspace = true }
 rodio = { workspace = true }
+biquad = { workspace = true }
 stream-download = { workspace = true }
 regex = { workspace = true }
 thiserror = { workspace = true }

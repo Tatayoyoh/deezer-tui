@@ -264,6 +264,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "biquad"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8dee8f423f64504139bdc53d7fbe6a1cd8eff4f354be3652e7cf26385c9f1cb4"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -760,6 +769,7 @@ checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 name = "deezer-core"
 version = "1.18.0"
 dependencies = [
+ "biquad",
  "blowfish",
  "cbc",
  "directories",

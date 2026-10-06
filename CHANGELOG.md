@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 - Search: new "All" category (default) mixing every result type — name, localized type and details columns. `Enter` opens the matching artist/album/playlist/podcast view; on a track it starts playback and queues a mix inspired by it.
+- 10-band graphic equalizer (`e`, or Settings → Equalizer): presets (Bass Boost, Rock, Vocal…), per-band ±12 dB plus a global gain, applied live to the playing track, saved in `config.json`. Pure-Rust biquad filters (`biquad` crate), with a transparent peak limiter so boosts never clip nor lower the overall level.
 
 ## [1.18.0] - 2026-09-14
 
