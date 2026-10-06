@@ -309,6 +309,65 @@ pub fn render_logo(frame: &mut Frame, area: Rect) {
     frame.render_widget(deezer_logo(), logo_area);
 }
 
+/// Split a table's `area` (`header` lines, then data rows) for a scrollbar
+/// when its `len` rows overflow: returns the table's area and the one-column
+/// track beside its data rows, or the untouched area and `None` when
+/// everything fits.
+pub fn split_list_scrollbar(area: Rect, header: u16, len: usize) -> (Rect, Option<Rect>) {
+    let rows = area.height.saturating_sub(header);
+    if len <= rows as usize || area.width < 2 {
+        return (area, None);
+    }
+    let table = Rect {
+        width: area.width - 1,
+        ..area
+    };
+    let track = Rect {
+        x: area.right() - 1,
+        y: area.y + header,
+        width: 1,
+        height: rows,
+    };
+    (table, Some(track))
+}
+
+/// Scrollbar in `track` for a list of `len` rows drawn from `offset`: the thumb
+/// spans the visible share of the list, at the visible position.
+///
+/// Drawn by hand rather than with ratatui's `Scrollbar`, which rounds both ends
+/// of the thumb independently and so makes it grow and shrink by a cell as the
+/// list scrolls.
+pub fn draw_list_scrollbar(frame: &mut Frame, track: Rect, offset: usize, len: usize) {
+    let (start, size) = scrollbar_thumb(track.height as usize, offset, len);
+    let thumb = Style::default().fg(Theme::primary());
+    let buf = frame.buffer_mut();
+    for i in 0..track.height {
+        let on_thumb = (start..start + size).contains(&(i as usize));
+        let (symbol, style) = if on_thumb {
+            ("█", thumb)
+        } else {
+            ("│", Theme::dim())
+        };
+        buf[(track.x, track.y + i)]
+            .set_symbol(symbol)
+            .set_style(style);
+    }
+}
+
+/// First cell and length of a scrollbar thumb on a `visible`-cell track, for a
+/// list of `len` rows scrolled to `offset`. The length depends only on the
+/// visible share of the list, so it stays constant while scrolling.
+fn scrollbar_thumb(visible: usize, offset: usize, len: usize) -> (usize, usize) {
+    if visible == 0 || len <= visible {
+        return (0, visible);
+    }
+    let size = ((visible * visible + len / 2) / len).clamp(1, visible);
+    let max_offset = len - visible;
+    let travel = visible - size;
+    let start = (offset.min(max_offset) * travel + max_offset / 2) / max_offset;
+    (start, size)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -420,5 +479,41 @@ mod tests {
             assert_ne!(pair[0], pair[1]);
         }
         assert_ne!(PULSE[PULSE.len() - 1], PULSE[0], "loop seam");
+    }
+
+    #[test]
+    fn no_scrollbar_when_every_row_fits() {
+        // 1 header line + 10 data rows.
+        let area = Rect::new(0, 0, 40, 11);
+        assert_eq!(split_list_scrollbar(area, 1, 10), (area, None));
+        assert_eq!(split_list_scrollbar(area, 1, 0), (area, None));
+    }
+
+    #[test]
+    fn scrollbar_thumb_keeps_its_size_and_reaches_both_ends() {
+        // 300 rows, 20 visible: same thumb size at every scroll position.
+        let (visible, len) = (20, 300);
+        let sizes: std::collections::HashSet<usize> = (0..=len - visible)
+            .map(|offset| scrollbar_thumb(visible, offset, len).1)
+            .collect();
+        assert_eq!(sizes.len(), 1, "thumb size changed while scrolling");
+        assert_eq!(scrollbar_thumb(visible, 0, len).0, 0);
+        let (start, size) = scrollbar_thumb(visible, len - visible, len);
+        assert_eq!(start + size, visible);
+
+        // Half the list visible: half the track.
+        assert_eq!(scrollbar_thumb(10, 0, 20), (0, 5));
+        assert_eq!(scrollbar_thumb(10, 10, 20), (5, 5));
+        // Never moves backwards.
+        let starts: Vec<usize> = (0..=280).map(|o| scrollbar_thumb(20, o, 300).0).collect();
+        assert!(starts.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[test]
+    fn scrollbar_beside_data_rows_when_overflowing() {
+        let area = Rect::new(2, 3, 40, 11);
+        let (table, track) = split_list_scrollbar(area, 1, 11);
+        assert_eq!(table, Rect::new(2, 3, 39, 11));
+        assert_eq!(track, Some(Rect::new(41, 4, 1, 10)));
     }
 }

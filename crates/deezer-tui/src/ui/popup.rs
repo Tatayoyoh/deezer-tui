@@ -7,7 +7,10 @@ use ratatui::widgets::{
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
 use crate::theme::{Theme, ThemeId};
-use crate::ui::common::{shortcut_hint, shortcut_line, track_status, STATUS_WIDTH};
+use crate::ui::common::{
+    draw_list_scrollbar, shortcut_hint, shortcut_line, split_list_scrollbar, track_status,
+    STATUS_WIDTH,
+};
 
 /// Draw the popup overlay if one is active.
 pub fn draw(frame: &mut Frame, view: &mut ViewState) {
@@ -1537,10 +1540,14 @@ fn draw_playlist_detail(frame: &mut Frame, view: &ViewState, selected: usize, is
         .row_highlight_style(Theme::highlight())
         .highlight_symbol("");
 
+    let (table_area, scrollbar_track) = split_list_scrollbar(list_area, 1, tracks.len());
     let mut table_state = view.table_state(RowsKind::PlaylistDetail, selected);
-    frame.render_stateful_widget(table, list_area, &mut table_state);
+    frame.render_stateful_widget(table, table_area, &mut table_state);
+    if let Some(track) = scrollbar_track {
+        draw_list_scrollbar(frame, track, table_state.offset(), tracks.len());
+    }
     view.record_rows(
-        list_area,
+        table_area,
         1, // header
         table_state.offset(),
         tracks.len(),
