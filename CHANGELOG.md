@@ -10,7 +10,7 @@ All notable changes to this project will be documented in this file.
     * What's new section with changelog on the first launch of a new version
 
 ### Fixed
-- Settings saved by the TUI (vim keys, theme, transparency, language, update check opt-out) were reverted the next time the daemon saved its own (volume, quality, equalizer, login): the daemon wrote back the copy it loaded at startup. Both now reload `config.json` before changing it, and writes are atomic
+- Settings `config.json` changes in the TUI no longer revert after a volume change
 
 ## [1.19.0] - 2026-10-06
 
