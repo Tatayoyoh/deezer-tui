@@ -33,6 +33,7 @@ use deezer_core::player::eq::{EqPreset, EqSettings, EQ_BAND_COUNT};
 use deezer_core::player::state::{PlaybackStatus, RepeatMode};
 
 use crate::i18n::{self, t, Locale};
+use crate::release_notes::{self, NoteLine};
 use deezer_core::offline::OfflineTrack;
 
 use crate::protocol::{
@@ -574,8 +575,9 @@ pub enum Overlay {
         /// Cursor within the modal's (filtered) track list.
         selected: usize,
     },
-    /// Application info modal.
-    Info,
+    /// Application info modal; `scroll` is the first visible line of its
+    /// release notes, when it shows some.
+    Info { scroll: usize },
     /// Update available dialog with 3 options.
     UpdateAvailable {
         version: String,
@@ -863,6 +865,8 @@ pub struct ViewState {
     pub playlist_detail_filter_typing: bool,
     /// Display order of the playlist detail modal (`o`). Client-only.
     pub playlist_detail_sort: PlaylistSort,
+    /// "What's new" shown in the info modal after an upgrade; empty otherwise.
+    pub release_notes: Vec<NoteLine>,
     pub genre_detail: Option<GenreDetail>,
     pub genre_detail_loading: bool,
     pub status_msg: Option<String>,
@@ -1053,6 +1057,7 @@ impl ViewState {
             playlist_detail_filter_input: String::new(),
             playlist_detail_filter_typing: false,
             playlist_detail_sort: PlaylistSort::Default,
+            release_notes: Vec::new(),
             genre_detail: snap.genre_detail.clone(),
             genre_detail_loading: snap.genre_detail_loading,
             status_msg: snap.status_msg.clone(),
@@ -1204,7 +1209,7 @@ impl ViewState {
                     | Overlay::QualityPicker { .. }
                     | Overlay::LanguagePicker { .. }
                     | Overlay::Equalizer { .. }
-                    | Overlay::Info
+                    | Overlay::Info { .. }
                     | Overlay::UpdateAvailable { .. }
                     | Overlay::Updating { .. }
             )
@@ -2125,9 +2130,17 @@ impl Client {
             self.view.login_mode = LoginMode::Button;
         }
 
-        // Show Info overlay after a successful update (--updated flag)
-        if show_updated && self.view.screen == Screen::Main {
-            self.view.overlay = Some(Overlay::Info);
+        // First launch of a new version (self-update with --updated, or any
+        // other install): open the info modal on what changed since the last
+        // version seen. Logged-out launches just record the version.
+        let last_seen = release_notes::last_seen_version();
+        let upgraded = last_seen.as_deref() != Some(env!("CARGO_PKG_VERSION"));
+        if (show_updated || upgraded) && self.view.screen == Screen::Main {
+            self.view.release_notes = release_notes::notes_since(last_seen.as_deref());
+            self.view.overlay = Some(Overlay::Info { scroll: 0 });
+        }
+        if upgraded {
+            release_notes::mark_seen();
         }
 
         // Main client loop
@@ -2412,7 +2425,8 @@ impl Client {
             return KeyAction::Continue;
         }
 
-        // Home / End / PageUp / PageDown: jump within the focused list.
+        // Home / End / PageUp / PageDown: jump within the focused list. With
+        // no list on screen the key falls through, for modals that scroll.
         if matches!(
             key.code,
             KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown
@@ -2420,7 +2434,9 @@ impl Client {
             && !self.view.is_text_input_active()
             && !popup_typing
         {
-            return self.jump_in_list(key.code);
+            if let Some(action) = self.jump_in_list(key.code) {
+                return action;
+            }
         }
 
         // e : toggle equalizer (not during text input), from any page
@@ -2443,10 +2459,10 @@ impl Client {
             && !self.view.is_text_input_active()
             && !popup_typing
         {
-            if matches!(self.view.overlay, Some(Overlay::Info)) {
+            if matches!(self.view.overlay, Some(Overlay::Info { .. })) {
                 self.view.pop_overlay();
             } else {
-                self.view.push_overlay(Overlay::Info);
+                self.view.push_overlay(Overlay::Info { scroll: 0 });
             }
             return KeyAction::Continue;
         }
@@ -2991,11 +3007,21 @@ impl Client {
                 }
                 KeyAction::Continue
             }
-            Overlay::Info => {
+            Overlay::Info { scroll } => {
+                // Scrolls the release notes; the draw pass clamps the offset.
+                let page = crate::ui::popup::RELEASE_NOTES_HEIGHT as usize;
                 match key.code {
                     KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('i') => {
                         self.view.pop_overlay();
                     }
+                    code if ViewState::nav_down(code, vim_keys) => *scroll += 1,
+                    code if ViewState::nav_up(code, vim_keys) => {
+                        *scroll = scroll.saturating_sub(1);
+                    }
+                    KeyCode::PageDown => *scroll += page,
+                    KeyCode::PageUp => *scroll = scroll.saturating_sub(page),
+                    KeyCode::Home => *scroll = 0,
+                    KeyCode::End => *scroll = usize::MAX,
                     _ => {}
                 }
                 KeyAction::Continue
@@ -5227,11 +5253,10 @@ impl Client {
     }
 
     /// Home / End / PageUp / PageDown on the topmost list drawn last frame:
-    /// first row, last row, or one screenful up / down.
-    fn jump_in_list(&mut self, code: KeyCode) -> KeyAction {
-        let Some(rows) = self.view.click.borrow().rows else {
-            return KeyAction::Continue;
-        };
+    /// first row, last row, or one screenful up / down. `None` when no list
+    /// was drawn, so the key can go to the open modal instead.
+    fn jump_in_list(&mut self, code: KeyCode) -> Option<KeyAction> {
+        let rows = self.view.click.borrow().rows?;
         // A focused album / artist description scrolls with the arrows; there
         // is no row cursor to move.
         let left_panel_focused = match rows.kind {
@@ -5240,20 +5265,20 @@ impl Client {
             _ => false,
         };
         if rows.len == 0 || left_panel_focused {
-            return KeyAction::Continue;
+            return Some(KeyAction::Continue);
         }
         let Some(current) = self.row_selection(rows.kind) else {
-            return KeyAction::Continue;
+            return Some(KeyAction::Continue);
         };
         let target = jump_target(code, current, rows.len, rows.area.height as usize);
         if rows.kind == RowsKind::Modal {
             self.walk_modal_cursor(target);
-            return KeyAction::Continue;
+            return Some(KeyAction::Continue);
         }
-        match self.select_row(rows.kind, target) {
+        Some(match self.select_row(rows.kind, target) {
             Some(cmd) => KeyAction::SendCommand(cmd),
             None => KeyAction::Continue,
-        }
+        })
     }
 
     /// Cursor position of the list `kind` — the read side of `select_row`.

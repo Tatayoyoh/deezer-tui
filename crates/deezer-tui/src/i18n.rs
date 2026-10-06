@@ -208,7 +208,9 @@ pub struct Strings {
     pub about_architecture: &'static str,
     pub about_author: &'static str,
     pub about_github: &'static str,
+    pub about_changelog: &'static str,
     pub about_license: &'static str,
+    pub about_whats_new: &'static str,
 
     // --- Themes ---
     pub themes: &'static str,
@@ -840,7 +842,9 @@ static EN: Strings = Strings {
     about_architecture: "Architecture",
     about_author: "Author",
     about_github: "GitHub",
+    about_changelog: "Changelog",
     about_license: "License",
+    about_whats_new: "What's new",
 
     themes: " Themes ",
     official_deezer_themes: "  Official Deezer themes",
@@ -1185,7 +1189,9 @@ static FR: Strings = Strings {
     about_architecture: "Architecture",
     about_author: "Auteur",
     about_github: "GitHub",
+    about_changelog: "Historique",
     about_license: "Licence",
+    about_whats_new: "Nouveautés",
 
     themes: " Thèmes ",
     official_deezer_themes: "  Thèmes officiels Deezer",
@@ -1529,7 +1535,9 @@ static ES: Strings = Strings {
     about_architecture: "Arquitectura",
     about_author: "Autor",
     about_github: "GitHub",
+    about_changelog: "Cambios",
     about_license: "Licencia",
+    about_whats_new: "Novedades",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiales de Deezer",
@@ -1873,7 +1881,9 @@ static PT: Strings = Strings {
     about_architecture: "Arquitetura",
     about_author: "Autor",
     about_github: "GitHub",
+    about_changelog: "Alterações",
     about_license: "Licença",
+    about_whats_new: "Novidades",
 
     themes: " Temas ",
     official_deezer_themes: "  Temas oficiais do Deezer",
@@ -2217,7 +2227,9 @@ static DE: Strings = Strings {
     about_architecture: "Architektur",
     about_author: "Autor",
     about_github: "GitHub",
+    about_changelog: "Änderungen",
     about_license: "Lizenz",
+    about_whats_new: "Neuigkeiten",
 
     themes: " Themen ",
     official_deezer_themes: "  Offizielle Deezer-Themen",

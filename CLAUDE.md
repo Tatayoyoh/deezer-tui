@@ -178,6 +178,7 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 - **Album detail** (`a`): Full track listing for album
 - **Playlist detail** (`Enter` on playlist): Track listing for playlist
 - **Shortcuts help** (`?`): Keyboard shortcuts reference
+- **Info** (`i`): Version, links. Opens by itself on the first launch of a new version with the release notes since the last version used (`release_notes.rs`: CHANGELOG embedded via `include_str!`, last version in `<config_dir>/last_version`)
 - **Settings** (`Ctrl+O`): Theme selection (official Deezer dark themes)
 - **Equalizer** (`e`): 10-band graphic EQ + global gain — `←/→` column, `↑/↓` gain, `Space` on/off, `p`/`P` preset, `0` reset column
 

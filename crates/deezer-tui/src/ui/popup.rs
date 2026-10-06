@@ -6,6 +6,7 @@ use ratatui::widgets::{
 
 use crate::client::{fuzzy_match, ClickTarget, Overlay, PopupMenu, RowsKind, SubMenu, ViewState};
 use crate::i18n::t;
+use crate::release_notes::NoteLine;
 use crate::theme::{Theme, ThemeId};
 use crate::ui::common::{
     draw_list_scrollbar, shortcut_hint, shortcut_line, split_list_scrollbar, track_status,
@@ -50,6 +51,15 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         return;
     }
 
+    // Same for the release notes of the info modal.
+    if let Some(Overlay::Info { scroll }) = &view.overlay {
+        let clamped = draw_info_overlay(frame, view, *scroll);
+        if let Some(Overlay::Info { scroll }) = &mut view.overlay {
+            *scroll = clamped;
+        }
+        return;
+    }
+
     // Overlays take priority over track popups
     match &view.overlay {
         Some(Overlay::Settings { selected }) => {
@@ -70,10 +80,6 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         }
         Some(Overlay::Equalizer { column }) => {
             draw_equalizer(frame, view, *column);
-            return;
-        }
-        Some(Overlay::Info) => {
-            draw_info_overlay(frame, view);
             return;
         }
         Some(Overlay::UpdateAvailable {
@@ -141,7 +147,7 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_offline_detail(frame, view, playlist, index, selected);
             // Don't return — let the popup (context menu) render on top if open
         }
-        Some(Overlay::Help { .. }) => unreachable!(),
+        Some(Overlay::Help { .. }) | Some(Overlay::Info { .. }) => unreachable!(),
         None => {}
     }
 
@@ -794,8 +800,12 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
     scroll
 }
 
-/// Draw the application info modal.
-fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
+/// Most lines the info modal gives its release notes before they scroll.
+pub const RELEASE_NOTES_HEIGHT: u16 = 14;
+
+/// Draw the application info modal, with the release notes of a fresh
+/// upgrade under it. Returns `scroll` clamped to the notes' length.
+fn draw_info_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usize {
     let s = t();
 
     let version = env!("CARGO_PKG_VERSION");
@@ -803,6 +813,7 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
     let os = std::env::consts::OS;
 
     let github_url = "https://github.com/Tatayoyoh/deezer-tui";
+    let changelog_url = "https://github.com/Tatayoyoh/deezer-tui/blob/main/CHANGELOG.md";
     let license_url = "https://en.wikipedia.org/wiki/WTFPL";
 
     let link_style = Style::default()
@@ -830,6 +841,10 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
             Span::styled(github_url, link_style),
         ])),
         ListItem::new(Line::from(vec![
+            Span::styled(format!("  {:<16}", s.about_changelog), label_style),
+            Span::styled(changelog_url, link_style),
+        ])),
+        ListItem::new(Line::from(vec![
             Span::styled(format!("  {:<16}", s.about_license), label_style),
             Span::styled("WTFPL", Theme::text()),
             Span::styled("  ", Theme::text()),
@@ -838,8 +853,26 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
     ];
 
     let area = frame.area();
-    let height = items.len() as u16 + 4;
-    let popup_area = centered_rect(60, height, area);
+    let info_height = items.len() as u16;
+    // 60% of the screen, widened so the longest line (the changelog link)
+    // fits when there is room. The width does not depend on the height: wrap
+    // the notes to it, then size the modal to fit them, up to
+    // RELEASE_NOTES_HEIGHT lines.
+    let content_width = items.iter().map(ListItem::width).max().unwrap_or(0) as u16 + 4;
+    let width = centered_rect(60, 0, area)
+        .width
+        .max(content_width)
+        .min(area.width);
+    // Borders, left indent (under the title), gap + scrollbar, right margin.
+    let text_width = width.saturating_sub(2 + 2 + 2 + 1) as usize;
+    let notes = release_note_lines(&view.release_notes, text_width);
+    // Borders and bottom padding: 2 blank lines alone, 1 under the notes.
+    // Notes: gap, title, then up to RELEASE_NOTES_HEIGHT lines.
+    let height = match notes.len() {
+        0 => info_height + 4,
+        n => info_height + 2 + (n as u16).min(RELEASE_NOTES_HEIGHT) + 3,
+    };
+    let popup_area = centered_rect_abs(width, height, area);
 
     frame.render_widget(Clear, popup_area);
     view.record_modal(popup_area);
@@ -854,8 +887,120 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState) {
     let inner = block.inner(popup_area);
     frame.render_widget(block, popup_area);
 
-    let list = List::new(items);
-    frame.render_widget(list, inner);
+    // The info lines keep their height on a short terminal; the notes take
+    // what is left (gap and title above them, padding below).
+    let info_area = Rect {
+        height: info_height.min(inner.height),
+        ..inner
+    };
+    frame.render_widget(List::new(items), info_area);
+    let notes_top = info_area.bottom() + 2;
+    if notes.is_empty() || notes_top + 1 >= inner.bottom() {
+        return 0;
+    }
+
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            format!("  {}", s.about_whats_new),
+            label_style,
+        )),
+        Rect::new(inner.x, notes_top - 1, inner.width, 1),
+    );
+    // Indented under the title; one column kept free on the right.
+    let notes_area = Rect {
+        x: inner.x + 2,
+        y: notes_top,
+        width: inner.width.saturating_sub(3),
+        height: (inner.bottom() - notes_top - 1).min(RELEASE_NOTES_HEIGHT),
+    };
+    let visible = notes_area.height as usize;
+    let total = notes.len();
+    let scroll = scroll.min(total.saturating_sub(visible));
+    let (mut text_area, track) = split_list_scrollbar(notes_area, 0, total);
+    if track.is_some() {
+        // Keep a gap between the text and the scrollbar.
+        text_area.width = text_area.width.saturating_sub(1);
+    }
+    let shown: Vec<Line> = notes.into_iter().skip(scroll).take(visible).collect();
+    frame.render_widget(Paragraph::new(shown), text_area);
+    if let Some(track) = track {
+        draw_list_scrollbar(frame, track, scroll, total);
+    }
+    scroll
+}
+
+/// Release notes as display lines, word-wrapped to `width` columns with a
+/// hanging indent under each bullet.
+fn release_note_lines(notes: &[NoteLine], width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for note in notes {
+        match note {
+            NoteLine::Version { version, date } => {
+                let mut spans = vec![Span::styled(
+                    format!("v{version}"),
+                    Style::default()
+                        .fg(Theme::primary())
+                        .add_modifier(Modifier::BOLD),
+                )];
+                if !date.is_empty() {
+                    spans.push(Span::styled(format!("  {date}"), Theme::dim()));
+                }
+                lines.push(Line::from(spans));
+            }
+            NoteLine::Section(title) => lines.push(Line::from(Span::styled(
+                title.clone(),
+                Style::default()
+                    .fg(Theme::text_color())
+                    .add_modifier(Modifier::BOLD),
+            ))),
+            NoteLine::Item { depth, text } => {
+                let (bullet, indent) = if *depth == 0 {
+                    ("• ", "  ")
+                } else {
+                    ("  ◦ ", "    ")
+                };
+                let wrapped = wrap_words(text, width.saturating_sub(indent.len()).max(10));
+                for (i, chunk) in wrapped.into_iter().enumerate() {
+                    let lead = if i == 0 { bullet } else { indent };
+                    lines.push(Line::from(vec![
+                        Span::styled(lead, Theme::dim()),
+                        Span::styled(chunk, Theme::text()),
+                    ]));
+                }
+            }
+            NoteLine::Blank => lines.push(Line::from("")),
+        }
+    }
+    lines
+}
+
+/// Greedy word wrap on `width` columns (counted in chars); a word longer than
+/// a line is split.
+fn wrap_words(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut line = String::new();
+    for word in text.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+        while word.len() > width {
+            if !line.is_empty() {
+                out.push(std::mem::take(&mut line));
+            }
+            out.push(word.drain(..width).collect());
+        }
+        let word: String = word.into_iter().collect();
+        let len = line.chars().count();
+        if len > 0 && len + 1 + word.chars().count() > width {
+            out.push(std::mem::take(&mut line));
+        }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.push_str(&word);
+    }
+    if !line.is_empty() || out.is_empty() {
+        out.push(line);
+    }
+    out
 }
 
 /// Draw the settings overlay with selectable entries.
@@ -2039,4 +2184,29 @@ fn draw_updating(frame: &mut Frame, version: &str, progress_msg: &str) {
         .style(Style::default().fg(Theme::primary()))
         .alignment(Alignment::Center);
     frame.render_widget(text, inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wrap_words;
+
+    #[test]
+    fn wrap_words_fills_lines_up_to_the_width() {
+        assert_eq!(
+            wrap_words("one two three four five", 9),
+            ["one two", "three", "four five"]
+        );
+        assert_eq!(wrap_words("fits", 9), ["fits"]);
+        assert_eq!(wrap_words("", 9), [""]);
+    }
+
+    #[test]
+    fn wrap_words_splits_a_word_longer_than_a_line() {
+        assert_eq!(
+            wrap_words("a abcdefghij b", 4),
+            ["a", "abcd", "efgh", "ij b"]
+        );
+        // Width counts chars, not bytes.
+        assert_eq!(wrap_words("éééé ééé", 4), ["éééé", "ééé"]);
+    }
 }

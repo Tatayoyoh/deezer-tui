@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- What's new: on the first launch of a new version, the info modal (`i`) opens on the changelog of every version released since the last one used, in a scrollable area (`↑`/`↓`, `PageUp`/`PageDown`, `Home`/`End`)
+- Info modal: direct link to the changelog
+
 ## [1.19.0] - 2026-10-06
 
 ### Added
