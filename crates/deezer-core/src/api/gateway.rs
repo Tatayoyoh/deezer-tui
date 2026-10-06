@@ -3,7 +3,7 @@ use tracing::debug;
 
 use super::models::{
     AlbumDetail, ArtistAlbumEntry, ArtistData, ArtistDetail, DeezerError, DisplayItem, EpisodeData,
-    MoodItem, PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults,
+    ItemKind, MoodItem, PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults,
     SimilarArtistEntry, TrackData,
 };
 use super::DeezerClient;
@@ -264,6 +264,29 @@ impl DeezerClient {
         }
     }
 
+    /// Search every category at once for the "All" view: the top result first,
+    /// then the best few hits of each type. One `deezer.pageSearch` call.
+    pub async fn search_all(&self, query: &str) -> Result<Vec<DisplayItem>, DeezerError> {
+        let params = json!({
+            "query": query,
+            "filter": "ALL",
+            "output": "TRACK",
+            "start": 0,
+            "nb": 40,
+        });
+        // The gateway's ALBUM section is unreliable (often empty), so albums
+        // come from the public API, as in the Albums category.
+        let (results, albums) = tokio::join!(
+            self.gw_call("deezer.pageSearch", params),
+            self.search_albums_public(query),
+        );
+        let albums = albums.unwrap_or_else(|e| {
+            debug!(error = %e, "Album search failed, All results without albums");
+            Vec::new()
+        });
+        Ok(build_all_results(&results?, albums))
+    }
+
     /// Search albums via the Deezer public API (returns richer data than gw-light).
     async fn search_albums_public(&self, query: &str) -> Result<Vec<DisplayItem>, DeezerError> {
         let resp: serde_json::Value = self
@@ -307,6 +330,7 @@ impl DeezerClient {
                     playlist_id: None,
                     artist_id: None,
                     show_id: None,
+                    kind: None,
                 }
             })
             .collect();
@@ -361,6 +385,7 @@ impl DeezerClient {
                     playlist_id: None,
                     artist_id,
                     show_id: None,
+                    kind: None,
                 }
             })
             .collect();
@@ -424,6 +449,7 @@ impl DeezerClient {
                     playlist_id: None,
                     artist_id: None,
                     show_id: None,
+                    kind: None,
                 }
             })
             .collect();
@@ -596,6 +622,7 @@ impl DeezerClient {
                     playlist_id: None,
                     artist_id: None,
                     show_id: None,
+                    kind: None,
                 }
             })
             .collect();
@@ -1630,6 +1657,103 @@ fn extract_ts(v: &serde_json::Value) -> Option<i64> {
     None
 }
 
+/// How many hits of each type the "All" search view keeps.
+const ALL_TRACKS: usize = 10;
+const ALL_ARTISTS: usize = 5;
+const ALL_ALBUMS: usize = 5;
+const ALL_PLAYLISTS: usize = 5;
+const ALL_PODCASTS: usize = 3;
+const ALL_EPISODES: usize = 3;
+const ALL_PROFILES: usize = 3;
+
+/// Parse one raw search entry of the given section type into a `DisplayItem`.
+fn parse_search_entry(kind: &str, entry: &serde_json::Value) -> Option<DisplayItem> {
+    let entry = entry.clone();
+    let item = match kind {
+        "TRACK" => DisplayItem::from_track(&serde_json::from_value(entry).ok()?),
+        "ARTIST" => DisplayItem::from_artist(&serde_json::from_value(entry).ok()?),
+        "ALBUM" => DisplayItem::from_album(&serde_json::from_value(entry).ok()?),
+        "PLAYLIST" => DisplayItem::from_playlist(&serde_json::from_value(entry).ok()?),
+        "SHOW" => DisplayItem::from_podcast(&serde_json::from_value(entry).ok()?),
+        "EPISODE" => DisplayItem::from_episode(&serde_json::from_value(entry).ok()?),
+        "USER" => DisplayItem::from_profile(&serde_json::from_value(entry).ok()?),
+        _ => return None,
+    };
+    Some(item)
+}
+
+/// Identity of a result across sections, to drop the top result's duplicate.
+fn item_key(item: &DisplayItem) -> Option<(ItemKind, String)> {
+    let id = item
+        .track
+        .as_ref()
+        .map(|t| t.track_id.clone())
+        .or_else(|| item.artist_id.clone())
+        .or_else(|| item.album_id.clone())
+        .or_else(|| item.playlist_id.clone())
+        .or_else(|| item.show_id.clone())?;
+    Some((item.kind(), id))
+}
+
+/// Build the mixed "All" result list from a `deezer.pageSearch` response,
+/// with albums supplied separately (public API search).
+fn build_all_results(results: &serde_json::Value, albums: Vec<DisplayItem>) -> Vec<DisplayItem> {
+    let mut items: Vec<DisplayItem> = Vec::new();
+    let push_unique = |items: &mut Vec<DisplayItem>, item: DisplayItem| {
+        let key = item_key(&item);
+        if key.is_none() || !items.iter().any(|i| item_key(i) == key) {
+            items.push(item);
+        }
+    };
+
+    // TOP_RESULT: entries tagged with their type in `__TYPE__`.
+    if let Some(top) = results.get("TOP_RESULT").and_then(|v| v.as_array()) {
+        for entry in top {
+            let kind = entry
+                .get("__TYPE__")
+                .and_then(|v| v.as_str())
+                .map(str::to_ascii_uppercase)
+                .unwrap_or_default();
+            if let Some(item) = parse_search_entry(&kind, entry) {
+                items.push(item);
+            }
+        }
+    }
+
+    let sections = [
+        ("TRACK", ALL_TRACKS),
+        ("ARTIST", ALL_ARTISTS),
+        ("ALBUM", ALL_ALBUMS),
+        ("PLAYLIST", ALL_PLAYLISTS),
+        ("SHOW", ALL_PODCASTS),
+        ("EPISODE", ALL_EPISODES),
+        ("USER", ALL_PROFILES),
+    ];
+    let mut albums = Some(albums);
+    for (key, limit) in sections {
+        if key == "ALBUM" {
+            for item in albums.take().unwrap_or_default().into_iter().take(limit) {
+                push_unique(&mut items, item);
+            }
+            continue;
+        }
+        let Some(data) = results
+            .get(key)
+            .and_then(|s| s.get("data"))
+            .and_then(|d| d.as_array())
+        else {
+            continue;
+        };
+        for entry in data.iter().take(limit) {
+            if let Some(item) = parse_search_entry(key, entry) {
+                push_unique(&mut items, item);
+            }
+        }
+    }
+
+    items.into_iter().map(DisplayItem::into_all_row).collect()
+}
+
 fn parse_search_section<T: serde::de::DeserializeOwned>(
     section: Option<&serde_json::Value>,
 ) -> Result<Vec<T>, DeezerError> {
@@ -1749,13 +1873,43 @@ fn is_stale_jwt(err: &DeezerError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_stale_jwt;
-    use crate::api::models::DeezerError;
+    use super::{build_all_results, is_stale_jwt};
+    use crate::api::models::{AlbumData, DeezerError, DisplayItem, ItemKind};
     use crate::api::DeezerClient;
 
     /// Live tests read the ARL from the environment so no token is committed.
     fn arl() -> String {
         std::env::var("DEEZER_ARL").expect("set DEEZER_ARL to run live tests")
+    }
+
+    #[test]
+    fn all_results_put_top_result_first_without_duplicate() {
+        let results = serde_json::json!({
+            "TOP_RESULT": [{ "__TYPE__": "artist", "ART_ID": "27", "ART_NAME": "Daft Punk", "NB_FAN": 100 }],
+            "TRACK": { "data": [{ "SNG_ID": "3135556", "SNG_TITLE": "Harder", "ART_NAME": "Daft Punk", "ALB_TITLE": "Discovery", "DURATION": "224" }] },
+            "ARTIST": { "data": [
+                { "ART_ID": "27", "ART_NAME": "Daft Punk", "NB_FAN": 100 },
+                { "ART_ID": "28", "ART_NAME": "Thomas Bangalter", "NB_FAN": 5 }
+            ] },
+            "PLAYLIST": { "data": [{ "PLAYLIST_ID": "9", "TITLE": "Best of", "NB_SONG": 3 }] },
+        });
+        let items = build_all_results(&results, Vec::new());
+        let kinds: Vec<ItemKind> = items.iter().map(|i| i.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                ItemKind::Artist,
+                ItemKind::Track,
+                ItemKind::Artist,
+                ItemKind::Playlist
+            ]
+        );
+        assert_eq!(items[0].col1, "Daft Punk");
+        assert_eq!(items[1].col1, "Harder");
+        // Detail column carries the artist; the type column is left to the UI.
+        assert_eq!(items[1].col3, "Daft Punk");
+        assert!(items[1].col2.is_empty());
+        assert_eq!(items[2].col1, "Thomas Bangalter");
     }
 
     #[test]

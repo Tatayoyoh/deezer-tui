@@ -576,9 +576,62 @@ pub struct DisplayItem {
     /// Show ID, if this item represents a podcast show.
     #[serde(default)]
     pub show_id: Option<String>,
+    /// Explicit item type; `None` lets `kind()` infer it from the IDs.
+    #[serde(default)]
+    pub kind: Option<ItemKind>,
+}
+
+/// What a `DisplayItem` represents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ItemKind {
+    Track,
+    Artist,
+    Album,
+    Playlist,
+    Podcast,
+    Episode,
+    Profile,
 }
 
 impl DisplayItem {
+    /// The item type: explicit when set, otherwise inferred from which IDs it
+    /// carries (episodes are the only playable items attached to a show).
+    pub fn kind(&self) -> ItemKind {
+        if let Some(kind) = self.kind {
+            kind
+        } else if self.track.is_some() {
+            if self.show_id.is_some() {
+                ItemKind::Episode
+            } else {
+                ItemKind::Track
+            }
+        } else if self.artist_id.is_some() {
+            ItemKind::Artist
+        } else if self.album_id.is_some() {
+            ItemKind::Album
+        } else if self.playlist_id.is_some() {
+            ItemKind::Playlist
+        } else if self.show_id.is_some() {
+            ItemKind::Podcast
+        } else {
+            ItemKind::Profile
+        }
+    }
+
+    /// Same item, laid out for the All search category: name, type (left
+    /// empty — the frontend fills in a localized label from `kind()`), and a
+    /// short detail (artist, author, show…).
+    pub fn into_all_row(mut self) -> Self {
+        let detail = match self.kind() {
+            ItemKind::Podcast | ItemKind::Profile => String::new(),
+            _ => std::mem::take(&mut self.col2),
+        };
+        self.col2 = String::new();
+        self.col3 = detail;
+        self.col4 = String::new();
+        self
+    }
+
     pub fn from_track(track: &TrackData) -> Self {
         let dur = track.duration_secs();
         Self {
@@ -591,6 +644,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: None,
             show_id: None,
+            kind: Some(ItemKind::Track),
         }
     }
 
@@ -605,6 +659,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: Some(artist.artist_id.clone()),
             show_id: None,
+            kind: Some(ItemKind::Artist),
         }
     }
 
@@ -619,6 +674,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: None,
             show_id: None,
+            kind: Some(ItemKind::Album),
         }
     }
 
@@ -633,6 +689,7 @@ impl DisplayItem {
             playlist_id: Some(playlist.playlist_id.clone()),
             artist_id: None,
             show_id: None,
+            kind: Some(ItemKind::Playlist),
         }
     }
 
@@ -647,6 +704,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: None,
             show_id: Some(podcast.show_id.clone()),
+            kind: Some(ItemKind::Podcast),
         }
     }
 
@@ -663,6 +721,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: None,
             show_id: episode.show_id.clone(),
+            kind: Some(ItemKind::Episode),
         }
     }
 
@@ -677,6 +736,7 @@ impl DisplayItem {
             playlist_id: None,
             artist_id: None,
             show_id: None,
+            kind: Some(ItemKind::Profile),
         }
     }
 }

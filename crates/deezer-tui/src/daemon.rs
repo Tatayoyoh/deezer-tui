@@ -8,8 +8,8 @@ use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem, PlaylistData,
-    PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem, ItemKind,
+    PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
@@ -92,6 +92,12 @@ enum AsyncResult {
     DislikeError(String),
     MixReady(Vec<TrackData>),
     MixError(String),
+    /// Mix for a track already playing: appended after it, without restarting
+    /// playback.
+    SeededMixReady {
+        seed_id: String,
+        tracks: Vec<TrackData>,
+    },
     FlowReady(Vec<TrackData>),
     FlowError(String),
     AlbumDetailReady(AlbumDetail),
@@ -720,6 +726,26 @@ impl Daemon {
                 self.start_search(query);
             }
             Command::PlayFromSearch { index } => {
+                // All view: play the picked item alone; a track also gets a
+                // mix inspired by it queued up behind it.
+                if self.search_category == SearchCategory::All {
+                    if let Some(item) = self.search_display.get(index) {
+                        if let Some(track) = item.track.clone() {
+                            let with_mix = item.kind() == ItemKind::Track;
+                            self.flow_active = false;
+                            self.active_mood = None;
+                            if let Ok(mut state) = self.player_state.lock() {
+                                state.queue = vec![track.clone()];
+                                state.queue_index = 0;
+                            }
+                            if with_mix {
+                                self.start_seeded_mix(track.track_id.clone());
+                            }
+                            self.start_play_track(track);
+                        }
+                    }
+                    return;
+                }
                 // Try to get a playable track from display items
                 if let Some(item) = self.search_display.get(index) {
                     if let Some(track) = &item.track {
@@ -1419,7 +1445,19 @@ impl Daemon {
         let category = self.search_category;
         let api_key = category.api_key().to_string();
 
-        if category == SearchCategory::Track {
+        if category == SearchCategory::All {
+            tokio::spawn(async move {
+                let client = client.lock().await;
+                match client.search_all(&query).await {
+                    Ok(items) => {
+                        let _ = tx.send(AsyncResult::SearchDisplayResults(items));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(AsyncResult::SearchError(e.to_string()));
+                    }
+                }
+            });
+        } else if category == SearchCategory::Track {
             // Track search: populate both search_results (for playback) and search_display
             tokio::spawn(async move {
                 let client = client.lock().await;
@@ -1950,6 +1988,24 @@ impl Daemon {
             match client.get_smart_radio(&track_id).await {
                 Ok(tracks) => {
                     let _ = tx.send(AsyncResult::MixReady(tracks));
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::MixError(e.to_string()));
+                }
+            }
+        });
+    }
+
+    /// Fetch a mix inspired by a track that is already playing, to fill the
+    /// queue behind it (see `AsyncResult::SeededMixReady`).
+    fn start_seeded_mix(&mut self, seed_id: String) {
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_smart_radio(&seed_id).await {
+                Ok(tracks) => {
+                    let _ = tx.send(AsyncResult::SeededMixReady { seed_id, tracks });
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::MixError(e.to_string()));
@@ -3135,6 +3191,26 @@ impl Daemon {
                             state.queue_index = 0;
                         }
                         self.start_play_track(first);
+                    }
+                }
+                AsyncResult::SeededMixReady { seed_id, tracks } => {
+                    let mut appended = 0;
+                    if let Ok(mut state) = self.player_state.lock() {
+                        // Only if the queue is still the lone seed track: the
+                        // user may have started something else meanwhile.
+                        let untouched = state.queue.len() == 1
+                            && state.queue.first().is_some_and(|t| t.track_id == seed_id);
+                        if untouched {
+                            let mix: Vec<TrackData> = tracks
+                                .into_iter()
+                                .filter(|t| t.track_id != seed_id)
+                                .collect();
+                            appended = mix.len();
+                            state.queue.extend(mix);
+                        }
+                    }
+                    if appended > 0 {
+                        self.status_msg = Some(t().fmt_mix_tracks(appended));
                     }
                 }
                 AsyncResult::MixError(err) => {

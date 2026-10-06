@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, PlaylistData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, ItemKind, PlaylistData,
     PlaylistDetail, TrackData,
 };
 use deezer_core::config::Config;
@@ -3213,10 +3213,17 @@ impl Client {
         {
             match self.view.active_tab {
                 ActiveTab::Search => {
-                    if self.view.search_category == SearchCategory::Track {
+                    if matches!(
+                        self.view.search_category,
+                        SearchCategory::Track | SearchCategory::All
+                    ) {
                         if let Some(item) = self.view.search_display.get(self.view.search_selected)
                         {
-                            if let Some(ref track) = item.track {
+                            if let Some(track) = item
+                                .track
+                                .as_ref()
+                                .filter(|_| item.kind() == ItemKind::Track)
+                            {
                                 let track_id = track.track_id.clone();
                                 return self.toggle_track_favorite(&track_id);
                             }

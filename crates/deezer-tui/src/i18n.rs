@@ -1,5 +1,7 @@
 use std::cell::Cell;
 
+use deezer_core::api::models::ItemKind;
+
 use crate::protocol::{
     ExploreCategory, FavoritesCategory, GenreDetailSubTab, OfflineCategory, SearchCategory,
 };
@@ -379,8 +381,12 @@ pub struct Strings {
     pub header_playlist: &'static str,
     pub header_podcast: &'static str,
     pub header_episode: &'static str,
+    pub header_name: &'static str,
+    pub header_type: &'static str,
+    pub header_details: &'static str,
 
     // --- Search categories ---
+    pub cat_all: &'static str,
     pub cat_tracks: &'static str,
     pub cat_artists: &'static str,
     pub cat_albums: &'static str,
@@ -388,6 +394,8 @@ pub struct Strings {
     pub cat_podcasts: &'static str,
     pub cat_episodes: &'static str,
     pub cat_profiles: &'static str,
+    /// Singular "track" label, shown as the result type in the All category.
+    pub kind_track: &'static str,
 
     // --- Favorites categories ---
     pub cat_recently_played: &'static str,
@@ -409,6 +417,7 @@ pub struct Strings {
 impl Strings {
     pub fn search_category_label(&self, cat: SearchCategory) -> &'static str {
         match cat {
+            SearchCategory::All => self.cat_all,
             SearchCategory::Track => self.cat_tracks,
             SearchCategory::Artist => self.cat_artists,
             SearchCategory::Album => self.cat_albums,
@@ -421,6 +430,7 @@ impl Strings {
 
     pub fn search_category_headers(&self, cat: SearchCategory) -> [&'static str; 4] {
         match cat {
+            SearchCategory::All => [self.header_name, self.header_type, self.header_details, ""],
             SearchCategory::Track => [
                 self.header_title,
                 self.header_artist,
@@ -448,6 +458,19 @@ impl Strings {
                 self.header_duration,
             ],
             SearchCategory::Profile => [self.header_profile, "", "", ""],
+        }
+    }
+
+    /// Singular label for a result's type (All search category).
+    pub fn item_kind_label(&self, kind: ItemKind) -> &'static str {
+        match kind {
+            ItemKind::Track => self.kind_track,
+            ItemKind::Artist => self.header_artist,
+            ItemKind::Album => self.header_album,
+            ItemKind::Playlist => self.header_playlist,
+            ItemKind::Podcast => self.header_podcast,
+            ItemKind::Episode => self.header_episode,
+            ItemKind::Profile => self.header_profile,
         }
     }
 
@@ -958,7 +981,11 @@ static EN: Strings = Strings {
     header_playlist: "Playlist",
     header_podcast: "Podcast",
     header_episode: "Episode",
+    header_name: "Name",
+    header_type: "Type",
+    header_details: "Details",
 
+    cat_all: "All",
     cat_tracks: "Tracks",
     cat_artists: "Artists",
     cat_albums: "Albums",
@@ -966,6 +993,7 @@ static EN: Strings = Strings {
     cat_podcasts: "Podcasts",
     cat_episodes: "Episodes",
     cat_profiles: "Profiles",
+    kind_track: "Track",
 
     cat_recently_played: "Recently Played",
     cat_following: "Following",
@@ -1278,7 +1306,11 @@ static FR: Strings = Strings {
     header_playlist: "Playlist",
     header_podcast: "Podcast",
     header_episode: "Épisode",
+    header_name: "Nom",
+    header_type: "Type",
+    header_details: "Détails",
 
+    cat_all: "Tout",
     cat_tracks: "Titres",
     cat_artists: "Artistes",
     cat_albums: "Albums",
@@ -1286,6 +1318,7 @@ static FR: Strings = Strings {
     cat_podcasts: "Podcasts",
     cat_episodes: "Épisodes",
     cat_profiles: "Profils",
+    kind_track: "Titre",
 
     cat_recently_played: "Écouté récemment",
     cat_following: "Abonnements",
@@ -1598,7 +1631,11 @@ static ES: Strings = Strings {
     header_playlist: "Playlist",
     header_podcast: "Podcast",
     header_episode: "Episodio",
+    header_name: "Nombre",
+    header_type: "Tipo",
+    header_details: "Detalles",
 
+    cat_all: "Todo",
     cat_tracks: "Canciones",
     cat_artists: "Artistas",
     cat_albums: "Álbumes",
@@ -1606,6 +1643,7 @@ static ES: Strings = Strings {
     cat_podcasts: "Podcasts",
     cat_episodes: "Episodios",
     cat_profiles: "Perfiles",
+    kind_track: "Canción",
 
     cat_recently_played: "Escuchado recientemente",
     cat_following: "Siguiendo",
@@ -1918,7 +1956,11 @@ static PT: Strings = Strings {
     header_playlist: "Playlist",
     header_podcast: "Podcast",
     header_episode: "Episódio",
+    header_name: "Nome",
+    header_type: "Tipo",
+    header_details: "Detalhes",
 
+    cat_all: "Tudo",
     cat_tracks: "Músicas",
     cat_artists: "Artistas",
     cat_albums: "Álbuns",
@@ -1926,6 +1968,7 @@ static PT: Strings = Strings {
     cat_podcasts: "Podcasts",
     cat_episodes: "Episódios",
     cat_profiles: "Perfis",
+    kind_track: "Música",
 
     cat_recently_played: "Ouvidos recentemente",
     cat_following: "Seguindo",
@@ -2238,7 +2281,11 @@ static DE: Strings = Strings {
     header_playlist: "Playlist",
     header_podcast: "Podcast",
     header_episode: "Episode",
+    header_name: "Name",
+    header_type: "Typ",
+    header_details: "Details",
 
+    cat_all: "Alle",
     cat_tracks: "Titel",
     cat_artists: "Künstler",
     cat_albums: "Alben",
@@ -2246,6 +2293,7 @@ static DE: Strings = Strings {
     cat_podcasts: "Podcasts",
     cat_episodes: "Episoden",
     cat_profiles: "Profile",
+    kind_track: "Titel",
 
     cat_recently_played: "Kürzlich gehört",
     cat_following: "Folge ich",

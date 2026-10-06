@@ -1,3 +1,4 @@
+use deezer_core::api::models::{DisplayItem, ItemKind};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table};
 
@@ -13,6 +14,13 @@ use crate::ui::common::{track_status, STATUS_WIDTH};
 /// types.
 fn column_widths(category: SearchCategory) -> [Constraint; 5] {
     match category {
+        SearchCategory::All => [
+            Constraint::Length(STATUS_WIDTH),
+            Constraint::Percentage(45),
+            Constraint::Length(12),
+            Constraint::Percentage(35),
+            Constraint::Length(0),
+        ],
         SearchCategory::Album => [
             Constraint::Length(STATUS_WIDTH),
             Constraint::Percentage(40),
@@ -34,6 +42,23 @@ fn column_widths(category: SearchCategory) -> [Constraint; 5] {
             Constraint::Percentage(25),
             Constraint::Length(6),
         ],
+    }
+}
+
+/// Details column of the All category, prefixed with what the detail is
+/// ("Artist: Metallica", "Author: …", "Podcast: …").
+fn all_detail(item: &DisplayItem) -> String {
+    let s = t();
+    let label = match item.kind() {
+        ItemKind::Track | ItemKind::Album => s.header_artist,
+        ItemKind::Playlist => s.header_author,
+        ItemKind::Episode => s.header_podcast,
+        ItemKind::Artist | ItemKind::Podcast | ItemKind::Profile => "",
+    };
+    if label.is_empty() || item.col3.is_empty() {
+        item.col3.clone()
+    } else {
+        format!("{label}: {}", item.col3)
     }
 }
 
@@ -145,6 +170,7 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
     ])
     .height(1);
 
+    let is_all = view.search_category == SearchCategory::All;
     let rows: Vec<Row> = view
         .search_display
         .iter()
@@ -167,10 +193,21 @@ fn draw_results_table(frame: &mut Frame, view: &mut ViewState, area: Rect) {
                 )),
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
-                    &item.col2,
+                    if is_all {
+                        s.item_kind_label(item.kind())
+                    } else {
+                        item.col2.as_str()
+                    },
                     Style::default().fg(Theme::primary()),
                 )),
-                Cell::from(Span::styled(&item.col3, Theme::dim())),
+                Cell::from(Span::styled(
+                    if is_all {
+                        all_detail(item)
+                    } else {
+                        item.col3.clone()
+                    },
+                    Theme::dim(),
+                )),
                 Cell::from(Span::styled(&item.col4, Theme::dim())),
             ])
         })

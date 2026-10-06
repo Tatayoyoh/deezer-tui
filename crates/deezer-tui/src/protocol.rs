@@ -278,7 +278,9 @@ pub struct GenreItem {
 /// Search category filter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SearchCategory {
+    /// Mixed results of every type (top result first).
     #[default]
+    All,
     Track,
     Artist,
     Album,
@@ -289,7 +291,8 @@ pub enum SearchCategory {
 }
 
 impl SearchCategory {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
+        Self::All,
         Self::Track,
         Self::Artist,
         Self::Album,
@@ -302,6 +305,7 @@ impl SearchCategory {
     /// API section key used in deezer.pageSearch response.
     pub fn api_key(&self) -> &'static str {
         match self {
+            Self::All => "ALL",
             Self::Track => "TRACK",
             Self::Artist => "ARTIST",
             Self::Album => "ALBUM",

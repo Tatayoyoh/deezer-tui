@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Search: new "All" category (default) mixing every result type — name, localized type and details columns. `Enter` opens the matching artist/album/playlist/podcast view; on a track it starts playback and queues a mix inspired by it.
+
 ## [1.18.0] - 2026-09-14
 
 ### Added
