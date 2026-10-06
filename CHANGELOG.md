@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 - Info modal: 
     * direct link to the changelog
     * What's new section with changelog on the first launch of a new version
+- Check v1.19.0 interesting changes (released same day)
 
 ### Fixed
 - Settings `config.json` changes in the TUI no longer revert after a volume change
