@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.19.0] - 2026-10-06
 
 ### Added
 - Search: new "All" category (default) mixing every result type. `Enter` opens the matching view, or starts a mix on a track.
