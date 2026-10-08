@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.20.1] - 2026-10-08
 
 ### Fixed
 - Recently played tracks no longer shown as favorites (♥)
