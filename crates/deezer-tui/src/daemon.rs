@@ -938,12 +938,21 @@ impl Daemon {
                 }
             }
             Command::ShuffleFavorites => {
-                if !self.favorites.is_empty() {
+                // `self.favorites` is whatever the Favorites tab displays
+                // (Recently Played, …): only trust it on the Tracks category.
+                let favorites = match &self.favorites_cache.tracks {
+                    Some(tracks) => tracks.clone(),
+                    None if self.favorites_category == FavoritesCategory::Tracks => {
+                        self.favorites.clone()
+                    }
+                    None => Vec::new(),
+                };
+                if !favorites.is_empty() {
                     // Set queue from favorites with shuffle enabled
                     self.flow_active = false;
                     self.active_mood = None;
                     if let Ok(mut state) = self.player_state.lock() {
-                        state.queue = self.favorites.clone();
+                        state.queue = favorites.clone();
                         state.shuffle = true;
                         // Same rule as toggling shuffle by hand: enabling it
                         // clears repeat.
@@ -954,13 +963,13 @@ impl Daemon {
                     use std::hash::{Hash, Hasher};
                     let mut hasher = DefaultHasher::new();
                     Instant::now().hash(&mut hasher);
-                    let idx = hasher.finish() as usize % self.favorites.len();
+                    let idx = hasher.finish() as usize % favorites.len();
                     if let Ok(mut state) = self.player_state.lock() {
                         state.queue_index = idx;
                     }
                     // Build the cycle around the track we're about to start.
-                    self.rebuild_shuffle_order(self.favorites.len(), idx);
-                    if let Some(track) = self.favorites.get(idx).cloned() {
+                    self.rebuild_shuffle_order(favorites.len(), idx);
+                    if let Some(track) = favorites.get(idx).cloned() {
                         self.start_play_track(track);
                     }
                 }

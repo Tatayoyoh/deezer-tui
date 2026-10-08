@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Recently played tracks no longer shown as favorites (♥)
+- Shuffle favorites (`g`) no longer plays Recently Played when that list is open
+
 ## [1.20.0] - 2026-10-06
 
 ### Added

@@ -1533,9 +1533,11 @@ impl ViewState {
     }
 
     /// Check if a track is in the user's favorites.
+    ///
+    /// Only `favorite_track_ids` is authoritative: `favorites` holds whatever
+    /// the Favorites tab currently displays (e.g. Recently Played).
     pub fn is_track_favorite(&self, track_id: &str) -> bool {
         self.favorite_track_ids.iter().any(|id| id == track_id)
-            || self.favorites.iter().any(|t| t.track_id == track_id)
     }
 
     /// True when this track is the one loaded in the player, playing or paused.
