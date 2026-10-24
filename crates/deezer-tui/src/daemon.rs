@@ -1524,7 +1524,13 @@ impl Daemon {
             self.status_msg = Some(t().no_internet.into());
             return;
         }
-        self.favorites_loading = true;
+        // This always fetches favorite *tracks*. Only show the spinner when
+        // that is what the Favorites tab displays: the response clears it
+        // only for the displayed category, so on any other subtab (e.g.
+        // Recently Played) the list would stay stuck on "Loading...".
+        if self.favorites_category == FavoritesCategory::Tracks {
+            self.favorites_loading = true;
+        }
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
