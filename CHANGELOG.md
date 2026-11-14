@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [1.21.1] - 2026-11-14
 
 ### Fixed
 - Favorites list no longer stuck on "Loading..." after liking or unliking a track
