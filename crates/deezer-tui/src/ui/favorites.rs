@@ -156,9 +156,15 @@ fn draw_favorites_table(frame: &mut Frame, view: &ViewState, area: Rect) {
                 .track
                 .as_ref()
                 .is_some_and(|t| view.is_playing_track(&t.track_id));
-            // In "My favorites", hearts are not shown (Point 5)
+            // In "My favorites", hearts are not shown (Point 5): every track
+            // there is a favorite. Recently Played mixes both, so show them.
+            let is_fav = view.favorites_category == FavoritesCategory::RecentlyPlayed
+                && item
+                    .track
+                    .as_ref()
+                    .is_some_and(|t| view.is_track_favorite(&t.track_id));
             Row::new(vec![
-                Cell::from(track_status(i == selected, is_playing, false, view.status)),
+                Cell::from(track_status(i == selected, is_playing, is_fav, view.status)),
                 Cell::from(Span::styled(&item.col1, Theme::text())),
                 Cell::from(Span::styled(
                     &item.col2,

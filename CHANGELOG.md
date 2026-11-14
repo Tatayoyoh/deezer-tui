@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- Recently Played shows ♥ on tracks that are in your favorites
+
 ### Fixed
 - Favorites list no longer stuck on "Loading..." after liking or unliking a track
 
