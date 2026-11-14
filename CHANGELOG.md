@@ -4,11 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-- Recently Played shows ♥ on tracks that are in your favorites
-
 ### Fixed
 - Favorites list no longer stuck on "Loading..." after liking or unliking a track
+- Recently Played now shows ♥ on tracks that are in your favorites
 
 ## [1.21.0] - 2026-10-22
 
