@@ -323,15 +323,14 @@ Run `cargo clippy -- -D warnings` for lint checks when relevant.
 
 ## Release Routine
 
-1. Update `CHANGELOG.md`:
-   - Move items from `[Unreleased]` into new version section `[X.Y.Z] - YYYY-MM-DD`
-   - Categorize under `### Added`, `### Changed`, `### Fixed`, `### Removed`
-   - Add fresh empty `[Unreleased]` section at top
-2. Update version in `Cargo.toml` files (workspace root + both crates)
-3. Run `cargo fmt && cargo build --release`
-4. Commit and tag: `git tag vX.Y.Z`
+Release with **`./release.sh X.Y.Z`** — never bump the version, write the version header or tag by hand. The script bumps the workspace version (`Cargo.toml` + `Cargo.lock`), renames `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, commits `Release vX.Y.Z`, tags, and pushes `main` + tags (CircleCI then builds and publishes the binaries).
 
-When adding features or fixes (not during release), add brief entry under `[Unreleased]` in `CHANGELOG.md`.
+Before running it:
+1. `[Unreleased]` in `CHANGELOG.md` holds the release's entries, under `### Added`, `### Changed`, `### Fixed`, `### Removed`
+2. Run `cargo fmt && cargo build --release`
+3. **Commit** everything that belongs in the release, `CHANGELOG.md` included: the script stashes uncommitted tracked changes, so they would be left out of the release commit
+
+When adding features or fixes (not during release), add brief entry under `[Unreleased]` in `CHANGELOG.md` (create the section if the last release consumed it).
 
 **Changelog style — concise, user side.** Entries are shown to users in the info modal after an upgrade, so:
 - One short line per entry: what the user sees or can do, with the key if any. No implementation details (internals, files, causes, mechanisms).
