@@ -1,0 +1,122 @@
+name: Release
+
+# Builds the release binaries on GitHub-hosted runners and publishes them as a
+# GitHub Release, so no local `cargo build --release` is needed.
+#
+# Triggered by pushing a version tag (`git push --tags`), which is what
+# `./release.sh X.Y.Z` does at the end. `workflow_dispatch` re-runs a build for
+# an existing tag without touching the repository.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and publish (e.g. v1.22.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux-x86_64:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - name: Install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Build
+        run: cargo build --release
+      - name: Package
+        run: |
+          cp target/release/deezer-tui deezer-tui-linux-x86_64
+          chmod +x deezer-tui-linux-x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deezer-tui-linux-x86_64
+          path: deezer-tui-linux-x86_64
+          if-no-files-found: error
+
+  build-linux-aarch64:
+    name: Linux aarch64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - name: Install ALSA dev headers
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Build
+        run: cargo build --release
+      - name: Package
+        run: |
+          cp target/release/deezer-tui deezer-tui-linux-aarch64
+          chmod +x deezer-tui-linux-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deezer-tui-linux-aarch64
+          path: deezer-tui-linux-aarch64
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS universal
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-rust
+      - name: Add x86_64 target
+        run: rustup target add x86_64-apple-darwin
+      - name: Build aarch64 (native)
+        run: cargo build --release --target aarch64-apple-darwin
+      - name: Build x86_64 (cross)
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: Create universal binary
+        run: |
+          lipo -create \
+            target/aarch64-apple-darwin/release/deezer-tui \
+            target/x86_64-apple-darwin/release/deezer-tui \
+            -output deezer-tui-macos-universal
+          chmod +x deezer-tui-macos-universal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deezer-tui-macos-universal
+          path: deezer-tui-macos-universal
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs:
+      - build-linux-x86_64
+      - build-linux-aarch64
+      - build-macos
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: List artifacts
+        run: ls -la artifacts/
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # On a tag push GITHUB_REF_NAME is the tag; on workflow_dispatch it is
+          # the branch, so fall back to the tag input.
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          echo "Publishing ${TAG}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            # Re-run for an existing release: replace the assets in place.
+            gh release upload "${TAG}" artifacts/* --clobber
+          else
+            gh release create "${TAG}" \
+              --title "deezer-tui ${TAG}" \
+              --generate-notes \
+              artifacts/*
+          fi

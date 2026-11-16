@@ -1,0 +1,33 @@
+name: Setup Rust
+description: Install the pinned Rust toolchain and restore/save the Cargo cache.
+
+inputs:
+  toolchain:
+    description: Rust toolchain version
+    required: false
+    default: "1.90.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Install Rust
+      shell: bash
+      env:
+        TOOLCHAIN: ${{ inputs.toolchain }}
+      run: |
+        rustup toolchain install "${TOOLCHAIN}" --profile minimal --no-self-update
+        rustup default "${TOOLCHAIN}"
+        rustc --version
+
+    # Cache the registry and build output. The key is per-OS/arch so the Linux,
+    # aarch64 and macOS jobs do not share (and invalidate) one entry.
+    - name: Restore Cargo cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          cargo-${{ runner.os }}-${{ runner.arch }}-

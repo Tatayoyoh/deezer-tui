@@ -305,6 +305,7 @@ PlayerEngine stays on daemon's main thread (rodio/cpal are `!Send`). Audio fetch
 - Logging: `tracing` crate — daemon logs to `/tmp/deezer-daemon.log`, client to `/tmp/deezer-tui.log` (set `RUST_LOG=debug`)
 - Tests: unit tests in `deezer-core`, integration tests for API (behind feature flag)
 - CI: **CircleCI** — Linux x86_64, Linux aarch64, macOS universal (no Windows native build)
+- Release: **GitHub Actions** (`.github/workflows/release.yml`) — same three targets, triggered by a `v*` tag push; `workflow_dispatch` rebuilds an existing tag
 - Linting: `clippy` with pedantic warnings
 - Formatting: `rustfmt` default — pre-commit hook in `.githooks/` auto-formats staged `.rs` files
 - Config stored as JSON in XDG config dir (`~/.config/deezer-tui/config.json` on Linux)
