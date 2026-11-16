@@ -50,7 +50,8 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 ✅ CLI controls & status line integration (`--status`, `--json`, `--volume`, etc.) for tmux, Waybar, Polybar, and scripts<br>
 ✅ Shell completions generator for Bash, Zsh, and Fish (`--completions <shell>`)<br>
 ✅ Dynamic terminal window/tab title<br>
-✅ 10-band biquad Equalizer
+✅ 10-band biquad Equalizer<br>
+✅ Live lyrics with the current line highlighted as the track plays
 
 ## Useful shortcuts
 
@@ -59,6 +60,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 * Deezer Flow [`f`]
 * Element context menu : focused element [`x`], playing track [`ctrl+space`]
 * Equalizer [`e`]
+* Live lyrics [`m`]
 * Focused track's album page [`a`]
 * Focused track's artist page [`t`]
 * Waiting list [`w`]

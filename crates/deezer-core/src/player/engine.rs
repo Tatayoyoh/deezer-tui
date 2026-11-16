@@ -226,6 +226,7 @@ impl PlayerEngine {
             state.current_track = Some(track.clone());
             state.duration_secs = track.duration_secs();
             state.position_secs = 0;
+            state.position_ms = 0;
             state.quality = quality;
         }
 
@@ -269,6 +270,7 @@ impl PlayerEngine {
         state.status = PlaybackStatus::Stopped;
         state.current_track = None;
         state.position_secs = 0;
+        state.position_ms = 0;
         state.duration_secs = 0;
         debug!("Stopped");
     }
@@ -378,6 +380,7 @@ impl PlayerEngine {
             state.current_track = Some(queued.track.clone());
             state.duration_secs = queued.track.duration_secs();
             state.position_secs = 0;
+            state.position_ms = 0;
             state.quality = queued.quality;
         }
         Some(queued.track)

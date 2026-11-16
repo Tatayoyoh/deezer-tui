@@ -448,6 +448,50 @@ pub struct GenreDetail {
     pub radios: Vec<RadioData>,
 }
 
+/// A single lyric line, with the millisecond offset it becomes current at.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LyricLine {
+    /// Position in the track the line starts at, in milliseconds.
+    pub at_ms: u64,
+    pub text: String,
+}
+
+/// Track lyrics. `synced` holds time-aligned lines when Deezer has them
+/// (LyricFind); `plain` is the unsynced text, also used as a fallback when
+/// `synced` is empty.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct Lyrics {
+    #[serde(default)]
+    pub synced: Vec<LyricLine>,
+    #[serde(default)]
+    pub plain: Vec<String>,
+    #[serde(default)]
+    pub writers: String,
+    #[serde(default)]
+    pub copyright: String,
+}
+
+impl Lyrics {
+    /// Index of the line current at `position_ms`, or `None` before the first
+    /// one. Assumes `synced` is sorted by `at_ms`.
+    pub fn line_at(&self, position_ms: u64) -> Option<usize> {
+        let mut current = None;
+        for (i, line) in self.synced.iter().enumerate() {
+            if line.at_ms <= position_ms {
+                current = Some(i);
+            } else {
+                break;
+            }
+        }
+        current
+    }
+
+    /// True when there is nothing to display.
+    pub fn is_empty(&self) -> bool {
+        self.synced.is_empty() && self.plain.iter().all(|l| l.trim().is_empty())
+    }
+}
+
 /// Full album detail returned from the public API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AlbumDetail {
@@ -957,5 +1001,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(track.direct_stream_url(), None);
+    }
+
+    #[test]
+    fn lyrics_line_at_picks_the_current_line() {
+        let lyrics = Lyrics {
+            synced: vec![
+                LyricLine {
+                    at_ms: 51_480,
+                    text: "Work it".into(),
+                },
+                LyricLine {
+                    at_ms: 59_710,
+                    text: "Harder".into(),
+                },
+            ],
+            plain: vec!["Work it".into(), "Harder".into()],
+            ..Lyrics::default()
+        };
+        // Before the first line there is nothing current.
+        assert_eq!(lyrics.line_at(0), None);
+        assert_eq!(lyrics.line_at(51_479), None);
+        assert_eq!(lyrics.line_at(51_480), Some(0));
+        assert_eq!(lyrics.line_at(59_000), Some(0));
+        assert_eq!(lyrics.line_at(600_000), Some(1));
     }
 }

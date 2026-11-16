@@ -9,7 +9,7 @@ use tracing::{debug, error, info, warn};
 
 use deezer_core::api::models::{
     AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem, ItemKind,
-    PlaylistData, PlaylistDetail, TrackData,
+    Lyrics, PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
@@ -150,6 +150,15 @@ enum AsyncResult {
     GenresError(String),
     GenreDetailReady(GenreDetail),
     GenreDetailError(String),
+    /// Lyrics for `track_id`. `Ok(None)` means Deezer has none for this track.
+    LyricsReady {
+        track_id: String,
+        lyrics: Option<Lyrics>,
+    },
+    LyricsError {
+        track_id: String,
+        err: String,
+    },
     OfflineTrackSaved {
         track: TrackData,
         quality: AudioQuality,
@@ -255,6 +264,11 @@ pub struct Daemon {
     // Genre detail
     genre_detail: Option<GenreDetail>,
     genre_detail_loading: bool,
+
+    // Lyrics of the currently playing track (fetched on demand)
+    lyrics: Option<Lyrics>,
+    lyrics_track_id: Option<String>,
+    lyrics_loading: bool,
 
     // Navigation overlay stack (persisted across client reconnections)
     nav_overlay: Option<crate::protocol::NavOverlay>,
@@ -414,6 +428,10 @@ impl Daemon {
 
             genre_detail: None,
             genre_detail_loading: false,
+
+            lyrics: None,
+            lyrics_track_id: None,
+            lyrics_loading: false,
 
             nav_overlay: None,
             nav_overlay_stack: Vec::new(),
@@ -858,6 +876,9 @@ impl Daemon {
                     quality = quality.as_api_format(),
                     "preferred quality updated (applies to next track)"
                 );
+            }
+            Command::RequestLyrics => {
+                self.request_lyrics();
             }
             Command::SeekForward { secs } => {
                 self.seek_relative(secs as i64);
@@ -1347,11 +1368,15 @@ impl Daemon {
             current_track: state.current_track.clone(),
             quality: state.quality,
             position_secs: state.position_secs,
+            position_ms: state.position_ms,
             duration_secs: state.duration_secs,
             volume: state.volume,
             shuffle: state.shuffle,
             repeat: state.repeat,
             equalizer: self.config.equalizer.clone(),
+            lyrics: self.lyrics.clone(),
+            lyrics_track_id: self.lyrics_track_id.clone(),
+            lyrics_loading: self.lyrics_loading,
             queue: state.queue.clone(),
             queue_index: state.queue_index,
             search_results: self.search_results.clone(),
@@ -2282,6 +2307,46 @@ impl Daemon {
         });
     }
 
+    /// Fetch lyrics for the currently playing track, unless already loaded or in
+    /// flight for it.
+    fn request_lyrics(&mut self) {
+        let Some(track) = self.player_state.lock().unwrap().current_track.clone() else {
+            return;
+        };
+        let track_id = track.track_id.clone();
+        if self.lyrics_track_id.as_deref() == Some(track_id.as_str()) && self.lyrics.is_some() {
+            return;
+        }
+        if self.lyrics_loading && self.lyrics_track_id.as_deref() == Some(track_id.as_str()) {
+            return;
+        }
+        if self.is_offline {
+            self.status_msg = Some(t().no_internet.into());
+            return;
+        }
+
+        self.lyrics = None;
+        self.lyrics_track_id = Some(track_id.clone());
+        self.lyrics_loading = true;
+
+        let client = Arc::clone(&self.client);
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let client = client.lock().await;
+            match client.get_lyrics(&track_id).await {
+                Ok(lyrics) => {
+                    let _ = tx.send(AsyncResult::LyricsReady { track_id, lyrics });
+                }
+                Err(e) => {
+                    let _ = tx.send(AsyncResult::LyricsError {
+                        track_id,
+                        err: e.to_string(),
+                    });
+                }
+            }
+        });
+    }
+
     fn start_play_radio(&mut self, radio_id: u64) {
         if self.is_offline {
             self.status_msg = Some(t().no_internet.into());
@@ -2417,6 +2482,12 @@ impl Daemon {
         let generation = self.track_generation;
         self.listen_logged_for = None;
 
+        // Drop the previous track's lyrics so a snapshot never carries them
+        // for the wrong song; the client re-requests for the new track.
+        self.lyrics = None;
+        self.lyrics_track_id = None;
+        self.lyrics_loading = false;
+
         info!(
             gen = generation,
             track_id = %track.track_id,
@@ -2430,6 +2501,7 @@ impl Daemon {
             state.current_track = Some(track.clone());
             state.duration_secs = track.duration_secs();
             state.position_secs = 0;
+            state.position_ms = 0;
         }
 
         self.status_msg = Some(t().loading.into());
@@ -2979,7 +3051,9 @@ impl Daemon {
         }
 
         if engine.try_seek(Duration::from_secs(new_pos)).is_ok() {
-            self.player_state.lock().unwrap().position_secs = new_pos;
+            let mut state = self.player_state.lock().unwrap();
+            state.position_secs = new_pos;
+            state.position_ms = new_pos.saturating_mul(1000);
         }
     }
 
@@ -3536,6 +3610,21 @@ impl Daemon {
                     self.genre_detail_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_genre_detail_error, &err));
                 }
+                AsyncResult::LyricsReady { track_id, lyrics } => {
+                    // Ignore a payload for a track we already moved past.
+                    if self.lyrics_track_id.as_deref() == Some(track_id.as_str()) {
+                        self.lyrics_loading = false;
+                        self.lyrics = lyrics;
+                        self.status_msg = Some(t().status_lyrics_loaded.into());
+                    }
+                }
+                AsyncResult::LyricsError { track_id, err } => {
+                    if self.lyrics_track_id.as_deref() == Some(track_id.as_str()) {
+                        self.lyrics_loading = false;
+                        self.lyrics = None;
+                        self.status_msg = Some(t().fmt_error(t().status_lyrics_error, &err));
+                    }
+                }
                 AsyncResult::OfflineTrackSaved { track, quality } => {
                     self.offline_loading = false;
                     self.offline_index.add_track(track, quality);
@@ -3913,12 +4002,16 @@ impl Daemon {
         self.track_generation += 1;
         let generation = self.track_generation;
         self.listen_logged_for = None;
+        self.lyrics = None;
+        self.lyrics_track_id = None;
+        self.lyrics_loading = false;
 
         if let Ok(mut state) = self.player_state.lock() {
             state.status = PlaybackStatus::Loading;
             state.current_track = Some(track.clone());
             state.duration_secs = track.duration_secs();
             state.position_secs = 0;
+            state.position_ms = 0;
         }
 
         self.status_msg = Some(t().loading.into());
@@ -3975,7 +4068,9 @@ impl Daemon {
         // Update playback position from what the sink has actually played
         if let (Some(engine), Ok(mut state)) = (self.engine.as_ref(), self.player_state.lock()) {
             if state.status == PlaybackStatus::Playing {
-                state.position_secs = engine.position().as_secs();
+                let pos = engine.position();
+                state.position_ms = pos.as_millis() as u64;
+                state.position_secs = pos.as_secs();
                 if state.duration_secs > 0 && state.position_secs >= state.duration_secs {
                     state.position_secs = state.duration_secs;
                 }

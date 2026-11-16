@@ -29,6 +29,11 @@ pub struct PlayerState {
     pub quality: AudioQuality,
     pub position_secs: u64,
     pub duration_secs: u64,
+    /// Position in the track, in milliseconds — precise enough to drive
+    /// time-synced lyrics. `position_secs` stays the coarse value used for
+    /// display and the CLI.
+    #[serde(default)]
+    pub position_ms: u64,
     pub volume: f32,
     pub shuffle: bool,
     pub repeat: RepeatMode,
@@ -44,6 +49,7 @@ impl Default for PlayerState {
             quality: AudioQuality::Mp3_128,
             position_secs: 0,
             duration_secs: 0,
+            position_ms: 0,
             volume: 0.8,
             shuffle: false,
             repeat: RepeatMode::Off,

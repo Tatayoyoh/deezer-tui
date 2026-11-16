@@ -174,11 +174,12 @@ Audio decoding pure Rust via `symphonia` (MP3 + FLAC), no system codecs needed.
 ```
 
 ### Overlays & Modals
-- **Context menu** (`m`): Play next, Add to queue, Add to playlist, Start mix, Dislike
+- **Context menu** (`x`): Play next, Add to queue, Add to playlist, Start mix, Dislike
 - **Queue / Waiting list** (`w`): View/manage play queue (delete, reorder, favorite)
 - **Album detail** (`a`): Full track listing for album
 - **Playlist detail** (`Enter` on playlist): Track listing for playlist
 - **Shortcuts help** (`?`): Keyboard shortcuts reference
+- **Live lyrics** (`m`): Time-synced lyrics with the current line highlighted as the track plays — `↑/↓`/`PgUp`/`PgDn`/`Home`/`End` scroll (stops following), `f` resumes following, `Space`/`n`/`b` keep controlling playback. Fetched from `song.getLyrics` (`deezer-core` `gateway::get_lyrics`); unsynced lyrics are shown unhighlighted with a note. The highlight is timed from `PlayerState.position_ms` (millisecond-accurate, carried through the snapshot as `position_ms`), not the whole-second `position_secs`, so it tracks lines closer than a second apart.
 - **Info** (`i`): Version, links. Opens by itself on the first launch of a new version with the release notes since the last version used (`release_notes.rs`: CHANGELOG embedded via `include_str!`, last version in `<config_dir>/last_version`)
 - **Settings** (`Ctrl+O`): Theme selection (official Deezer dark themes)
 - **Equalizer** (`e`): 10-band graphic EQ + global gain — `←/→` column, `↑/↓` gain, `Space` on/off, `p`/`P` preset, `0` reset column
