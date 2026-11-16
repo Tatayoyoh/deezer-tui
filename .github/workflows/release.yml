@@ -24,6 +24,7 @@ env:
 
 jobs:
   build-linux-x86_64:
+  build-linux-aarch64:
     name: Linux x86_64
     runs-on: ubuntu-24.04
     steps:
@@ -63,37 +64,11 @@ jobs:
           path: deezer-tui-linux-aarch64
           if-no-files-found: error
 
-  build-macos:
-    name: macOS universal
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/setup-rust
-      - name: Add x86_64 target
-        run: rustup target add x86_64-apple-darwin
-      - name: Build aarch64 (native)
-        run: cargo build --release --target aarch64-apple-darwin
-      - name: Build x86_64 (cross)
-        run: cargo build --release --target x86_64-apple-darwin
-      - name: Create universal binary
-        run: |
-          lipo -create \
-            target/aarch64-apple-darwin/release/deezer-tui \
-            target/x86_64-apple-darwin/release/deezer-tui \
-            -output deezer-tui-macos-universal
-          chmod +x deezer-tui-macos-universal
-      - uses: actions/upload-artifact@v4
-        with:
-          name: deezer-tui-macos-universal
-          path: deezer-tui-macos-universal
-          if-no-files-found: error
-
   release:
     name: Publish release
     needs:
       - build-linux-x86_64
       - build-linux-aarch64
-      - build-macos
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
