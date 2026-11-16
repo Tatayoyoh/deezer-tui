@@ -41,7 +41,10 @@ const PREFETCH_MIN_AHEAD_SECS: f64 = 20.0;
 
 /// Async results from background tasks.
 enum AsyncResult {
-    LoginSuccess(String),
+    LoginSuccess(
+        deezer_core::api::auth::Session,
+        Vec<deezer_core::api::models::FamilyProfile>,
+    ),
     LoginError(String),
     MasterKeyReady([u8; 16]),
     MasterKeyError(String),
@@ -188,6 +191,7 @@ pub struct Daemon {
     // Login state
     login_error: Option<String>,
     login_loading: bool,
+    family_profiles: Vec<deezer_core::api::models::FamilyProfile>,
     user_name: Option<String>,
 
     // Search state
@@ -362,6 +366,7 @@ impl Daemon {
 
             login_error: None,
             login_loading: false,
+            family_profiles: Vec::new(),
             user_name: None,
 
             search_results: Vec::new(),
@@ -748,8 +753,33 @@ impl Daemon {
             Command::GetSnapshot => {} // Snapshot is sent after every command anyway
             Command::Login { arl } => {
                 self.config.arl = Some(arl.clone());
-                let _ = Config::update(|c| c.arl = Some(arl.clone()));
+                self.config.family_profile_id = None;
+                self.family_profiles.clear();
+                let _ = Config::update(|c| {
+                    c.arl = Some(arl.clone());
+                    c.family_profile_id = None;
+                });
                 self.start_login(arl);
+            }
+            Command::ChooseFamilyProfile => {
+                if self.screen == Screen::Login && !self.login_loading {
+                    if let Some(arl) = self.config.arl.clone() {
+                        self.config.family_profile_id = None;
+                        self.family_profiles.clear();
+                        self.start_login(arl);
+                    }
+                }
+            }
+            Command::SelectFamilyProfile { profile_id } => {
+                if self.screen == Screen::Login
+                    && !self.login_loading
+                    && self.family_profiles.iter().any(|p| p.user_id == profile_id)
+                {
+                    if let Some(arl) = self.config.arl.clone() {
+                        self.config.family_profile_id = Some(profile_id);
+                        self.start_login(arl);
+                    }
+                }
             }
             Command::Search { query } => {
                 self.last_search_query = query.clone();
@@ -1182,7 +1212,20 @@ impl Daemon {
             Command::Logout => {
                 // Clear ARL, stop playback, return to login screen
                 self.config.arl = None;
-                let _ = Config::update(|c| c.arl = None);
+                self.config.family_profile_id = None;
+                self.family_profiles.clear();
+                // In-flight reads/playback from the old account must never
+                // populate the next profile's state or persistent cache.
+                (self.async_tx, self.async_rx) = tokio::sync::mpsc::unbounded_channel();
+                self.track_generation = self.track_generation.wrapping_add(1);
+                self.prefetch = None;
+                self.favorite_track_ids.clear();
+                self.favorite_artist_ids.clear();
+                self.favorite_album_ids.clear();
+                let _ = Config::update(|c| {
+                    c.arl = None;
+                    c.family_profile_id = None;
+                });
                 self.screen = Screen::Login;
                 self.user_name = None;
                 self.master_key = None;
@@ -1423,6 +1466,7 @@ impl Daemon {
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
+            family_profiles: self.family_profiles.clone(),
             user_name: self.user_name.clone(),
             is_offline: self.is_offline,
         }
@@ -1436,11 +1480,23 @@ impl Daemon {
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
+        let profile_id = self.config.family_profile_id;
         tokio::spawn(async move {
             let mut client = client.lock().await;
-            match client.login_arl(&arl).await {
+            match client.login_arl_with_profile(&arl, profile_id).await {
                 Ok(session) => {
-                    let _ = tx.send(AsyncResult::LoginSuccess(session.user_name));
+                    let profiles = if profile_id.is_none() {
+                        match client.family_profiles().await {
+                            Ok(profiles) => profiles,
+                            Err(e) => {
+                                let _ = tx.send(AsyncResult::LoginError(e.to_string()));
+                                return;
+                            }
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.send(AsyncResult::LoginSuccess(session, profiles));
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::LoginError(e.to_string()));
@@ -2986,13 +3042,30 @@ impl Daemon {
     fn process_async_results(&mut self) {
         while let Ok(result) = self.async_rx.try_recv() {
             match result {
-                AsyncResult::LoginSuccess(name) => {
-                    // A successful login proves Deezer is reachable.
+                AsyncResult::LoginSuccess(session, profiles) => {
                     self.is_offline = false;
                     self.login_loading = false;
+                    self.login_error = None;
+                    if self.config.family_profile_id.is_none() && profiles.len() > 1 {
+                        self.family_profiles = profiles;
+                        self.screen = Screen::Login;
+                        continue;
+                    }
+                    let profile_id = self.config.family_profile_id;
+                    if let Err(e) = Config::update(|c| c.family_profile_id = profile_id) {
+                        self.screen = Screen::Login;
+                        self.login_error = Some(e.to_string());
+                        continue;
+                    }
+                    self.family_profiles.clear();
+                    self.favorite_track_ids.clear();
+                    self.favorite_artist_ids.clear();
+                    self.favorite_album_ids.clear();
+                    self.favorites_cache.select_user(session.user_id);
+                    self.favorites_cache.save();
                     self.screen = Screen::Main;
-                    self.user_name = Some(name.clone());
-                    self.status_msg = Some(t().fmt_connected_as(&name));
+                    self.user_name = Some(session.user_name.clone());
+                    self.status_msg = Some(t().fmt_connected_as(&session.user_name));
                     self.start_fetch_master_key();
                 }
                 AsyncResult::LoginError(err) => {

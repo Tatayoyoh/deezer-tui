@@ -875,6 +875,8 @@ pub struct ViewState {
     pub status_msg_at: Option<Instant>,
     pub login_error: Option<String>,
     pub login_loading: bool,
+    pub family_profiles: Vec<deezer_core::api::models::FamilyProfile>,
+    pub family_profile_selected: usize,
     pub user_name: Option<String>,
     pub is_offline: bool,
 
@@ -1064,6 +1066,8 @@ impl ViewState {
             status_msg_at: snap.status_msg.as_ref().map(|_| Instant::now()),
             login_error: snap.login_error.clone(),
             login_loading: snap.login_loading,
+            family_profiles: snap.family_profiles.clone(),
+            family_profile_selected: 0,
             user_name: snap.user_name.clone(),
             is_offline: snap.is_offline,
             vim_keys: Config::load().vim_keys,
@@ -1488,6 +1492,10 @@ impl ViewState {
         }
         self.login_error = snap.login_error;
         self.login_loading = snap.login_loading;
+        self.family_profiles = snap.family_profiles;
+        self.family_profile_selected = self
+            .family_profile_selected
+            .min(self.family_profiles.len().saturating_sub(1));
         self.user_name = snap.user_name;
         self.is_offline = snap.is_offline;
 
@@ -2550,6 +2558,13 @@ impl Client {
             return KeyAction::Continue;
         }
 
+        if key.code == KeyCode::Char('p') && self.view.login_error.is_some() {
+            self.view.login_loading = true;
+            return KeyAction::SendCommand(Command::ChooseFamilyProfile);
+        }
+        if !self.view.family_profiles.is_empty() {
+            return handle_family_profile_key(&mut self.view, key);
+        }
         match self.view.login_mode {
             LoginMode::Button => match key.code {
                 KeyCode::Enter => KeyAction::WebLogin,
@@ -5770,10 +5785,68 @@ async fn perform_update(download_url: &str) -> Result<std::path::PathBuf> {
     Ok(current_exe)
 }
 
+/// Profile selection uses public IDs only; credentials stay in the daemon.
+fn handle_family_profile_key(view: &mut ViewState, key: KeyEvent) -> KeyAction {
+    if view.login_loading || view.family_profiles.is_empty() {
+        return KeyAction::Continue;
+    }
+    match key.code {
+        KeyCode::Up => {
+            view.family_profile_selected = view.family_profile_selected.saturating_sub(1)
+        }
+        KeyCode::Down => {
+            view.family_profile_selected =
+                (view.family_profile_selected + 1).min(view.family_profiles.len() - 1)
+        }
+        KeyCode::Enter => {
+            let profile_id = view.family_profiles[view.family_profile_selected].user_id;
+            view.login_loading = true;
+            return KeyAction::SendCommand(Command::SelectFamilyProfile { profile_id });
+        }
+        KeyCode::Esc => return KeyAction::SendCommand(Command::Logout),
+        _ => {}
+    }
+    KeyAction::Continue
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ui::common::tab_rects;
+
+    #[test]
+    fn family_picker_sends_chosen_id_and_blocks_duplicate_submissions() {
+        let snap = DaemonSnapshot {
+            family_profiles: vec![
+                deezer_core::api::models::FamilyProfile {
+                    user_id: 10,
+                    name: "Admin".into(),
+                },
+                deezer_core::api::models::FamilyProfile {
+                    user_id: 20,
+                    name: "Profile".into(),
+                },
+            ],
+            ..DaemonSnapshot::default()
+        };
+        let mut view = ViewState::from_snapshot(&snap);
+        handle_family_profile_key(&mut view, KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        let action =
+            handle_family_profile_key(&mut view, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(
+            action,
+            KeyAction::SendCommand(Command::SelectFamilyProfile { profile_id: 20 })
+        ));
+        assert!(matches!(
+            handle_family_profile_key(&mut view, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            KeyAction::Continue
+        ));
+        view.login_loading = false;
+        assert!(matches!(
+            handle_family_profile_key(&mut view, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            KeyAction::SendCommand(Command::Logout)
+        ));
+    }
 
     fn rows(y: u16, height: u16, offset: usize, len: usize) -> RowsArea {
         RowsArea {

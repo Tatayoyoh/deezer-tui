@@ -21,7 +21,7 @@ impl DeezerClient {
     }
 
     /// Call a gateway API method.
-    async fn gw_call(
+    pub(super) async fn gw_call(
         &self,
         method: &str,
         params: serde_json::Value,
@@ -1393,10 +1393,14 @@ impl DeezerClient {
         }
 
         debug!("Fetching JWT from auth.deezer.com");
-        let resp = self
-            .http
-            .post(AUTH_JWT_URL)
-            .header("Content-Length", "0")
+        let request = if let Some((id, arl)) = &self.profile_auth {
+            self.http
+                .post("https://auth.deezer.com/login/arl?jo=p&rto=c&i=p")
+                .json(&json!({ "arl": arl, "account_id": id.to_string() }))
+        } else {
+            self.http.post(AUTH_JWT_URL).header("Content-Length", "0")
+        };
+        let resp = request
             .send()
             .await
             .map_err(|e| DeezerError::Http(e.to_string()))?;
@@ -1406,10 +1410,6 @@ impl DeezerClient {
             .text()
             .await
             .map_err(|e| DeezerError::Http(e.to_string()))?;
-        let _ = std::fs::write(
-            "/tmp/deezer-jwt-debug.txt",
-            format!("status={status}\n{raw}"),
-        );
         let body: serde_json::Value = serde_json::from_str(&raw)
             .map_err(|e| DeezerError::Http(format!("JWT response not JSON: {e}")))?;
 
@@ -1421,6 +1421,9 @@ impl DeezerClient {
             })?
             .to_string();
 
+        if let Some((id, _)) = &self.profile_auth {
+            verify_profile_jwt(&jwt, *id)?;
+        }
         if let Ok(mut cache) = self.jwt_cache.lock() {
             *cache = Some(jwt.clone());
         }
@@ -1457,6 +1460,9 @@ impl DeezerClient {
             .http
             .post(PIPE_GRAPHQL_URL)
             .bearer_auth(&jwt)
+            // Gateway ARL/sid cookies can conflict with a profile-scoped JWT
+            // and make Pipe return an empty HTTP 400. Pipe uses Bearer auth.
+            .header(reqwest::header::COOKIE, "")
             .json(&body)
             .send()
             .await
@@ -1994,5 +2000,79 @@ mod tests {
             let is_mp3 = audio.starts_with(b"ID3") || (audio[0] == 0xFF && audio[1] & 0xE0 == 0xE0);
             assert!(is_mp3, "payload is not MP3: {:02X?}", &audio[..4]);
         }
+    }
+}
+
+/// Check identity before caching a profile JWT; signature verification remains Deezer's job.
+fn verify_profile_jwt(jwt: &str, expected: u64) -> Result<(), DeezerError> {
+    use base64::Engine;
+    let payload = jwt
+        .split('.')
+        .nth(1)
+        .and_then(|s| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(s.trim_end_matches('='))
+                .ok()
+        })
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let id = payload
+        .as_ref()
+        .and_then(|p| p.get("userId"))
+        .and_then(|v| {
+            v.as_u64()
+                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+        });
+    if id != Some(expected) {
+        return Err(DeezerError::Auth(
+            "Deezer did not issue a JWT for the requested Family profile".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod family_jwt_tests {
+    use super::verify_profile_jwt;
+    use base64::Engine;
+
+    fn jwt(claim: serde_json::Value) -> String {
+        format!(
+            "header.{}.signature",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claim.to_string())
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "live API: requires DEEZER_TEST_ARL and DEEZER_TEST_PROFILE_ID"]
+    async fn family_profile_authenticates_both_apis_and_jwt_refresh() {
+        let arl = std::env::var("DEEZER_TEST_ARL").expect("ARL env var");
+        let id: u64 = std::env::var("DEEZER_TEST_PROFILE_ID")
+            .expect("profile id")
+            .parse()
+            .unwrap();
+        let mut client = super::DeezerClient::new().unwrap();
+        client.login_arl(&arl).await.unwrap();
+        assert!(client
+            .family_profiles()
+            .await
+            .unwrap()
+            .iter()
+            .any(|p| p.user_id == id));
+        let session = client.login_arl_with_profile(&arl, Some(id)).await.unwrap();
+        assert_eq!(session.user_id, id);
+        client.get_listening_history().await.unwrap();
+        verify_profile_jwt(&client.ensure_jwt(false).await.unwrap(), id).unwrap();
+        verify_profile_jwt(&client.ensure_jwt(true).await.unwrap(), id).unwrap();
+        let me = client.graphql_call("{ me { id } }").await.unwrap();
+        assert_eq!(me["me"]["id"].as_str().unwrap(), id.to_string());
+    }
+
+    #[test]
+    fn profile_jwt_rejects_admin_identity_and_malformed_tokens() {
+        assert!(verify_profile_jwt(&jwt(serde_json::json!({"userId": "20"})), 20).is_ok());
+        assert!(verify_profile_jwt(&jwt(serde_json::json!({"userId": 20})), 20).is_ok());
+        assert!(verify_profile_jwt(&jwt(serde_json::json!({"userId": "10"})), 20).is_err());
+        assert!(verify_profile_jwt(&jwt(serde_json::json!({})), 20).is_err());
+        assert!(verify_profile_jwt("not-a-jwt", 20).is_err());
     }
 }

@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Deezer Family profile selection after login, with the chosen profile remembered across launches
+
+### Fixed
+- Family libraries and Flow now use the selected profile for gateway and GraphQL authentication
+- Discard favorites cached for another profile when switching accounts
+- Keep credential configuration private across atomic saves and stop dumping JWT responses to disk
+
 ## [1.21.1] - 2026-11-14
 
 ### Fixed
