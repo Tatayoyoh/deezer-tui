@@ -5,8 +5,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, GenreDetail, PlaylistData,
-    PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, GenreDetail, Lyrics,
+    PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::offline::OfflineTrack;
 use deezer_core::player::eq::EqSettings;
@@ -189,6 +189,8 @@ pub enum Command {
     SetQuality { quality: AudioQuality },
     /// Replace the equalizer settings (applied live, persisted to config).
     SetEqualizer { settings: EqSettings },
+    /// Fetch the lyrics of the currently playing track.
+    RequestLyrics,
     /// Graceful shutdown — daemon exits.
     Shutdown,
 }
@@ -399,6 +401,10 @@ pub struct DaemonSnapshot {
     pub quality: AudioQuality,
     #[serde(default)]
     pub position_secs: u64,
+    /// Millisecond-accurate position, for time-synced lyrics. Older daemons
+    /// omit it, in which case the client derives it from `position_secs`.
+    #[serde(default)]
+    pub position_ms: u64,
     #[serde(default)]
     pub duration_secs: u64,
     #[serde(default = "default_volume")]
@@ -409,6 +415,18 @@ pub struct DaemonSnapshot {
     pub repeat: RepeatMode,
     #[serde(default)]
     pub equalizer: EqSettings,
+
+    /// Lyrics of the currently playing track, when the user has requested them
+    /// (or when the daemon prefetched them). `None` means "not fetched yet".
+    #[serde(default)]
+    pub lyrics: Option<Lyrics>,
+    /// Track ID the `lyrics` above belong to, so the client can tell a stale
+    /// payload from the one it asked for.
+    #[serde(default)]
+    pub lyrics_track_id: Option<String>,
+    /// True while a lyrics fetch is in flight.
+    #[serde(default)]
+    pub lyrics_loading: bool,
 
     // Queue
     #[serde(default)]
@@ -562,11 +580,15 @@ impl Default for DaemonSnapshot {
             current_track: None,
             quality: AudioQuality::Mp3_128,
             position_secs: 0,
+            position_ms: 0,
             duration_secs: 0,
             volume: 0.8,
             shuffle: false,
             repeat: RepeatMode::Off,
             equalizer: EqSettings::default(),
+            lyrics: None,
+            lyrics_track_id: None,
+            lyrics_loading: false,
             queue: Vec::new(),
             queue_index: 0,
             search_results: Vec::new(),

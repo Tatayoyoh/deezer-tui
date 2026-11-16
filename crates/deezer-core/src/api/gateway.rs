@@ -3,8 +3,8 @@ use tracing::debug;
 
 use super::models::{
     AlbumDetail, ArtistAlbumEntry, ArtistData, ArtistDetail, DeezerError, DisplayItem, EpisodeData,
-    ItemKind, MoodItem, PlaylistData, PlaylistDetail, PodcastData, ProfileData, SearchResults,
-    SimilarArtistEntry, TrackData,
+    ItemKind, LyricLine, Lyrics, MoodItem, PlaylistData, PlaylistDetail, PodcastData, ProfileData,
+    SearchResults, SimilarArtistEntry, TrackData,
 };
 use super::DeezerClient;
 
@@ -135,6 +135,18 @@ impl DeezerClient {
         }
 
         Ok(track)
+    }
+
+    /// Fetch track lyrics. Deezer answers with a `DATA_ERROR` when it has none,
+    /// which maps to `Ok(None)`.
+    pub async fn get_lyrics(&self, song_id: &str) -> Result<Option<Lyrics>, DeezerError> {
+        let params = json!({ "sng_id": song_id });
+        let results = match self.gw_call("song.getLyrics", params).await {
+            Ok(results) => results,
+            Err(DeezerError::Api(msg)) if msg.contains("DATA_ERROR") => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        Ok(parse_lyrics(&results))
     }
 
     /// Get multiple tracks at once (includes TRACK_TOKEN and MD5_ORIGIN).
@@ -1794,6 +1806,59 @@ fn parse_id(id: &str) -> serde_json::Value {
     }
 }
 
+/// Turn a `song.getLyrics` result into a `Lyrics`. Time-aligned lines come from
+/// `LYRICS_SYNC_JSON`; entries without a `milliseconds` field are verse breaks
+/// and are dropped from the synced list. `LYRICS_TEXT` is the unsynced fallback.
+fn parse_lyrics(results: &serde_json::Value) -> Option<Lyrics> {
+    let synced: Vec<LyricLine> = results
+        .get("LYRICS_SYNC_JSON")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|line| {
+            let at_ms = line.get("milliseconds").and_then(|m| {
+                m.as_u64()
+                    .or_else(|| m.as_str().and_then(|s| s.parse().ok()))
+            })?;
+            let text = line.get("line").and_then(|l| l.as_str()).unwrap_or("");
+            Some(LyricLine {
+                at_ms,
+                text: text.to_string(),
+            })
+        })
+        .collect();
+
+    let text = results
+        .get("LYRICS_TEXT")
+        .and_then(|t| t.as_str())
+        .unwrap_or("");
+    let plain: Vec<String> = if text.trim().is_empty() {
+        synced.iter().map(|l| l.text.clone()).collect()
+    } else {
+        text.lines().map(|l| l.trim_end().to_string()).collect()
+    };
+
+    let lyrics = Lyrics {
+        synced,
+        plain,
+        writers: results
+            .get("LYRICS_WRITERS")
+            .and_then(|w| w.as_str())
+            .unwrap_or("")
+            .to_string(),
+        copyright: results
+            .get("LYRICS_COPYRIGHTS")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string(),
+    };
+    if lyrics.is_empty() {
+        None
+    } else {
+        Some(lyrics)
+    }
+}
+
 fn format_fans(n: u64) -> String {
     if n >= 1_000_000 {
         format!("{:.1}M fans", n as f64 / 1_000_000.0)
@@ -1891,8 +1956,8 @@ fn is_stale_jwt(err: &DeezerError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_all_results, is_stale_jwt};
-    use crate::api::models::{AlbumData, DeezerError, DisplayItem, ItemKind};
+    use super::{build_all_results, is_stale_jwt, parse_lyrics};
+    use crate::api::models::{AlbumData, DeezerError, DisplayItem, ItemKind, LyricLine};
     use crate::api::DeezerClient;
 
     /// Live tests read the ARL from the environment so no token is committed.
@@ -1928,6 +1993,59 @@ mod tests {
         assert_eq!(items[1].col3, "Daft Punk");
         assert!(items[1].col2.is_empty());
         assert_eq!(items[2].col1, "Thomas Bangalter");
+    }
+
+    #[test]
+    fn lyrics_parse_synced_lines_and_plain_text() {
+        let results = serde_json::json!({
+            "LYRICS_SYNC_JSON": [
+                { "line": "Work it", "milliseconds": "51480", "duration": "1160" },
+                { "line": "" },
+                { "line": "Harder", "milliseconds": 59710, "duration": "1190" }
+            ],
+            "LYRICS_TEXT": "Work it\r\n\r\nHarder",
+            "LYRICS_WRITERS": "Thomas Bangalter",
+            "LYRICS_COPYRIGHTS": "Because"
+        });
+        let lyrics = parse_lyrics(&results).unwrap();
+        // Verse break (no `milliseconds`) is dropped from the synced list.
+        assert_eq!(
+            lyrics.synced,
+            vec![
+                LyricLine {
+                    at_ms: 51480,
+                    text: "Work it".into()
+                },
+                LyricLine {
+                    at_ms: 59710,
+                    text: "Harder".into()
+                },
+            ]
+        );
+        assert_eq!(lyrics.plain, vec!["Work it", "", "Harder"]);
+        assert_eq!(lyrics.writers, "Thomas Bangalter");
+        assert_eq!(lyrics.copyright, "Because");
+    }
+
+    #[test]
+    fn lyrics_fall_back_to_synced_text_without_lyrics_text() {
+        let results = serde_json::json!({
+            "LYRICS_SYNC_JSON": [
+                { "line": "La la", "milliseconds": "1000" },
+                { "line": "La", "milliseconds": "2000" }
+            ]
+        });
+        let lyrics = parse_lyrics(&results).unwrap();
+        assert_eq!(lyrics.plain, vec!["La la", "La"]);
+    }
+
+    #[test]
+    fn empty_lyrics_payload_is_none() {
+        assert_eq!(parse_lyrics(&serde_json::json!({})), None);
+        assert_eq!(
+            parse_lyrics(&serde_json::json!({ "LYRICS_TEXT": "   " })),
+            None
+        );
     }
 
     #[test]

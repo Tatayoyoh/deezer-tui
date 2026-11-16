@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- Live lyrics (`m`): the current line is highlighted and follows playback (millisecond-accurate position), with scroll and a follow toggle
+
 ## [1.21.1] - 2026-11-14
 
 ### Fixed

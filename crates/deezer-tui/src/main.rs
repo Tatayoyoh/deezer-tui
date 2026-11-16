@@ -389,6 +389,7 @@ fn handle_status(json: bool) -> Result<()> {
                         "duration": t.duration,
                     })),
                     "position_secs": s.position_secs,
+                    "position_ms": s.position_ms,
                     "duration_secs": s.duration_secs,
                     "volume": s.volume,
                     "volume_percent": (s.volume * 100.0).round() as u32,

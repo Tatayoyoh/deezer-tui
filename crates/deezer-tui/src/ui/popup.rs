@@ -1,6 +1,6 @@
 use ratatui::prelude::*;
 use ratatui::widgets::{
-    Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Scrollbar,
+    Block, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph, Row, Scrollbar,
     ScrollbarOrientation, ScrollbarState, Table,
 };
 
@@ -56,6 +56,17 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
         let clamped = draw_info_overlay(frame, view, *scroll);
         if let Some(Overlay::Info { scroll }) = &mut view.overlay {
             *scroll = clamped;
+        }
+        return;
+    }
+
+    // Live lyrics: scroll offset auto-follows the current line unless the user
+    // scrolled by hand.
+    if let Some(Overlay::Lyrics { scroll, manual }) = &view.overlay {
+        let (new_scroll, new_manual) = draw_lyrics_overlay(frame, view, *scroll, *manual);
+        if let Some(Overlay::Lyrics { scroll, manual }) = &mut view.overlay {
+            *scroll = new_scroll;
+            *manual = new_manual;
         }
         return;
     }
@@ -147,7 +158,9 @@ pub fn draw(frame: &mut Frame, view: &mut ViewState) {
             draw_offline_detail(frame, view, playlist, index, selected);
             // Don't return — let the popup (context menu) render on top if open
         }
-        Some(Overlay::Help { .. }) | Some(Overlay::Info { .. }) => unreachable!(),
+        Some(Overlay::Help { .. }) | Some(Overlay::Info { .. }) | Some(Overlay::Lyrics { .. }) => {
+            unreachable!()
+        }
         None => {}
     }
 
@@ -735,6 +748,7 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         (Some("Ctrl+O"), s.help_settings),
         (Some("i"), s.help_info),
         (Some("e"), s.help_equalizer),
+        (Some("m"), s.help_lyrics),
         // Actions
         (None, s.help_section_actions),
         (Some("f"), s.help_start_flow),
@@ -946,6 +960,129 @@ fn draw_info_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         draw_list_scrollbar(frame, track, scroll, total);
     }
     scroll
+}
+
+/// Live lyrics overlay. Returns the (possibly updated) scroll offset and
+/// whether following has been turned off, so the caller can write them back to
+/// the `Overlay::Lyrics` state.
+fn draw_lyrics_overlay(
+    frame: &mut Frame,
+    view: &ViewState,
+    scroll: usize,
+    manual: bool,
+) -> (usize, bool) {
+    let s = t();
+    let area = frame.area();
+    let popup_area = centered_rect(70, area.height.saturating_sub(4), area);
+
+    frame.render_widget(Clear, popup_area);
+    view.record_modal(popup_area);
+
+    let title = match view.current_track.as_ref() {
+        Some(track) => format!("{} — {} ", track.title, track.artist),
+        None => s.lyrics_title.to_string(),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Theme::border_focused())
+        .style(Style::default().bg(Theme::surface()))
+        .title(title)
+        .title_style(Theme::title());
+    let inner = block.inner(popup_area);
+    frame.render_widget(block, popup_area);
+
+    // Lyrics only make sense for the track playing now; ignore a payload left
+    // over from a previous track.
+    let current_id = view.current_track.as_ref().map(|t| t.track_id.as_str());
+    let lyrics = view
+        .lyrics
+        .as_ref()
+        .filter(|_| view.lyrics_track_id.as_deref() == current_id);
+
+    // Position within the track, in milliseconds.
+    let position_ms = view.position_ms;
+    let synced = lyrics.is_some_and(|l| !l.synced.is_empty());
+    let current = lyrics.and_then(|l| l.line_at(position_ms));
+
+    // Unsynced lyrics (or a plain fallback) come from `plain`, with no
+    // highlight; the footer then carries a "not synced" note.
+    let lines: Vec<Line<'static>> = match lyrics {
+        Some(l) if synced => l
+            .synced
+            .iter()
+            .enumerate()
+            .map(|(i, line)| {
+                let style = if Some(i) == current {
+                    Theme::highlight()
+                } else {
+                    Theme::text()
+                };
+                Line::from(Span::styled(line.text.clone(), style))
+            })
+            .collect(),
+        Some(l) => l
+            .plain
+            .iter()
+            .map(|line| Line::from(Span::styled(line.clone(), Theme::text())))
+            .collect(),
+        None => Vec::new(),
+    };
+
+    let mut footer = vec![shortcut_hint(s.lyrics_scroll_hint)];
+    if lyrics.is_some() && !synced {
+        footer.push(Line::from(Span::styled(
+            s.lyrics_unsynced_note,
+            Theme::dim(),
+        )));
+    }
+
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(footer.len() as u16)])
+        .split(inner);
+    let body = layout[0];
+    let footer_area = layout[1];
+    frame.render_widget(Paragraph::new(footer).style(Theme::dim()), footer_area);
+
+    if lyrics.is_none() {
+        let msg = if current_id.is_none() {
+            s.lyrics_no_track
+        } else if view.lyrics_loading || view.lyrics_track_id.as_deref() != current_id {
+            s.lyrics_loading
+        } else {
+            s.lyrics_none
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(msg, Theme::dim()))
+                .alignment(Alignment::Center)
+                .block(Block::default().padding(Padding::top(body.height / 2))),
+            body,
+        );
+        return (scroll, manual);
+    }
+
+    let total = lines.len();
+
+    // Follow the current line: keep it vertically centered until the user
+    // scrolls by hand.
+    let follow = !manual && current.is_some();
+    let mut scroll = if follow {
+        let cur = current.unwrap();
+        cur.saturating_sub((body.height as usize) / 2)
+    } else {
+        scroll
+    };
+    let max_scroll = total.saturating_sub(body.height as usize);
+    scroll = scroll.min(max_scroll);
+
+    let mut state = ListState::default().with_offset(scroll);
+    frame.render_stateful_widget(List::new(lines), body, &mut state);
+
+    if total > body.height as usize {
+        draw_list_scrollbar(frame, body, scroll, total);
+    }
+
+    (scroll, manual)
 }
 
 /// Release notes as display lines, word-wrapped to `width` columns with a

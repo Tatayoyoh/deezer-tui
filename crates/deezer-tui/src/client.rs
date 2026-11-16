@@ -25,8 +25,8 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, ItemKind, PlaylistData,
-    PlaylistDetail, TrackData,
+    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, ItemKind, Lyrics,
+    PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::config::Config;
 use deezer_core::player::eq::{EqPreset, EqSettings, EQ_BAND_COUNT};
@@ -578,6 +578,9 @@ pub enum Overlay {
     /// Application info modal; `scroll` is the first visible line of its
     /// release notes, when it shows some.
     Info { scroll: usize },
+    /// Live lyrics overlay. `scroll` is the first visible line (auto-follows
+    /// the current line unless the user scrolled away; `manual` tracks that).
+    Lyrics { scroll: usize, manual: bool },
     /// Update available dialog with 3 options.
     UpdateAvailable {
         version: String,
@@ -796,6 +799,8 @@ pub struct ViewState {
     pub current_track: Option<TrackData>,
     pub quality: AudioQuality,
     pub position_secs: u64,
+    /// Millisecond-accurate position, used to time the lyrics highlight.
+    pub position_ms: u64,
     pub duration_secs: u64,
     pub volume: f32,
     pub equalizer: EqSettings,
@@ -869,6 +874,14 @@ pub struct ViewState {
     pub release_notes: Vec<NoteLine>,
     pub genre_detail: Option<GenreDetail>,
     pub genre_detail_loading: bool,
+    /// Lyrics of the current track, as sent by the daemon.
+    pub lyrics: Option<Lyrics>,
+    /// Track ID the `lyrics` above belong to.
+    pub lyrics_track_id: Option<String>,
+    pub lyrics_loading: bool,
+    /// Track ID we last asked the daemon for lyrics, so a snapshot arriving
+    /// before the daemon answers does not trigger a duplicate request.
+    pub lyrics_requested_for: Option<String>,
     pub status_msg: Option<String>,
     /// When `status_msg` last changed — the notification auto-hides after
     /// [`STATUS_MSG_TTL`], even though the daemon keeps the text in snapshots.
@@ -978,6 +991,16 @@ pub(crate) fn fuzzy_match(query: &str, target: &str) -> bool {
 }
 
 impl ViewState {
+    /// Millisecond position from a snapshot, falling back to whole seconds when
+    /// the daemon did not send the finer field (older daemon).
+    fn snapshot_position_ms(snap: &DaemonSnapshot) -> u64 {
+        if snap.position_ms > 0 {
+            snap.position_ms
+        } else {
+            snap.position_secs.saturating_mul(1000)
+        }
+    }
+
     fn from_snapshot(snap: &DaemonSnapshot) -> Self {
         Self {
             screen: snap.screen,
@@ -986,6 +1009,7 @@ impl ViewState {
             current_track: snap.current_track.clone(),
             quality: snap.quality,
             position_secs: snap.position_secs,
+            position_ms: Self::snapshot_position_ms(snap),
             duration_secs: snap.duration_secs,
             volume: snap.volume,
             equalizer: snap.equalizer.clone(),
@@ -1060,6 +1084,10 @@ impl ViewState {
             release_notes: Vec::new(),
             genre_detail: snap.genre_detail.clone(),
             genre_detail_loading: snap.genre_detail_loading,
+            lyrics: snap.lyrics.clone(),
+            lyrics_track_id: snap.lyrics_track_id.clone(),
+            lyrics_loading: snap.lyrics_loading,
+            lyrics_requested_for: None,
             status_msg: snap.status_msg.clone(),
             status_msg_at: snap.status_msg.as_ref().map(|_| Instant::now()),
             login_error: snap.login_error.clone(),
@@ -1355,13 +1383,16 @@ impl ViewState {
 
     fn update_from_snapshot(&mut self, snap: DaemonSnapshot) {
         let prev_screen = self.screen;
+        let prev_track_id = self.current_track.as_ref().map(|t| t.track_id.clone());
 
+        let position_ms = Self::snapshot_position_ms(&snap);
         self.screen = snap.screen;
         self.active_tab = snap.active_tab;
         self.status = snap.status;
         self.current_track = snap.current_track;
         self.quality = snap.quality;
         self.position_secs = snap.position_secs;
+        self.position_ms = position_ms;
         self.duration_secs = snap.duration_secs;
         self.volume = snap.volume;
         self.equalizer = snap.equalizer;
@@ -1426,6 +1457,21 @@ impl ViewState {
         self.playlist_detail_loading = snap.playlist_detail_loading;
         self.genre_detail = snap.genre_detail;
         self.genre_detail_loading = snap.genre_detail_loading;
+        self.lyrics = snap.lyrics;
+        self.lyrics_track_id = snap.lyrics_track_id;
+        self.lyrics_loading = snap.lyrics_loading;
+
+        // New track: reset the lyrics overlay so it follows the new song from
+        // the top, and forget the request marker so the daemon gets asked again.
+        let track_changed =
+            prev_track_id != self.current_track.as_ref().map(|t| t.track_id.clone());
+        if track_changed {
+            self.lyrics_requested_for = None;
+            if let Some(Overlay::Lyrics { scroll, manual }) = &mut self.overlay {
+                *scroll = 0;
+                *manual = false;
+            }
+        }
 
         // Restore navigation overlay from daemon state.
         // Only apply if the current overlay is a nav type or None (don't clobber UI overlays).
@@ -1530,6 +1576,23 @@ impl ViewState {
             self.favorites_filter_input.clear();
             self.favorites_filter_typing = false;
         }
+    }
+
+    /// If the lyrics overlay is open for a track whose lyrics are not loaded
+    /// (and not already requested), return the command to fetch them.
+    pub fn pending_lyrics_command(&mut self) -> Option<Command> {
+        if !matches!(self.overlay, Some(Overlay::Lyrics { .. })) {
+            return None;
+        }
+        let track_id = self.current_track.as_ref()?.track_id.clone();
+        if self.lyrics_track_id.as_deref() == Some(track_id.as_str()) && self.lyrics.is_some() {
+            return None;
+        }
+        if self.lyrics_requested_for.as_deref() == Some(track_id.as_str()) {
+            return None;
+        }
+        self.lyrics_requested_for = Some(track_id);
+        Some(Command::RequestLyrics)
     }
 
     /// Check if a track is in the user's favorites.
@@ -2357,6 +2420,11 @@ impl Client {
                     self.view.update_from_snapshot(snap);
                     self.update_terminal_title();
                     self.maybe_fetch_cover_image();
+                    if let Some(cmd) = self.view.pending_lyrics_command() {
+                        if let Err(e) = self.send_cmd(&cmd).await {
+                            debug!("Send lyrics command error: {e}");
+                        }
+                    }
                 }
                 Ok(Ok(ServerMessage::Error(err))) => {
                     self.view.set_status_msg(Some(format!("Error: {err}")));
@@ -2985,6 +3053,9 @@ impl Client {
             // Deezer Flow
             KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
 
+            // Live lyrics
+            KeyCode::Char('m') => self.toggle_lyrics_overlay(),
+
             // Toggle favorite / like for focused track or playing track
             KeyCode::Char('L') | KeyCode::Char('l') => self.toggle_like_focused_or_playing(),
 
@@ -3051,6 +3122,49 @@ impl Client {
                     KeyCode::Home => *scroll = 0,
                     KeyCode::End => *scroll = usize::MAX,
                     _ => {}
+                }
+                KeyAction::Continue
+            }
+            Overlay::Lyrics { scroll, manual } => {
+                // Scrolls the lyrics; the draw pass auto-follows the current
+                // line until the user scrolls by hand (`manual`).
+                let page = 5usize;
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter | KeyCode::Char('m') => {
+                        self.view.pop_overlay();
+                    }
+                    code if ViewState::nav_down(code, vim_keys) => {
+                        *scroll += 1;
+                        *manual = true;
+                    }
+                    code if ViewState::nav_up(code, vim_keys) => {
+                        *scroll = scroll.saturating_sub(1);
+                        *manual = true;
+                    }
+                    KeyCode::PageDown => {
+                        *scroll += page;
+                        *manual = true;
+                    }
+                    KeyCode::PageUp => {
+                        *scroll = scroll.saturating_sub(page);
+                        *manual = true;
+                    }
+                    KeyCode::Home => {
+                        *scroll = 0;
+                        *manual = true;
+                    }
+                    KeyCode::End => {
+                        *scroll = usize::MAX;
+                        *manual = true;
+                    }
+                    // Resume following the current line.
+                    KeyCode::Char('f') => *manual = false,
+                    // Playback keeps working from inside the overlay.
+                    code => {
+                        if let Some(action) = self.player_control_action(code) {
+                            return action;
+                        }
+                    }
                 }
                 KeyAction::Continue
             }
@@ -3360,6 +3474,25 @@ impl Client {
             selected: 0,
         });
         KeyAction::Continue
+    }
+
+    /// Open the live lyrics overlay for the current track, fetching them from
+    /// the daemon if they are not loaded yet.
+    fn toggle_lyrics_overlay(&mut self) -> KeyAction {
+        if matches!(self.view.overlay, Some(Overlay::Lyrics { .. })) {
+            self.view.pop_overlay();
+            return KeyAction::Continue;
+        }
+        self.view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+        // An explicit open retries a previous failure.
+        self.view.lyrics_requested_for = None;
+        match self.view.pending_lyrics_command() {
+            Some(cmd) => KeyAction::SendCommand(cmd),
+            None => KeyAction::Continue,
+        }
     }
 
     /// Optimistically toggle a track's favorite status in the local view and send
@@ -5774,6 +5907,7 @@ async fn perform_update(download_url: &str) -> Result<std::path::PathBuf> {
 mod tests {
     use super::*;
     use crate::ui::common::tab_rects;
+    use deezer_core::api::models::LyricLine;
 
     fn rows(y: u16, height: u16, offset: usize, len: usize) -> RowsArea {
         RowsArea {
@@ -6113,5 +6247,235 @@ mod tests {
             }
             _ => panic!("Expected ConfirmRemoveFavorite sub_menu"),
         }
+    }
+
+    fn track(id: &str) -> TrackData {
+        serde_json::from_value(serde_json::json!({
+            "SNG_ID": id,
+            "SNG_TITLE": "Song",
+            "ART_NAME": "Artist",
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn lyrics_command_only_fires_once_per_track() {
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            current_track: Some(track("1")),
+            ..DaemonSnapshot::default()
+        });
+
+        // No overlay open: nothing to fetch.
+        assert!(view.pending_lyrics_command().is_none());
+
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+        // First ask goes out, the following ones wait for the daemon's answer.
+        assert!(matches!(
+            view.pending_lyrics_command(),
+            Some(Command::RequestLyrics)
+        ));
+        assert!(view.pending_lyrics_command().is_none());
+    }
+
+    #[test]
+    fn lyrics_command_skips_tracks_whose_lyrics_are_loaded() {
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            current_track: Some(track("1")),
+            ..DaemonSnapshot::default()
+        });
+        view.lyrics_track_id = Some("1".into());
+        view.lyrics = Some(Lyrics {
+            synced: vec![LyricLine {
+                at_ms: 0,
+                text: "la".into(),
+            }],
+            ..Lyrics::default()
+        });
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+        assert!(view.pending_lyrics_command().is_none());
+    }
+
+    #[test]
+    fn track_change_resets_the_lyrics_overlay_and_request_marker() {
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            current_track: Some(track("1")),
+            ..DaemonSnapshot::default()
+        });
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 12,
+            manual: true,
+        });
+        view.lyrics_requested_for = Some("1".into());
+
+        view.update_from_snapshot(DaemonSnapshot {
+            current_track: Some(track("2")),
+            ..DaemonSnapshot::default()
+        });
+
+        match &view.overlay {
+            Some(Overlay::Lyrics { scroll, manual }) => {
+                assert_eq!(*scroll, 0);
+                assert!(!*manual);
+            }
+            other => panic!("unexpected overlay {other:?}"),
+        }
+        assert!(view.lyrics_requested_for.is_none());
+        assert!(matches!(
+            view.pending_lyrics_command(),
+            Some(Command::RequestLyrics)
+        ));
+    }
+
+    #[test]
+    fn lyrics_overlay_renders_and_highlights_the_current_line() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            screen: crate::protocol::Screen::Main,
+            current_track: Some(track("1")),
+            position_secs: 30,
+            ..DaemonSnapshot::default()
+        });
+        view.lyrics_track_id = Some("1".into());
+        view.lyrics = Some(Lyrics {
+            synced: vec![
+                LyricLine {
+                    at_ms: 0,
+                    text: "first line".into(),
+                },
+                LyricLine {
+                    at_ms: 30_000,
+                    text: "second line".into(),
+                },
+            ],
+            ..Lyrics::default()
+        });
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::popup::draw(frame, &mut view))
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer().clone();
+        let text: String = buffer.content().iter().map(|c| c.symbol()).collect();
+        assert!(text.contains("first line"), "missing first line: {text}");
+        assert!(text.contains("second line"), "missing second line: {text}");
+
+        // The current line (position 30s) is the second one: its text cells
+        // carry the primary background, while the first line's do not.
+        let bg_at = |needle: &str| {
+            let cells = buffer.content();
+            let start = cells
+                .windows(needle.len())
+                .position(|w| w.iter().map(|c| c.symbol()).collect::<String>() == needle)
+                .expect("line not on screen");
+            cells[start].style().bg
+        };
+        assert_eq!(
+            bg_at("second line"),
+            Some(crate::theme::Theme::primary()),
+            "current line not highlighted"
+        );
+        assert_ne!(bg_at("first line"), Some(crate::theme::Theme::primary()));
+    }
+
+    #[test]
+    fn lyrics_overlay_shows_a_message_when_nothing_is_playing() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            screen: crate::protocol::Screen::Main,
+            ..DaemonSnapshot::default()
+        });
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::popup::draw(frame, &mut view))
+            .expect("draw");
+
+        let text: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|c| c.symbol())
+            .collect();
+        assert!(
+            text.contains(crate::i18n::t().lyrics_no_track),
+            "missing empty-state message: {text}"
+        );
+    }
+
+    #[test]
+    fn lyrics_highlight_follows_sub_second_position() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let mut view = ViewState::from_snapshot(&DaemonSnapshot {
+            screen: crate::protocol::Screen::Main,
+            current_track: Some(track("1")),
+            position_secs: 1,
+            position_ms: 1_700,
+            ..DaemonSnapshot::default()
+        });
+        view.lyrics_track_id = Some("1".into());
+        // The second line starts at 1.5s, inside the same whole second as the
+        // current position (1.7s). A seconds-only position would truncate to
+        // 1.0s and wrongly stay on the first line.
+        view.lyrics = Some(Lyrics {
+            synced: vec![
+                LyricLine {
+                    at_ms: 1_000,
+                    text: "line one".into(),
+                },
+                LyricLine {
+                    at_ms: 1_500,
+                    text: "line two".into(),
+                },
+            ],
+            ..Lyrics::default()
+        });
+        view.push_overlay(Overlay::Lyrics {
+            scroll: 0,
+            manual: false,
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::popup::draw(frame, &mut view))
+            .expect("draw");
+
+        let buffer = terminal.backend().buffer().clone();
+        let bg_at = |needle: &str| {
+            let cells = buffer.content();
+            let start = cells
+                .windows(needle.len())
+                .position(|w| w.iter().map(|c| c.symbol()).collect::<String>() == needle)
+                .expect("line not on screen");
+            cells[start].style().bg
+        };
+        // At 1700 ms the current line is "line two", not "line one".
+        assert_eq!(
+            bg_at("line two"),
+            Some(crate::theme::Theme::primary()),
+            "sub-second position did not advance the highlight"
+        );
+        assert_ne!(bg_at("line one"), Some(crate::theme::Theme::primary()));
     }
 }
