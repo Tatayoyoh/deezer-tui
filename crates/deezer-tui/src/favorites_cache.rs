@@ -33,6 +33,9 @@ pub struct FavoritesCache {
     /// Format version of this cache file; mismatched files are discarded.
     #[serde(default)]
     pub version: u32,
+    /// The authenticated owner. Untagged/other-user caches are discarded at login.
+    #[serde(default)]
+    pub user_id: Option<u64>,
     /// Favorite tracks (FavoritesCategory::Tracks).
     #[serde(default)]
     pub tracks: Option<Vec<TrackData>>,
@@ -80,7 +83,10 @@ impl FavoritesCache {
             Ok(content) => serde_json::from_str::<Self>(&content).unwrap_or_default(),
             Err(_) => return Self::empty(),
         };
-        if cache.version == CACHE_VERSION {
+        let selected_profile = Config::load().family_profile_id;
+        if cache.version == CACHE_VERSION
+            && selected_profile.is_none_or(|id| cache.user_id == Some(id))
+        {
             cache
         } else {
             Self::empty()
@@ -97,6 +103,13 @@ impl FavoritesCache {
         to_write.version = CACHE_VERSION;
         if let Ok(content) = serde_json::to_string(&to_write) {
             let _ = std::fs::write(path, content);
+        }
+    }
+
+    pub fn select_user(&mut self, user_id: u64) {
+        if self.user_id != Some(user_id) {
+            *self = Self::empty();
+            self.user_id = Some(user_id);
         }
     }
 
@@ -120,5 +133,27 @@ impl FavoritesCache {
         if let Some(id) = playlist_id {
             self.playlist_details.remove(id);
         }
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+
+    #[test]
+    fn cached_library_is_discarded_when_owner_changes() {
+        let mut cache = FavoritesCache::empty();
+        cache.user_id = Some(10);
+        cache.tracks = Some(Vec::new());
+        cache.select_user(10);
+        assert!(cache.tracks.is_some());
+        cache.select_user(20);
+        assert_eq!(cache.user_id, Some(20));
+        assert!(cache.tracks.is_none());
+        // Caches written before ownership tagging must also be discarded.
+        cache.user_id = None;
+        cache.tracks = Some(Vec::new());
+        cache.select_user(20);
+        assert!(cache.tracks.is_none());
     }
 }

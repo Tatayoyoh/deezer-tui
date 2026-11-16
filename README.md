@@ -65,6 +65,24 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 * Seek forward on playing track [`ctrl+→`]
 * Seek backward on playing track [`ctrl+←`]
 
+## Deezer Family profiles
+
+Log in with the Family administrator's ARL or use browser login. When multiple
+profiles are available, choose one with ↑/↓ and press Enter. The choice is
+remembered for the next launch; favorites, playback, and Flow use that profile.
+Members with their own login credentials must log in separately.
+
+To change profiles, log out from the app menu and log in again. If a remembered
+profile is no longer available, press `p` on the login error screen to choose
+another profile with the same ARL.
+
+For live API validation, provide `DEEZER_TEST_ARL` and `DEEZER_TEST_PROFILE_ID`
+through the environment, then run:
+
+```bash
+cargo test -p deezer-core family_profile_authenticates_both_apis_and_jwt_refresh -- --ignored
+```
+
 ## In action
 
 Simple search

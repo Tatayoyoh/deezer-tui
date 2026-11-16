@@ -74,6 +74,8 @@ pub struct Strings {
     pub login_arl_title: &'static str,
     pub login_arl_placeholder: &'static str,
     pub login_arl_hint: &'static str,
+    pub family_profile_title: &'static str,
+    pub family_profile_hint: &'static str,
 
     // --- Search ---
     pub search_title_typing: &'static str,
@@ -720,6 +722,8 @@ static EN: Strings = Strings {
     login_arl_title: " ARL Token ",
     login_arl_placeholder: "Paste your ARL token from browser cookies...",
     login_arl_hint: "Enter: connect | Esc: back",
+    family_profile_title: "Choose a profile",
+    family_profile_hint: "↑/↓: choose · Enter: connect · Esc: cancel",
 
     search_title_typing: " Search - [Enter] to submit, [Esc] to cancel ",
     search_title_normal: " Search - [Ctrl+F] or [/] to type ",
@@ -1068,6 +1072,8 @@ static FR: Strings = Strings {
     login_arl_title: " Jeton ARL ",
     login_arl_placeholder: "Collez votre jeton ARL depuis les cookies du navigateur...",
     login_arl_hint: "Entrée : connecter | Esc : retour",
+    family_profile_title: "Choisir un profil",
+    family_profile_hint: "↑/↓ : choisir · Entrée : connecter · Échap : annuler",
 
     search_title_typing: " Recherche - [Entrée] pour valider, [Esc] pour annuler ",
     search_title_normal: " Recherche - [Ctrl+F] ou [/] pour écrire ",
@@ -1415,6 +1421,8 @@ static ES: Strings = Strings {
     login_arl_title: " Token ARL ",
     login_arl_placeholder: "Pega tu token ARL de las cookies del navegador...",
     login_arl_hint: "Enter: conectar | Esc: volver",
+    family_profile_title: "Elegir un perfil",
+    family_profile_hint: "↑/↓: elegir · Intro: conectar · Esc: cancelar",
 
     search_title_typing: " Buscar - [Enter] para enviar, [Esc] para cancelar ",
     search_title_normal: " Buscar - [Ctrl+F] o [/] para escribir ",
@@ -1762,6 +1770,8 @@ static PT: Strings = Strings {
     login_arl_title: " Token ARL ",
     login_arl_placeholder: "Cole seu token ARL dos cookies do navegador...",
     login_arl_hint: "Enter: conectar | Esc: voltar",
+    family_profile_title: "Escolher um perfil",
+    family_profile_hint: "↑/↓: escolher · Enter: conectar · Esc: cancelar",
 
     search_title_typing: " Buscar - [Enter] para enviar, [Esc] para cancelar ",
     search_title_normal: " Buscar - [Ctrl+F] ou [/] para digitar ",
@@ -2109,6 +2119,8 @@ static DE: Strings = Strings {
     login_arl_title: " ARL-Token ",
     login_arl_placeholder: "ARL-Token aus den Browser-Cookies einfügen...",
     login_arl_hint: "Enter: Verbinden | Esc: Zurück",
+    family_profile_title: "Profil auswählen",
+    family_profile_hint: "↑/↓: wählen · Enter: verbinden · Esc: abbrechen",
 
     search_title_typing: " Suche - [Enter] zum Senden, [Esc] zum Abbrechen ",
     search_title_normal: " Suche - [Ctrl+F] oder [/] zum Tippen ",

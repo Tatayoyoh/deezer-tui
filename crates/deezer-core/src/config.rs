@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
@@ -15,6 +16,9 @@ const APP_NAME: &str = "deezer-tui";
 pub struct Config {
     #[serde(default)]
     pub arl: Option<String>,
+    /// Family profile to select after authenticating the shared ARL.
+    #[serde(default)]
+    pub family_profile_id: Option<u64>,
     #[serde(default = "default_quality")]
     pub quality: AudioQuality,
     #[serde(default = "default_volume")]
@@ -48,6 +52,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             arl: None,
+            family_profile_id: None,
             quality: default_quality(),
             volume: default_volume(),
             theme: None,
@@ -140,12 +145,25 @@ impl Config {
             .map_err(|e| DeezerError::Api(format!("Failed to serialize config: {e}")))?;
 
         let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-        fs::write(&tmp, content)
-            .and_then(|()| fs::rename(&tmp, path))
-            .map_err(|e| {
-                let _ = fs::remove_file(&tmp);
-                DeezerError::Api(format!("Failed to write config: {e}"))
-            })
+        let write_private = || -> std::io::Result<()> {
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+                options.mode(0o600);
+                let mut file = options.open(&tmp)?;
+                file.set_permissions(fs::Permissions::from_mode(0o600))?;
+                file.write_all(content.as_bytes())?;
+            }
+            #[cfg(not(unix))]
+            options.open(&tmp)?.write_all(content.as_bytes())?;
+            fs::rename(&tmp, path)
+        };
+        write_private().map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            DeezerError::Api(format!("Failed to write config: {e}"))
+        })
     }
 }
 
@@ -160,6 +178,32 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         dir.join("config.json")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_config_rewrite_keeps_credentials_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = temp_config("private");
+        Config::default().save_to(&path).unwrap();
+        Config::update_at(&path, |c| c.family_profile_id = Some(20)).unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn family_choice_is_optional_and_survives_other_config_updates() {
+        let old: Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(old.family_profile_id, None);
+        let path = temp_config("family-profile");
+        old.save_to(&path).unwrap();
+        Config::update_at(&path, |c| c.family_profile_id = Some(20)).unwrap();
+        Config::update_at(&path, |c| c.volume = 0.4).unwrap();
+        assert_eq!(Config::load_from(&path).family_profile_id, Some(20));
+        let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

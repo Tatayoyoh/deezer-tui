@@ -1,5 +1,5 @@
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph};
 
 use crate::client::{LoginMode, ViewState};
 use crate::i18n::t;
@@ -38,6 +38,11 @@ pub fn draw(frame: &mut Frame, view: &ViewState) {
 
     let form_area = horizontal[1];
 
+    if !view.family_profiles.is_empty() {
+        view.login_button_area.set(None);
+        draw_profiles(frame, view, form_area);
+        return;
+    }
     match view.login_mode {
         LoginMode::Button => draw_button_mode(frame, view, form_area),
         LoginMode::ArlInput => {
@@ -102,7 +107,10 @@ fn draw_button_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     let hint_text = if view.login_loading {
         Span::styled(s.login_connecting, Style::default().fg(Color::Cyan))
     } else if let Some(ref error) = view.login_error {
-        Span::styled(error.as_str(), Style::default().fg(Color::Red))
+        Span::styled(
+            format!("{error}\np: {}", s.family_profile_title),
+            Style::default().fg(Color::Red),
+        )
     } else {
         Span::styled(s.login_hint, Theme::dim())
     };
@@ -164,4 +172,35 @@ fn draw_arl_mode(frame: &mut Frame, view: &ViewState, area: Rect) {
     };
     let hint = Paragraph::new(hint_text).alignment(Alignment::Center);
     frame.render_widget(hint, chunks[4]);
+}
+
+fn draw_profiles(frame: &mut Frame, view: &ViewState, area: Rect) {
+    let s = t();
+    let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(2)]).split(area);
+    let items: Vec<ListItem> = view
+        .family_profiles
+        .iter()
+        .map(|p| ListItem::new(p.name.as_str()))
+        .collect();
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(s.family_profile_title),
+        )
+        .style(Theme::text())
+        .highlight_style(
+            Style::default()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
+        )
+        .highlight_symbol("› ");
+    let mut state = ListState::default().with_selected(Some(view.family_profile_selected));
+    frame.render_stateful_widget(list, chunks[0], &mut state);
+    let hint = if view.login_loading {
+        s.login_connecting
+    } else {
+        view.login_error.as_deref().unwrap_or(s.family_profile_hint)
+    };
+    frame.render_widget(Paragraph::new(hint).style(Theme::dim()), chunks[1]);
 }

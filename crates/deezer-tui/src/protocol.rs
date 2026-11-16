@@ -19,6 +19,10 @@ pub enum Command {
     GetSnapshot,
     /// Login with ARL token.
     Login { arl: String },
+    /// Select one of the profiles offered after a Family login.
+    SelectFamilyProfile { profile_id: u64 },
+    /// Retry login without the remembered Family profile.
+    ChooseFamilyProfile,
     /// Search for tracks.
     Search { query: String },
     /// Play track at index from search results.
@@ -544,6 +548,8 @@ pub struct DaemonSnapshot {
     #[serde(default)]
     pub login_loading: bool,
     #[serde(default)]
+    pub family_profiles: Vec<deezer_core::api::models::FamilyProfile>,
+    #[serde(default)]
     pub user_name: Option<String>,
     #[serde(default)]
     pub is_offline: bool,
@@ -617,6 +623,7 @@ impl Default for DaemonSnapshot {
             status_msg: None,
             login_error: None,
             login_loading: false,
+            family_profiles: Vec::new(),
             user_name: None,
             is_offline: false,
         }
