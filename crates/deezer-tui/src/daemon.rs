@@ -8,9 +8,10 @@ use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem, ItemKind,
-    PlaylistData, PlaylistDetail, TrackData,
+    AlbumData, AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DeezerError, DisplayItem,
+    ItemKind, PlaylistData, PlaylistDetail, TrackData,
 };
+use deezer_core::api::releases::{get_genre_releases, get_new_releases};
 use deezer_core::api::DeezerClient;
 use deezer_core::offline::OfflineIndex;
 use deezer_core::player::engine::{AudioInput, PlayerEngine};
@@ -41,7 +42,10 @@ const PREFETCH_MIN_AHEAD_SECS: f64 = 20.0;
 
 /// Async results from background tasks.
 enum AsyncResult {
-    LoginSuccess(String),
+    LoginSuccess(
+        deezer_core::api::auth::Session,
+        Vec<deezer_core::api::models::FamilyProfile>,
+    ),
     LoginError(String),
     MasterKeyReady([u8; 16]),
     MasterKeyError(String),
@@ -148,6 +152,7 @@ enum AsyncResult {
     },
     GenresReady(Vec<GenreItem>),
     GenresError(String),
+    NewReleasesLoaded(Result<Vec<AlbumData>, DeezerError>),
     GenreDetailReady(GenreDetail),
     GenreDetailError(String),
     OfflineTrackSaved {
@@ -188,6 +193,7 @@ pub struct Daemon {
     // Login state
     login_error: Option<String>,
     login_loading: bool,
+    family_profiles: Vec<deezer_core::api::models::FamilyProfile>,
     user_name: Option<String>,
 
     // Search state
@@ -211,6 +217,10 @@ pub struct Daemon {
 
     // Explore tab
     explore_category: ExploreCategory,
+    new_releases: Vec<AlbumData>,
+    new_releases_selected: usize,
+    new_releases_loading: bool,
+    new_releases_error: bool,
 
     // Radios
     radios: Vec<RadioItem>,
@@ -362,6 +372,7 @@ impl Daemon {
 
             login_error: None,
             login_loading: false,
+            family_profiles: Vec::new(),
             user_name: None,
 
             search_results: Vec::new(),
@@ -387,6 +398,10 @@ impl Daemon {
             offline_loading: false,
 
             explore_category: ExploreCategory::default(),
+            new_releases: Vec::new(),
+            new_releases_selected: 0,
+            new_releases_loading: false,
+            new_releases_error: false,
             radios: Vec::new(),
             radios_selected: 0,
             radios_loading: false,
@@ -646,6 +661,7 @@ impl Daemon {
                 ExploreCategory::Moods => &mut self.moods_selected,
                 ExploreCategory::Categories => &mut self.genres_selected,
                 ExploreCategory::Radios => &mut self.radios_selected,
+                ExploreCategory::Discovery => &mut self.new_releases_selected,
             },
             ActiveTab::Downloads => &mut self.offline_selected,
         }
@@ -660,6 +676,7 @@ impl Daemon {
                 ExploreCategory::Moods => self.moods.len(),
                 ExploreCategory::Categories => self.genres.len(),
                 ExploreCategory::Radios => self.radios.len(),
+                ExploreCategory::Discovery => self.new_releases.len(),
             },
             ActiveTab::Downloads => match self.offline_category {
                 OfflineCategory::Tracks => self.offline_index.tracks.len(),
@@ -686,9 +703,19 @@ impl Daemon {
         }
     }
 
+    fn set_tab(&mut self, tab: ActiveTab) {
+        if self.active_tab != tab
+            && tab == ActiveTab::Explore
+            && self.explore_category == ExploreCategory::Discovery
+        {
+            self.start_load_new_releases();
+        }
+        self.active_tab = tab;
+    }
+
     /// Switch the active tab's category to `index` in its `ALL` list, resetting
     /// the selection and kicking off whatever load the new category needs.
-    /// Out-of-range indices and no-op switches are ignored.
+    /// Clicking the current Discovery category reloads the feed.
     fn set_category_index(&mut self, index: usize) {
         match self.active_tab {
             ActiveTab::Search => {
@@ -719,15 +746,18 @@ impl Daemon {
                 let Some(&cat) = ExploreCategory::ALL.get(index) else {
                     return;
                 };
-                if cat == self.explore_category {
+                if cat == self.explore_category && cat != ExploreCategory::Discovery {
                     return;
                 }
                 self.explore_category = cat;
-                if cat == ExploreCategory::Categories
-                    && self.genres.is_empty()
-                    && !self.genres_loading
-                {
-                    self.start_load_genres();
+                match cat {
+                    ExploreCategory::Discovery => self.start_load_new_releases(),
+                    ExploreCategory::Categories
+                        if self.genres.is_empty() && !self.genres_loading =>
+                    {
+                        self.start_load_genres();
+                    }
+                    _ => {}
                 }
             }
             ActiveTab::Downloads => {
@@ -748,8 +778,33 @@ impl Daemon {
             Command::GetSnapshot => {} // Snapshot is sent after every command anyway
             Command::Login { arl } => {
                 self.config.arl = Some(arl.clone());
-                let _ = Config::update(|c| c.arl = Some(arl.clone()));
+                self.config.family_profile_id = None;
+                self.family_profiles.clear();
+                let _ = Config::update(|c| {
+                    c.arl = Some(arl.clone());
+                    c.family_profile_id = None;
+                });
                 self.start_login(arl);
+            }
+            Command::ChooseFamilyProfile => {
+                if self.screen == Screen::Login && !self.login_loading {
+                    if let Some(arl) = self.config.arl.clone() {
+                        self.config.family_profile_id = None;
+                        self.family_profiles.clear();
+                        self.start_login(arl);
+                    }
+                }
+            }
+            Command::SelectFamilyProfile { profile_id } => {
+                if self.screen == Screen::Login
+                    && !self.login_loading
+                    && self.family_profiles.iter().any(|p| p.user_id == profile_id)
+                {
+                    if let Some(arl) = self.config.arl.clone() {
+                        self.config.family_profile_id = Some(profile_id);
+                        self.start_login(arl);
+                    }
+                }
             }
             Command::Search { query } => {
                 self.last_search_query = query.clone();
@@ -917,20 +972,20 @@ impl Daemon {
                 }
             }
             Command::NextTab => {
-                self.active_tab = match self.active_tab {
+                self.set_tab(match self.active_tab {
                     ActiveTab::Search => ActiveTab::Favorites,
                     ActiveTab::Favorites => ActiveTab::Explore,
                     ActiveTab::Explore => ActiveTab::Downloads,
                     ActiveTab::Downloads => ActiveTab::Search,
-                };
+                });
             }
             Command::PrevTab => {
-                self.active_tab = match self.active_tab {
+                self.set_tab(match self.active_tab {
                     ActiveTab::Search => ActiveTab::Downloads,
                     ActiveTab::Favorites => ActiveTab::Search,
                     ActiveTab::Explore => ActiveTab::Favorites,
                     ActiveTab::Downloads => ActiveTab::Explore,
-                };
+                });
             }
             Command::NextCategory => {
                 let (idx, count) = self.category_position();
@@ -941,7 +996,7 @@ impl Daemon {
                 self.set_category_index((idx + count - 1) % count);
             }
             Command::SetCategory { index } => self.set_category_index(index),
-            Command::SetTab { tab } => self.active_tab = tab,
+            Command::SetTab { tab } => self.set_tab(tab),
             Command::SelectIndex { index } => {
                 let len = self.current_list_len();
                 let sel = self.selection_mut();
@@ -1182,7 +1237,20 @@ impl Daemon {
             Command::Logout => {
                 // Clear ARL, stop playback, return to login screen
                 self.config.arl = None;
-                let _ = Config::update(|c| c.arl = None);
+                self.config.family_profile_id = None;
+                self.family_profiles.clear();
+                // In-flight reads/playback from the old account must never
+                // populate the next profile's state or persistent cache.
+                (self.async_tx, self.async_rx) = tokio::sync::mpsc::unbounded_channel();
+                self.track_generation = self.track_generation.wrapping_add(1);
+                self.prefetch = None;
+                self.favorite_track_ids.clear();
+                self.favorite_artist_ids.clear();
+                self.favorite_album_ids.clear();
+                let _ = Config::update(|c| {
+                    c.arl = None;
+                    c.family_profile_id = None;
+                });
                 self.screen = Screen::Login;
                 self.user_name = None;
                 self.master_key = None;
@@ -1396,6 +1464,10 @@ impl Daemon {
             offline_loading: self.offline_loading,
             offline_track_ids: self.offline_index.track_ids(),
             explore_category: self.explore_category,
+            new_releases: self.new_releases.clone(),
+            new_releases_selected: self.new_releases_selected,
+            new_releases_loading: self.new_releases_loading,
+            new_releases_error: self.new_releases_error,
             radios: self.radios.clone(),
             radios_selected: self.radios_selected,
             radios_loading: self.radios_loading,
@@ -1423,6 +1495,7 @@ impl Daemon {
             status_msg: self.status_msg.clone(),
             login_error: self.login_error.clone(),
             login_loading: self.login_loading,
+            family_profiles: self.family_profiles.clone(),
             user_name: self.user_name.clone(),
             is_offline: self.is_offline,
         }
@@ -1436,11 +1509,23 @@ impl Daemon {
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
 
+        let profile_id = self.config.family_profile_id;
         tokio::spawn(async move {
             let mut client = client.lock().await;
-            match client.login_arl(&arl).await {
+            match client.login_arl_with_profile(&arl, profile_id).await {
                 Ok(session) => {
-                    let _ = tx.send(AsyncResult::LoginSuccess(session.user_name));
+                    let profiles = if profile_id.is_none() {
+                        match client.family_profiles().await {
+                            Ok(profiles) => profiles,
+                            Err(e) => {
+                                let _ = tx.send(AsyncResult::LoginError(e.to_string()));
+                                return;
+                            }
+                        }
+                    } else {
+                        Vec::new()
+                    };
+                    let _ = tx.send(AsyncResult::LoginSuccess(session, profiles));
                 }
                 Err(e) => {
                     let _ = tx.send(AsyncResult::LoginError(e.to_string()));
@@ -2259,6 +2344,24 @@ impl Daemon {
         });
     }
 
+    fn start_load_new_releases(&mut self) {
+        if self.is_offline || self.new_releases_loading {
+            return;
+        }
+
+        self.new_releases_loading = true;
+        self.new_releases_error = false;
+        // The channel is public, so use the cookie-free client and leave the
+        // authenticated client available for album details and playback.
+        let http = self.cdn_http.clone();
+        let tx = self.async_tx.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(AsyncResult::NewReleasesLoaded(
+                get_new_releases(&http).await,
+            ));
+        });
+    }
+
     fn start_load_genre_detail(&mut self, genre_id: u64, name: String) {
         if self.is_offline {
             self.status_msg = Some(t().no_internet.into());
@@ -2268,11 +2371,21 @@ impl Daemon {
         self.genre_detail_loading = true;
         let client = Arc::clone(&self.client);
         let tx = self.async_tx.clone();
+        let http = self.cdn_http.clone();
 
         tokio::spawn(async move {
+            // The channel page is public: fetch it without cookies, before
+            // taking the client lock.
+            let new_releases = get_genre_releases(&http, genre_id)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("new releases for genre {genre_id}: {e}");
+                    Vec::new()
+                });
             let client = client.lock().await;
             match client.get_genre_detail(genre_id, name).await {
-                Ok(detail) => {
+                Ok(mut detail) => {
+                    detail.new_releases = new_releases;
                     let _ = tx.send(AsyncResult::GenreDetailReady(detail));
                 }
                 Err(e) => {
@@ -2986,13 +3099,30 @@ impl Daemon {
     fn process_async_results(&mut self) {
         while let Ok(result) = self.async_rx.try_recv() {
             match result {
-                AsyncResult::LoginSuccess(name) => {
-                    // A successful login proves Deezer is reachable.
+                AsyncResult::LoginSuccess(session, profiles) => {
                     self.is_offline = false;
                     self.login_loading = false;
+                    self.login_error = None;
+                    if self.config.family_profile_id.is_none() && profiles.len() > 1 {
+                        self.family_profiles = profiles;
+                        self.screen = Screen::Login;
+                        continue;
+                    }
+                    let profile_id = self.config.family_profile_id;
+                    if let Err(e) = Config::update(|c| c.family_profile_id = profile_id) {
+                        self.screen = Screen::Login;
+                        self.login_error = Some(e.to_string());
+                        continue;
+                    }
+                    self.family_profiles.clear();
+                    self.favorite_track_ids.clear();
+                    self.favorite_artist_ids.clear();
+                    self.favorite_album_ids.clear();
+                    self.favorites_cache.select_user(session.user_id);
+                    self.favorites_cache.save();
                     self.screen = Screen::Main;
-                    self.user_name = Some(name.clone());
-                    self.status_msg = Some(t().fmt_connected_as(&name));
+                    self.user_name = Some(session.user_name.clone());
+                    self.status_msg = Some(t().fmt_connected_as(&session.user_name));
                     self.start_fetch_master_key();
                 }
                 AsyncResult::LoginError(err) => {
@@ -3526,6 +3656,32 @@ impl Daemon {
                 AsyncResult::GenresError(err) => {
                     self.genres_loading = false;
                     self.status_msg = Some(t().fmt_error(t().status_genres_error, &err));
+                }
+                AsyncResult::NewReleasesLoaded(result) => {
+                    self.new_releases_loading = false;
+                    match result {
+                        Ok(albums) => {
+                            self.new_releases_selected = self
+                                .new_releases
+                                .get(self.new_releases_selected)
+                                .and_then(|selected| {
+                                    albums
+                                        .iter()
+                                        .position(|album| album.album_id == selected.album_id)
+                                })
+                                .unwrap_or(0);
+                            self.new_releases = albums;
+                        }
+                        Err(err) => {
+                            warn!(%err, "Failed to load new releases");
+                            self.new_releases_error = true;
+                            if self.active_tab == ActiveTab::Explore
+                                && self.explore_category == ExploreCategory::Discovery
+                            {
+                                self.status_msg = Some(t().discovery_error.into());
+                            }
+                        }
+                    }
                 }
                 AsyncResult::GenreDetailReady(detail) => {
                     self.genre_detail_loading = false;

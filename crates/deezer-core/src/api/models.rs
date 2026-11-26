@@ -108,6 +108,15 @@ pub struct UserData {
     pub offer: Option<UserOffer>,
 }
 
+/// A Family account that can be selected using the administrator's login.
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq, Eq)]
+pub struct FamilyProfile {
+    #[serde(rename = "USER_ID", deserialize_with = "deserialize_string_or_number")]
+    pub user_id: u64,
+    #[serde(rename = "BLOG_NAME")]
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserInfo {
     #[serde(rename = "USER_ID")]
@@ -438,6 +447,8 @@ pub struct GenreDetail {
     pub name: String,
     #[serde(default)]
     pub tracks: Vec<TrackData>,
+    #[serde(default)]
+    pub new_releases: Vec<AlbumData>,
     #[serde(default)]
     pub albums: Vec<AlbumData>,
     #[serde(default)]

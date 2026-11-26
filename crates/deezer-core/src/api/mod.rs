@@ -2,6 +2,7 @@ pub mod auth;
 pub mod gateway;
 pub mod media;
 pub mod models;
+pub mod releases;
 
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +16,9 @@ pub struct DeezerClient {
     pub(crate) http: Client,
     pub(crate) cookie_jar: Arc<Jar>,
     pub(crate) session: Option<Session>,
+    pub(crate) family_enabled: bool,
+    // Never serialized or included in Debug: the shared ARL is a credential.
+    pub(crate) profile_auth: Option<(u64, String)>,
     /// Cached JWT for pipe.deezer.com GraphQL API. Lazily fetched.
     pub(crate) jwt_cache: Mutex<Option<String>>,
 }
@@ -35,6 +39,8 @@ impl DeezerClient {
             http,
             cookie_jar,
             session: None,
+            family_enabled: false,
+            profile_auth: None,
             jwt_cache: Mutex::new(None),
         })
     }

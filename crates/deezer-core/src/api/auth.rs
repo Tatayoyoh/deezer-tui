@@ -1,4 +1,4 @@
-use tracing::{debug, info};
+use tracing::info;
 
 use super::models::{DeezerError, UserData};
 use super::DeezerClient;
@@ -17,13 +17,68 @@ pub struct Session {
 impl DeezerClient {
     /// Authenticate using an ARL token (extracted from browser cookies).
     pub async fn login_arl(&mut self, arl: &str) -> Result<Session, DeezerError> {
-        debug!("Authenticating with ARL token");
+        self.login_arl_with_profile(arl, None).await
+    }
 
-        // Inject ARL cookie into the cookie jar (persists across all subsequent requests)
+    /// Log in with the shared ARL, then select and verify the requested Family profile.
+    /// A failed switch must never leave the caller authenticated as the administrator.
+    pub async fn login_arl_with_profile(
+        &mut self,
+        arl: &str,
+        profile_id: Option<u64>,
+    ) -> Result<Session, DeezerError> {
+        *self = Self::new()?;
+        let result = self.login_inner(arl, profile_id).await;
+        if result.is_err() {
+            self.session = None;
+            self.profile_auth = None;
+        }
+        result
+    }
+
+    async fn login_inner(
+        &mut self,
+        arl: &str,
+        profile_id: Option<u64>,
+    ) -> Result<Session, DeezerError> {
         let cookie = format!("arl={arl}; Domain=.deezer.com; Path=/");
         self.cookie_jar
             .add_cookie_str(&cookie, &DEEZER_URL.parse().unwrap());
+        let body = self.fetch_login_data().await?;
+        let mut user_data = parse_user_data(&body, None)?;
+        self.family_enabled = body["results"]["USER"]["MULTI_ACCOUNT"]["ENABLED"] == true
+            && body["results"]["USER"]["MULTI_ACCOUNT"]["IS_SUB_ACCOUNT"] != true;
+        self.session = Some(session_from_data(&user_data));
 
+        if let Some(id) = profile_id {
+            if id != user_data.user.user_id {
+                self.gw_call("user.loginMulti", serde_json::json!({"account_id": id}))
+                    .await?;
+                let body = self.fetch_login_data().await?;
+                user_data = parse_user_data(&body, Some(id))?;
+                // GraphQL otherwise returns an administrator JWT even after
+                // the gateway session has switched to a Family profile.
+                self.profile_auth = Some((id, arl.to_owned()));
+            }
+        }
+        let session = session_from_data(&user_data);
+        self.session = Some(session.clone());
+        info!(user_id = session.user_id, name = %session.user_name, "Authenticated successfully");
+        Ok(session)
+    }
+
+    /// Selectable profiles only; independent members need their own login.
+    pub async fn family_profiles(&self) -> Result<Vec<super::models::FamilyProfile>, DeezerError> {
+        if !self.family_enabled {
+            return Ok(Vec::new());
+        }
+        let results = self
+            .gw_call("deezer.getChildAccounts", serde_json::json!({}))
+            .await?;
+        selectable_profiles(results, self.session.as_ref().map(|s| s.user_id))
+    }
+
+    async fn fetch_login_data(&self) -> Result<serde_json::Value, DeezerError> {
         // Call getUserData to validate the token and get session info.
         // The server will also set a session cookie (sid) in the response,
         // which the cookie jar will automatically store for subsequent calls.
@@ -43,51 +98,97 @@ impl DeezerClient {
             .await
             .map_err(|e| DeezerError::Http(e.to_string()))?;
 
-        let results = body
-            .get("results")
-            .ok_or_else(|| DeezerError::Api("Missing 'results' in response".into()))?;
-
-        let user_data: UserData = serde_json::from_value(results.clone())
-            .map_err(|e| DeezerError::Api(format!("Failed to parse user data: {e}")))?;
-
-        if user_data.user.user_id == 0 {
-            return Err(DeezerError::Auth("Invalid ARL token — user_id is 0".into()));
-        }
-
-        let session = Session {
-            api_token: user_data.api_token,
-            license_token: user_data.user.options.license_token,
-            user_id: user_data.user.user_id,
-            user_name: user_data.user.user_name,
-        };
-        // Invalidate any cached JWT from a previous session.
-        if let Ok(mut cache) = self.jwt_cache.lock() {
-            *cache = None;
-        }
-
-        let offer_name = user_data
-            .offer
-            .as_ref()
-            .map_or("unknown", |o| &o.offer_name);
-        info!(
-            user_id = session.user_id,
-            name = %session.user_name,
-            offer = %offer_name,
-            web_streaming = user_data.user.options.web_streaming,
-            web_hq = user_data.user.options.web_hq,
-            web_lossless = user_data.user.options.web_lossless,
-            license_country = %user_data.user.options.license_country,
-            "Authenticated successfully"
-        );
-
-        self.session = Some(session.clone());
-        Ok(session)
+        Ok(body)
     }
+}
+
+fn session_from_data(data: &UserData) -> Session {
+    Session {
+        api_token: data.api_token.clone(),
+        license_token: data.user.options.license_token.clone(),
+        user_id: data.user.user_id,
+        user_name: data.user.user_name.clone(),
+    }
+}
+
+fn parse_user_data(
+    body: &serde_json::Value,
+    expected: Option<u64>,
+) -> Result<UserData, DeezerError> {
+    let results = body
+        .get("results")
+        .ok_or_else(|| DeezerError::Api("Missing 'results' in response".into()))?;
+    let data: UserData = serde_json::from_value(results.clone())
+        .map_err(|e| DeezerError::Api(format!("Failed to parse user data: {e}")))?;
+    if data.user.user_id == 0 {
+        return Err(DeezerError::Auth("Invalid ARL token".into()));
+    }
+    if expected.is_some_and(|id| id != data.user.user_id) {
+        return Err(DeezerError::Auth(
+            "Deezer did not select the requested Family profile".into(),
+        ));
+    }
+    Ok(data)
+}
+
+fn selectable_profiles(
+    results: serde_json::Value,
+    current_id: Option<u64>,
+) -> Result<Vec<super::models::FamilyProfile>, DeezerError> {
+    let entries = results
+        .as_array()
+        .ok_or_else(|| DeezerError::Api("Invalid Family profile list".into()))?;
+    let mut profiles = Vec::new();
+    for entry in entries {
+        let profile: super::models::FamilyProfile = serde_json::from_value(entry.clone())
+            .map_err(|e| DeezerError::Api(format!("Invalid Family profile: {e}")))?;
+        if Some(profile.user_id) == current_id || entry["EXTRA_FAMILY"]["IS_LOGGABLE_AS"] == true {
+            profiles.push(profile);
+        }
+    }
+    Ok(profiles)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn user_data(id: u64) -> serde_json::Value {
+        serde_json::json!({ "results": {
+            "checkForm": "test-csrf", "USER": {
+                "USER_ID": id.to_string(), "BLOG_NAME": "Profile",
+                "OPTIONS": {"license_token": "test-license"}
+            }
+        }})
+    }
+
+    #[test]
+    fn rejected_profile_switch_cannot_fall_back_to_admin() {
+        assert!(parse_user_data(&user_data(10), Some(20)).is_err());
+        assert!(parse_user_data(&user_data(0), Some(20)).is_err());
+        assert_eq!(
+            parse_user_data(&user_data(20), Some(20))
+                .unwrap()
+                .user
+                .user_id,
+            20
+        );
+        assert!(parse_user_data(&user_data(10), None).is_ok());
+    }
+
+    #[test]
+    fn family_picker_excludes_independent_accounts() {
+        let profiles = selectable_profiles(serde_json::json!([
+            {"USER_ID": "10", "BLOG_NAME": "Admin"},
+            {"USER_ID": 20, "BLOG_NAME": "Profile", "EXTRA_FAMILY": {"IS_LOGGABLE_AS": true}},
+            {"USER_ID": "30", "BLOG_NAME": "Independent", "EXTRA_FAMILY": {"IS_LOGGABLE_AS": false}}
+        ]), Some(10)).unwrap();
+        assert_eq!(
+            profiles.iter().map(|p| p.user_id).collect::<Vec<_>>(),
+            vec![10, 20]
+        );
+        assert!(selectable_profiles(serde_json::json!({}), Some(10)).is_err());
+    }
 
     /// Live tests need a real ARL token, provided through the environment.
     /// NEVER hardcode a real ARL: it is a full-session credential.

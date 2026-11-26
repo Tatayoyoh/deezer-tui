@@ -769,6 +769,7 @@ checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
 name = "deezer-core"
 version = "1.21.1"
 dependencies = [
+ "base64",
  "biquad",
  "blowfish",
  "cbc",
