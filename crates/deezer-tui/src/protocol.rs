@@ -5,8 +5,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, GenreDetail, PlaylistData,
-    PlaylistDetail, TrackData,
+    AlbumData, AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, GenreDetail,
+    PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::offline::OfflineTrack;
 use deezer_core::player::eq::EqSettings;
@@ -213,6 +213,7 @@ pub enum NavOverlay {
 pub enum GenreDetailSubTab {
     #[default]
     Tracks,
+    NewReleases,
     Albums,
     Artists,
     Playlists,
@@ -220,8 +221,9 @@ pub enum GenreDetailSubTab {
 }
 
 impl GenreDetailSubTab {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Tracks,
+        Self::NewReleases,
         Self::Albums,
         Self::Artists,
         Self::Playlists,
@@ -275,10 +277,11 @@ pub enum ExploreCategory {
     Moods,
     Categories,
     Radios,
+    Discovery,
 }
 
 impl ExploreCategory {
-    pub const ALL: [Self; 3] = [Self::Moods, Self::Categories, Self::Radios];
+    pub const ALL: [Self; 4] = [Self::Moods, Self::Categories, Self::Radios, Self::Discovery];
 }
 
 /// A music genre/category for display.
@@ -473,6 +476,14 @@ pub struct DaemonSnapshot {
     // Explore tab
     #[serde(default)]
     pub explore_category: ExploreCategory,
+    #[serde(default)]
+    pub new_releases: Vec<AlbumData>,
+    #[serde(default)]
+    pub new_releases_selected: usize,
+    #[serde(default)]
+    pub new_releases_loading: bool,
+    #[serde(default)]
+    pub new_releases_error: bool,
 
     // Radios
     #[serde(default)]
@@ -596,6 +607,10 @@ impl Default for DaemonSnapshot {
             offline_loading: false,
             offline_track_ids: Vec::new(),
             explore_category: ExploreCategory::default(),
+            new_releases: Vec::new(),
+            new_releases_selected: 0,
+            new_releases_loading: false,
+            new_releases_error: false,
             radios: Vec::new(),
             radios_selected: 0,
             radios_loading: false,

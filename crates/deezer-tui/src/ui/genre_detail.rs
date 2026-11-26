@@ -127,6 +127,34 @@ fn draw_content(
                 ];
                 (rows, header, widths, detail.tracks.len())
             }
+            GenreDetailSubTab::NewReleases => {
+                let rows: Vec<Row> = detail
+                    .new_releases
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| {
+                        Row::new(vec![
+                            Cell::from(Span::styled(format!("{:>3}", i + 1), Theme::dim())),
+                            Cell::from(Span::styled(a.title.clone(), Theme::text())),
+                            Cell::from(Span::styled(a.artist.clone(), Theme::text())),
+                            Cell::from(Span::styled(a.release_date.clone(), Theme::dim())),
+                        ])
+                    })
+                    .collect();
+                let header = vec![
+                    Cell::from(Span::styled("#", Theme::dim())),
+                    Cell::from(Span::styled(s.header_album, Theme::dim())),
+                    Cell::from(Span::styled(s.header_artist, Theme::dim())),
+                    Cell::from(Span::styled(s.discovery_date, Theme::dim())),
+                ];
+                let widths = vec![
+                    Constraint::Length(4),
+                    Constraint::Fill(3),
+                    Constraint::Fill(2),
+                    Constraint::Length(s.discovery_date.chars().count().max(10) as u16),
+                ];
+                (rows, header, widths, detail.new_releases.len())
+            }
             GenreDetailSubTab::Albums => {
                 let rows: Vec<Row> = detail
                     .albums

@@ -1296,6 +1296,8 @@ impl DeezerClient {
             genre_id,
             name,
             tracks,
+            // Filled by the caller from the public channel page.
+            new_releases: Vec::new(),
             albums,
             artists,
             playlists,

@@ -2,6 +2,7 @@ pub mod auth;
 pub mod gateway;
 pub mod media;
 pub mod models;
+pub mod releases;
 
 use std::sync::{Arc, Mutex};
 

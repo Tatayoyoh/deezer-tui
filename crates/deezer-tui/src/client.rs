@@ -25,8 +25,8 @@ use tokio::sync::mpsc;
 use tracing::debug;
 
 use deezer_core::api::models::{
-    AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, ItemKind, PlaylistData,
-    PlaylistDetail, TrackData,
+    AlbumData, AlbumDetail, ArtistDetail, ArtistSubTab, AudioQuality, DisplayItem, ItemKind,
+    PlaylistData, PlaylistDetail, TrackData,
 };
 use deezer_core::config::Config;
 use deezer_core::player::eq::{EqPreset, EqSettings, EQ_BAND_COUNT};
@@ -829,6 +829,10 @@ pub struct ViewState {
     pub offline_loading: bool,
     pub offline_track_ids: Vec<String>,
     pub explore_category: ExploreCategory,
+    pub new_releases: Vec<AlbumData>,
+    pub new_releases_selected: usize,
+    pub new_releases_loading: bool,
+    pub new_releases_error: bool,
     pub radios: Vec<RadioItem>,
     pub radios_filtered: Vec<RadioItem>,
     pub radios_selected: usize,
@@ -1025,6 +1029,10 @@ impl ViewState {
             offline_loading: snap.offline_loading,
             offline_track_ids: snap.offline_track_ids.clone(),
             explore_category: snap.explore_category,
+            new_releases: snap.new_releases.clone(),
+            new_releases_selected: snap.new_releases_selected,
+            new_releases_loading: snap.new_releases_loading,
+            new_releases_error: snap.new_releases_error,
             radios: snap.radios.clone(),
             radios_filtered: snap.radios.clone(),
             radios_selected: snap.radios_selected,
@@ -1306,7 +1314,7 @@ impl ViewState {
                 self.apply_favorites_filter();
             }
             ActiveTab::Explore => match self.explore_category {
-                ExploreCategory::Moods => {}
+                ExploreCategory::Moods | ExploreCategory::Discovery => {}
                 ExploreCategory::Categories => {
                     self.genres_filter_typing = true;
                     if clear {
@@ -1401,6 +1409,10 @@ impl ViewState {
         self.offline_loading = snap.offline_loading;
         self.offline_track_ids = snap.offline_track_ids;
         self.explore_category = snap.explore_category;
+        self.new_releases = snap.new_releases;
+        self.new_releases_selected = snap.new_releases_selected;
+        self.new_releases_loading = snap.new_releases_loading;
+        self.new_releases_error = snap.new_releases_error;
         // Update radios and re-apply filter
         if self.radios.len() != snap.radios.len() || self.radios_loading != snap.radios_loading {
             self.radios = snap.radios;
@@ -2819,6 +2831,9 @@ impl Client {
                         ExploreCategory::Radios => {
                             self.view.radios_selected = self.view.radios_selected.saturating_sub(1);
                         }
+                        ExploreCategory::Discovery => {
+                            return KeyAction::SendCommand(Command::SelectUp);
+                        }
                     }
                     return KeyAction::Continue;
                 }
@@ -2857,6 +2872,9 @@ impl Client {
                                 self.view.radios_selected = (self.view.radios_selected + 1)
                                     .min(self.view.radios_filtered.len() - 1);
                             }
+                        }
+                        ExploreCategory::Discovery => {
+                            return KeyAction::SendCommand(Command::SelectDown);
                         }
                     }
                     return KeyAction::Continue;
@@ -2933,6 +2951,7 @@ impl Client {
                         index: self.view.favorites_selected_original_index(),
                     }),
                     ActiveTab::Explore => match self.view.explore_category {
+                        ExploreCategory::Discovery => self.open_album_detail(),
                         ExploreCategory::Moods => {
                             if self.view.moods.is_empty() {
                                 KeyAction::Continue
@@ -4094,32 +4113,36 @@ impl Client {
 
     /// Open the album detail overlay for the selected item.
     fn open_album_detail(&mut self) -> KeyAction {
-        let item = match self.view.active_tab {
-            ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
-            ActiveTab::Favorites => self.view.favorites_selected_item(),
-            _ => None,
+        let album_id = match self.view.active_tab {
+            ActiveTab::Explore if self.view.explore_category == ExploreCategory::Discovery => self
+                .view
+                .new_releases
+                .get(self.view.new_releases_selected)
+                .map(|album| &album.album_id),
+            tab => {
+                let item = match tab {
+                    ActiveTab::Search => self.view.search_display.get(self.view.search_selected),
+                    ActiveTab::Favorites => self.view.favorites_selected_item(),
+                    _ => None,
+                };
+                item.and_then(|item| {
+                    item.album_id.as_ref().or_else(|| {
+                        item.track
+                            .as_ref()
+                            .and_then(|track| track.album_id.as_ref())
+                    })
+                })
+            }
         };
-
-        // Try to get album_id from the DisplayItem directly (album search/favorites)
-        if let Some(album_id) = item.and_then(|i| i.album_id.clone()) {
-            self.view
-                .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
-            self.view.album_detail_selected = 0;
-            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
-        }
-
-        // For tracks, get album_id from the embedded TrackData
-        if let Some(album_id) = item
-            .and_then(|i| i.track.as_ref())
-            .and_then(|t| t.album_id.clone())
-        {
-            self.view
-                .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
-            self.view.album_detail_selected = 0;
-            return KeyAction::SendCommand(Command::GetAlbumDetail { album_id });
-        }
-
-        KeyAction::Continue
+        let Some(album_id) = album_id.cloned() else {
+            return KeyAction::Continue;
+        };
+        self.view
+            .set_nav_overlay(Overlay::AlbumDetail { from_artist: false });
+        self.view.album_detail_selected = 0;
+        self.view.album_detail_left_scroll = 0;
+        self.view.album_detail_left_focused = false;
+        KeyAction::SendCommand(Command::GetAlbumDetail { album_id })
     }
 
     /// Open artist detail page for the currently selected item.
@@ -4345,6 +4368,7 @@ impl Client {
             .as_ref()
             .map(|d| match sub_tab {
                 GenreDetailSubTab::Tracks => d.tracks.len(),
+                GenreDetailSubTab::NewReleases => d.new_releases.len(),
                 GenreDetailSubTab::Albums => d.albums.len(),
                 GenreDetailSubTab::Artists => d.artists.len(),
                 GenreDetailSubTab::Playlists => d.playlists.len(),
@@ -4415,8 +4439,13 @@ impl Client {
                             KeyAction::Continue
                         }
                     }
-                    GenreDetailSubTab::Albums => {
-                        if let Some(album) = detail.albums.get(selected) {
+                    GenreDetailSubTab::NewReleases | GenreDetailSubTab::Albums => {
+                        let albums = if sub_tab == GenreDetailSubTab::NewReleases {
+                            &detail.new_releases
+                        } else {
+                            &detail.albums
+                        };
+                        if let Some(album) = albums.get(selected) {
                             let album_id = album.album_id.clone();
                             self.view
                                 .push_overlay(Overlay::AlbumDetail { from_artist: false });
@@ -5328,6 +5357,7 @@ impl Client {
                     ExploreCategory::Moods => view.moods_selected,
                     ExploreCategory::Categories => view.genres_selected,
                     ExploreCategory::Radios => view.radios_selected,
+                    ExploreCategory::Discovery => view.new_releases_selected,
                 },
                 ActiveTab::Downloads if view.offline_filter_active() => {
                     view.offline_filter_selected
@@ -5517,6 +5547,10 @@ impl Client {
                         ExploreCategory::Moods => self.view.moods_selected = index,
                         ExploreCategory::Categories => self.view.genres_selected = index,
                         ExploreCategory::Radios => self.view.radios_selected = index,
+                        ExploreCategory::Discovery => {
+                            self.view.new_releases_selected = index;
+                            return Some(Command::SelectIndex { index });
+                        }
                     }
                     None
                 }
@@ -5845,6 +5879,72 @@ mod tests {
         assert!(matches!(
             handle_family_profile_key(&mut view, KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
             KeyAction::SendCommand(Command::Logout)
+        ));
+    }
+
+    #[tokio::test]
+    async fn discovery_activates_the_album_in_the_clicked_row() {
+        let albums =
+            [("123", "First album"), ("456", "Second album")].map(|(id, title)| AlbumData {
+                album_id: id.into(),
+                title: title.into(),
+                artist: "Test artist".into(),
+                nb_tracks: 0,
+                release_date: "2026-11-20".into(),
+                nb_fan: 0,
+            });
+        let snapshot = DaemonSnapshot {
+            screen: Screen::Main,
+            active_tab: ActiveTab::Explore,
+            explore_category: ExploreCategory::Discovery,
+            new_releases: albums.into(),
+            ..DaemonSnapshot::default()
+        };
+        let (socket, _peer) = UnixStream::pair().unwrap();
+        let (_, writer) = socket.into_split();
+        let (_, server_rx) = mpsc::unbounded_channel();
+        let (image_tx, image_rx) = mpsc::unbounded_channel();
+        let mut client = Client {
+            view: ViewState::from_snapshot(&snapshot),
+            server_rx,
+            writer,
+            picker: Picker::halfblocks(),
+            image_tx,
+            image_rx,
+            image_cache: HashMap::new(),
+            last_click: None,
+            last_terminal_title: String::new(),
+        };
+        let mut terminal = Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| ui::draw(frame, &mut client.view))
+            .unwrap();
+
+        assert!(matches!(
+            client.handle_key(KeyEvent::from(KeyCode::Down)),
+            KeyAction::SendCommand(Command::SelectDown)
+        ));
+        let second_row = client.view.click.borrow().rows.unwrap().area.y + 1;
+        let row_text: String = (0..80)
+            .map(|x| terminal.backend().buffer()[(x, second_row)].symbol())
+            .collect();
+        assert!(row_text.contains("Second album"));
+
+        assert!(matches!(
+            client.handle_left_click(4, second_row),
+            KeyAction::SendCommand(Command::SelectIndex { index: 1 })
+        ));
+        assert!(matches!(
+            client.handle_left_click(4, second_row),
+            KeyAction::MultiCommand(commands) if matches!(
+                commands.as_slice(),
+                [Command::SelectIndex { index: 1 }, Command::GetAlbumDetail { album_id }]
+                    if album_id == "456"
+            )
+        ));
+        assert!(matches!(
+            client.view.overlay,
+            Some(Overlay::AlbumDetail { from_artist: false })
         ));
     }
 

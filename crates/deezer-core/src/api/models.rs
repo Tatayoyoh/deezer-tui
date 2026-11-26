@@ -448,6 +448,8 @@ pub struct GenreDetail {
     #[serde(default)]
     pub tracks: Vec<TrackData>,
     #[serde(default)]
+    pub new_releases: Vec<AlbumData>,
+    #[serde(default)]
     pub albums: Vec<AlbumData>,
     #[serde(default)]
     pub artists: Vec<ArtistData>,

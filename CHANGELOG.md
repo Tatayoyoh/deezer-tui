@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Category pages have a New releases tab listing the albums from the genre's Deezer channel.
+- Discovery under Explore shows new album releases from Deezer and opens their track lists.
 - Deezer Family profile selection after login, with the chosen profile remembered across launches
 
 ### Fixed
