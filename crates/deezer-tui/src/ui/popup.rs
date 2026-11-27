@@ -738,6 +738,7 @@ fn draw_help_overlay(frame: &mut Frame, view: &ViewState, scroll: usize) -> usiz
         // Actions
         (None, s.help_section_actions),
         (Some("f"), s.help_start_flow),
+        (Some("m"), s.help_start_mix),
         (Some("g"), s.help_shuffle_favorites),
         (Some("Ctrl+Q"), s.help_quit),
         (Some("Ctrl+Z"), s.help_detach),

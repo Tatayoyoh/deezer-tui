@@ -636,6 +636,8 @@ pub enum ClickTarget {
     FilterInput,
     /// "f Flow" chip in the player bar.
     FlowChip,
+    /// "m Mix" chip in the player bar: mix inspired by the playing track.
+    MixChip,
     /// Heart icon / Like button in the player bar to toggle favorite for current track.
     ToggleLikeCurrentTrack,
     /// Playing track's name / progress bar in the player bar.
@@ -2985,6 +2987,9 @@ impl Client {
             // Deezer Flow
             KeyCode::Char('f') => KeyAction::SendCommand(Command::StartFlow),
 
+            // Mix inspired by the playing track
+            KeyCode::Char('m') => self.start_mix_from_playing(),
+
             // Toggle favorite / like for focused track or playing track
             KeyCode::Char('L') | KeyCode::Char('l') => self.toggle_like_focused_or_playing(),
 
@@ -3384,6 +3389,16 @@ impl Client {
 
     /// Toggle favorite for the currently focused track in any list/overlay, or
     /// fall back to toggling the currently playing track.
+    /// Start a mix inspired by the playing track, if any.
+    fn start_mix_from_playing(&mut self) -> KeyAction {
+        match self.view.current_track {
+            Some(ref track) => KeyAction::SendCommand(Command::StartMix {
+                track_id: track.track_id.clone(),
+            }),
+            None => KeyAction::Continue,
+        }
+    }
+
     fn toggle_like_focused_or_playing(&mut self) -> KeyAction {
         // 1. If an overlay with tracks is open:
         if let Some(ref overlay) = self.view.overlay {
@@ -5426,6 +5441,7 @@ impl Client {
                 KeyAction::Continue
             }
             ClickTarget::FlowChip => KeyAction::SendCommand(Command::StartFlow),
+            ClickTarget::MixChip => self.start_mix_from_playing(),
             ClickTarget::ToggleLikeCurrentTrack => {
                 if let Some(ref track) = self.view.current_track {
                     let track_id = track.track_id.clone();

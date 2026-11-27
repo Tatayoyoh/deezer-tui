@@ -57,6 +57,7 @@ sudo mv deezer-tui /usr/local/bin/deezer-tui
 * settings [`ctrl+o`] or `escape` on main window
 * background mode [`ctrl+z`]
 * Deezer Flow [`f`]
+* Mix inspired by the playing track [`m`]
 * Element context menu : focused element [`x`], playing track [`ctrl+space`]
 * Equalizer [`e`]
 * Focused track's album page [`a`]
