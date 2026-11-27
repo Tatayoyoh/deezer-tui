@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- `m Mix` button in the player bar (or `m`) starts a mix inspired by the playing track
+
 ## [1.21.1] - 2026-11-14
 
 ### Fixed

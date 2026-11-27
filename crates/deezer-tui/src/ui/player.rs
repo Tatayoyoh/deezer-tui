@@ -21,7 +21,7 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         .constraints([
             Constraint::Length(1), // Track info
             Constraint::Length(1), // Progress bar + volume
-            Constraint::Length(1), // Controls + Flow button
+            Constraint::Length(1), // Controls + Mix / Flow buttons
         ])
         .split(inner);
 
@@ -184,9 +184,25 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
         Span::styled(format!(" {}  ", repeat_label), repeat_style),
     ]);
 
+    // Mix chip: starts a mix inspired by the playing track. Dimmed when
+    // nothing is loaded, since there is no track to seed the mix.
+    let chip_style = Theme::shortcut_flow_chip();
+    let mix_style = if view.current_track.is_some() {
+        chip_style
+    } else {
+        Theme::dim()
+    };
+    let mix_label = format!(" m {} ", s.mix);
+    let mix_width = mix_label.chars().count() as u16;
+    let mix_chip = Line::from(vec![
+        Span::styled(" ", mix_style),
+        Span::styled("m", mix_style.add_modifier(Modifier::UNDERLINED)),
+        Span::styled(format!(" {} ", s.mix), mix_style),
+    ]);
+
     // Flow is special: the whole "f Flow" chip is white on a secondary bg,
     // with only the "f" key underlined.
-    let flow_style = Theme::shortcut_flow_chip();
+    let flow_style = chip_style;
     let flow_label = format!(" f {} ", s.flow);
     let flow_width = flow_label.chars().count() as u16;
     let controls_right = Line::from(vec![
@@ -197,12 +213,19 @@ pub fn draw(frame: &mut Frame, view: &ViewState, area: Rect) {
 
     let ctrl_chunks = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Min(1), Constraint::Length(flow_width)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(mix_width),
+            Constraint::Length(1),
+            Constraint::Length(flow_width),
+        ])
         .split(chunks[2]);
     frame.render_widget(Paragraph::new(controls_left), ctrl_chunks[0]);
+    frame.render_widget(Paragraph::new(mix_chip), ctrl_chunks[1]);
+    view.record_click(ctrl_chunks[1], ClickTarget::MixChip);
     frame.render_widget(
         Paragraph::new(controls_right).alignment(Alignment::Right),
-        ctrl_chunks[1],
+        ctrl_chunks[3],
     );
-    view.record_click(ctrl_chunks[1], ClickTarget::FlowChip);
+    view.record_click(ctrl_chunks[3], ClickTarget::FlowChip);
 }
